@@ -1,0 +1,173 @@
+cmake_minimum_required(VERSION 3.20)
+project(axon VERSION 0.1.0 LANGUAGES C CXX ASM)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
+
+# ── DuckDB (pre-built shared lib from GitHub releases) ───────────────────────
+add_library(duckdb_lib SHARED IMPORTED)
+set_target_properties(duckdb_lib PROPERTIES
+    IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.so
+    INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib
+)
+# Ensure the .so is found at runtime
+set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
+
+# ── tree-sitter core ─────────────────────────────────────────────────────────
+add_library(tree_sitter_lib STATIC
+    third_party/tree-sitter/lib/src/lib.c
+)
+target_include_directories(tree_sitter_lib PUBLIC
+    third_party/tree-sitter/lib/include
+    third_party/tree-sitter/lib/src
+)
+
+# ── tree-sitter language grammars ────────────────────────────────────────────
+set(TS_INCLUDE third_party/tree-sitter/lib/include)
+
+add_library(ts_typescript STATIC
+    third_party/tree-sitter-typescript/typescript/src/parser.c
+    third_party/tree-sitter-typescript/typescript/src/scanner.c
+)
+target_include_directories(ts_typescript PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-typescript/typescript/src)
+
+add_library(ts_javascript STATIC
+    third_party/tree-sitter-javascript/src/parser.c
+    third_party/tree-sitter-javascript/src/scanner.c
+)
+target_include_directories(ts_javascript PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-javascript/src)
+
+add_library(ts_python STATIC
+    third_party/tree-sitter-python/src/parser.c
+    third_party/tree-sitter-python/src/scanner.c
+)
+target_include_directories(ts_python PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-python/src)
+
+add_library(ts_rust STATIC
+    third_party/tree-sitter-rust/src/parser.c
+    third_party/tree-sitter-rust/src/scanner.c
+)
+target_include_directories(ts_rust PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-rust/src)
+
+add_library(ts_go STATIC
+    third_party/tree-sitter-go/src/parser.c
+)
+target_include_directories(ts_go PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-go/src)
+
+add_library(ts_csharp STATIC
+    third_party/tree-sitter-c-sharp/src/parser.c
+    third_party/tree-sitter-c-sharp/src/scanner.c
+)
+target_include_directories(ts_csharp PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-c-sharp/src)
+
+add_library(ts_php STATIC
+    third_party/tree-sitter-php/php/src/parser.c
+    third_party/tree-sitter-php/php/src/scanner.c
+)
+target_include_directories(ts_php PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-php/php/src)
+
+add_library(ts_dart STATIC
+    third_party/tree-sitter-dart/src/parser.c
+    third_party/tree-sitter-dart/src/scanner.c
+)
+target_include_directories(ts_dart PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-dart/src)
+
+add_library(ts_java STATIC
+    third_party/tree-sitter-java/src/parser.c
+)
+target_include_directories(ts_java PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-java/src)
+
+add_library(ts_bash STATIC
+    third_party/tree-sitter-bash/src/parser.c
+    third_party/tree-sitter-bash/src/scanner.c
+)
+target_include_directories(ts_bash PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-bash/src)
+
+add_library(ts_cpp STATIC
+    third_party/tree-sitter-cpp/src/parser.c
+    third_party/tree-sitter-cpp/src/scanner.c
+)
+target_include_directories(ts_cpp PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-cpp/src)
+
+add_library(ts_kotlin STATIC
+    third_party/tree-sitter-kotlin/src/parser.c
+    third_party/tree-sitter-kotlin/src/scanner.c
+)
+target_include_directories(ts_kotlin PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-kotlin/src)
+
+add_library(ts_vue STATIC
+    third_party/tree-sitter-vue/src/parser.c
+    third_party/tree-sitter-vue/src/scanner.cc
+)
+target_include_directories(ts_vue PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-vue/src)
+
+# ── llama.cpp ────────────────────────────────────────────────────────────────
+set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/llama.cpp)
+
+# ── blake3 ───────────────────────────────────────────────────────────────────
+add_library(blake3_lib STATIC
+    third_party/blake3/c/blake3.c
+    third_party/blake3/c/blake3_dispatch.c
+    third_party/blake3/c/blake3_portable.c
+    third_party/blake3/c/blake3_sse2_x86-64_unix.S
+    third_party/blake3/c/blake3_sse41_x86-64_unix.S
+    third_party/blake3/c/blake3_avx2_x86-64_unix.S
+    third_party/blake3/c/blake3_avx512_x86-64_unix.S
+)
+target_include_directories(blake3_lib PUBLIC third_party/blake3/c)
+
+# ── axon executable ──────────────────────────────────────────────────────────
+file(GLOB_RECURSE AXON_SOURCES src/*.cpp)
+
+add_executable(axon ${AXON_SOURCES})
+
+target_include_directories(axon PRIVATE
+    src/
+    third_party/tree-sitter/lib/include
+    third_party/duckdb
+    third_party/llama.cpp/include
+    third_party/nlohmann-json/single_include
+)
+
+target_link_libraries(axon PRIVATE
+    duckdb_lib
+    tree_sitter_lib
+    ts_typescript
+    ts_javascript
+    ts_python
+    ts_rust
+    ts_go
+    ts_csharp
+    ts_php
+    ts_dart
+    ts_java
+    ts_bash
+    ts_cpp
+    ts_kotlin
+    ts_vue
+    llama
+    ggml
+    blake3_lib
+)
+
+# DuckDB pre-built lib uses old GCC ABI (std::string without __cxx11 inline namespace)
+add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
+
+target_compile_options(axon PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)

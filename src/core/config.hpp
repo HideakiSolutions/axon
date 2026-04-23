@@ -1,0 +1,24 @@
+#pragma once
+#include <filesystem>
+#include <optional>
+#include <string>
+
+namespace axon {
+
+struct Config {
+    std::filesystem::path project_root;
+    std::filesystem::path axon_dir;   // project_root/.axon/
+    std::filesystem::path db_path;    // project_root/.axon/index.duckdb
+    std::filesystem::path model_path; // path to .gguf embedding model
+};
+
+// Walk up from cwd looking for .git or Cargo.toml / package.json
+std::optional<std::filesystem::path> find_project_root(
+    const std::filesystem::path& start = std::filesystem::current_path());
+
+Config make_config(const std::filesystem::path& root);
+
+// Find the embedding model (searches common locations)
+std::filesystem::path find_model(const std::filesystem::path& axon_binary_dir);
+
+} // namespace axon

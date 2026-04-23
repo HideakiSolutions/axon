@@ -1,0 +1,6 @@
+build/
+models/*.gguf
+.axon/
+*.o
+*.a
+.DS_Store

@@ -1,0 +1,205 @@
+#include "core/config.hpp"
+#include "core/db.hpp"
+#include "core/indexer.hpp"
+#include "core/graph.hpp"
+#include "core/skeleton.hpp"
+#include "core/capsule.hpp"
+#include "core/embeddings.hpp"
+#include "mcp/server.hpp"
+#include <iostream>
+#include <string>
+#include <fstream>
+#include <sstream>
+
+namespace fs = std::filesystem;
+
+static void print_usage() {
+    std::cerr << R"(
+axon — Context Engine for AI Coding Agents
+
+Usage:
+  axon index  [path]                    Index project (parse + graph + embeddings)
+  axon index-paths <files...> [--prune] Incrementally reindex specific files
+                                        (--prune alone = only sweep deleted files)
+  axon serve                            Start MCP server on stdio
+  axon capsule <query>                  Print context capsule for a query
+  axon skeleton <file>                  Print skeleton (signatures-only) of a file
+  axon status                           Show index statistics
+  axon help                             Show this help
+
+)";
+}
+
+static axon::Config load_config(const std::string& path_arg = "") {
+    fs::path start = path_arg.empty() ? fs::current_path() : fs::path(path_arg);
+    auto root = axon::find_project_root(start);
+    if (!root) root = start;  // fallback: use given path as root
+    return axon::make_config(*root);
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 2) { print_usage(); return 1; }
+    std::string cmd = argv[1];
+
+    // ── axon index [path] ──────────────────────────────────────────────────
+    if (cmd == "index") {
+        std::string path = argc > 2 ? argv[2] : "";
+        auto cfg = load_config(path);
+        std::cout << "Indexing " << cfg.project_root << " ...\n";
+
+        axon::Database db(cfg.db_path);
+
+        auto stats = axon::index_project(cfg, db, [](const std::string& f, int done, int total) {
+            std::cerr << "\r[" << done << "/" << total << "] " << f << "    ";
+        });
+        std::cerr << "\n";
+
+        std::cout << "Done: " << stats.files_indexed << " files, "
+                  << stats.symbols_found << " symbols, "
+                  << stats.edges_found   << " edges\n";
+
+        // Attempt to embed symbols if model is available
+        try {
+            auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
+            std::cout << "Loading embedding model...\n";
+            axon::EmbeddingModel model(model_path);
+
+            int n = axon::embed_pending_symbols(db, model);
+            if (n > 0) std::cout << "Embedded " << n << " symbols.\n";
+        } catch (const std::exception& e) {
+            std::cerr << "[warn] Skipping embeddings: " << e.what() << "\n";
+            std::cerr << "       Run `axon index` again after downloading the model.\n";
+        }
+        return 0;
+    }
+
+    // ── axon index-paths <files...> [--prune] ──────────────────────────────
+    if (cmd == "index-paths") {
+        bool prune = false;
+        std::vector<fs::path> paths;
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--prune") prune = true;
+            else paths.push_back(fs::path(a));
+        }
+
+        auto cfg = load_config();
+        if (!fs::exists(cfg.db_path)) {
+            std::cerr << "No index found. Run `axon index` first.\n";
+            return 1;
+        }
+
+        axon::Database db(cfg.db_path);
+        auto stats = axon::index_files(cfg, db, paths, prune);
+
+        // Embed any newly-inserted symbols so get_context_capsule sees them immediately
+        if (stats.files_indexed > 0) {
+            try {
+                auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
+                axon::EmbeddingModel model(model_path);
+                axon::embed_pending_symbols(db, model);
+            } catch (const std::exception& e) {
+                std::cerr << "[warn] Skipping embeddings: " << e.what() << "\n";
+            }
+        }
+
+        std::cout << stats.files_indexed << " indexed, "
+                  << stats.files_skipped << " unchanged";
+        if (prune) std::cout << ", " << stats.files_pruned << " pruned";
+        std::cout << "\n";
+        return 0;
+    }
+
+    // ── axon serve ─────────────────────────────────────────────────────────
+    if (cmd == "serve") {
+        auto cfg = load_config();
+        axon::mcp::ServerContext ctx;
+        ctx.cfg = cfg;
+
+        if (fs::exists(cfg.db_path)) {
+            ctx.db = std::make_unique<axon::Database>(cfg.db_path);
+            ctx.graph = axon::load_graph(*ctx.db);
+            try {
+                auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
+                ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
+            } catch (...) {}
+        }
+
+        axon::mcp::run_stdio(ctx);
+        return 0;
+    }
+
+    // ── axon capsule <query> ───────────────────────────────────────────────
+    if (cmd == "capsule") {
+        if (argc < 3) { std::cerr << "Usage: axon capsule <query>\n"; return 1; }
+        std::string query;
+        for (int i = 2; i < argc; i++) { if (i > 2) query += " "; query += argv[i]; }
+
+        auto cfg = load_config();
+        if (!fs::exists(cfg.db_path)) { std::cerr << "No index found. Run `axon index` first.\n"; return 1; }
+
+        axon::Database db(cfg.db_path);
+        auto graph = axon::load_graph(db);
+
+        auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
+        axon::EmbeddingModel model(model_path);
+
+        auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root);
+
+        std::cout << "{\n";
+        std::cout << "  \"query\": \"" << query << "\",\n";
+        std::cout << "  \"token_estimate\": " << capsule.token_estimate << ",\n";
+        std::cout << "  \"pivot_files\": " << capsule.pivot_files.size() << ",\n";
+        std::cout << "  \"support_files\": " << capsule.support_files.size() << "\n";
+        std::cout << "}\n";
+
+        for (const auto& f : capsule.pivot_files)
+            std::cerr << "  [pivot]   " << f.path << " (" << f.token_estimate << " tok)\n";
+        for (const auto& f : capsule.support_files)
+            std::cerr << "  [support] " << f.path << " (" << f.token_estimate << " tok)\n";
+        return 0;
+    }
+
+    // ── axon skeleton <file> ───────────────────────────────────────────────
+    if (cmd == "skeleton") {
+        if (argc < 3) { std::cerr << "Usage: axon skeleton <file>\n"; return 1; }
+        fs::path p = argv[2];
+        std::ifstream f(p, std::ios::binary);
+        if (!f) { std::cerr << "File not found: " << p << "\n"; return 1; }
+        std::string src((std::istreambuf_iterator<char>(f)), {});
+
+        auto ext = p.extension().string();
+        if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
+        auto lang = axon::language_from_extension(ext);
+        if (!lang) { std::cerr << "Unsupported language: " << ext << "\n"; return 1; }
+
+        std::cout << axon::skeletonize(src, *lang);
+        return 0;
+    }
+
+    // ── axon status ────────────────────────────────────────────────────────
+    if (cmd == "status") {
+        auto cfg = load_config();
+        if (!fs::exists(cfg.db_path)) { std::cout << "No index. Run `axon index`.\n"; return 0; }
+
+        axon::Database db(cfg.db_path);
+        auto fr  = db.conn().Query("SELECT count(*) FROM files");
+        auto sr  = db.conn().Query("SELECT count(*) FROM symbols");
+        auto er  = db.conn().Query("SELECT count(*) FROM edges");
+        auto embr= db.conn().Query("SELECT count(*) FROM symbols WHERE embedding IS NOT NULL");
+        auto& fm  = *fr;
+        auto& sm  = *sr;
+        auto& em  = *er;
+        auto& embm= *embr;
+
+        std::cout << "Project: " << cfg.project_root << "\n";
+        std::cout << "Files:    " << fm.GetValue<int64_t>(0, 0) << "\n";
+        std::cout << "Symbols:  " << sm.GetValue<int64_t>(0, 0) << "\n";
+        std::cout << "Edges:    " << em.GetValue<int64_t>(0, 0) << "\n";
+        std::cout << "Embedded: " << embm.GetValue<int64_t>(0, 0) << " symbols\n";
+        return 0;
+    }
+
+    print_usage();
+    return 1;
+}
