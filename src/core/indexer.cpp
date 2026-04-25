@@ -47,13 +47,14 @@ static bool should_skip(const fs::path& p) {
     return false;
 }
 
-// Returns file id, or -1 if unchanged (same hash)
+// Returns file id, or -1 if unchanged (same hash and !force)
 static int64_t upsert_file(duckdb::Connection& conn,
                            const std::string& rel_path,
                            const std::string& lang,
                            const std::string& hash,
                            int64_t byte_size,
-                           const std::string& skeleton)
+                           const std::string& skeleton,
+                           bool force = false)
 {
     // Check existing
     auto check = conn.Query("SELECT id, hash FROM files WHERE path = '" + sq(rel_path) + "'");
@@ -62,7 +63,7 @@ static int64_t upsert_file(duckdb::Connection& conn,
     if (mat.RowCount() > 0) {
         int64_t fid = mat.GetValue<int64_t>(0, 0);
         std::string existing_hash = mat.GetValue(1, 0).ToString();
-        if (existing_hash == hash) return -1;  // unchanged
+        if (existing_hash == hash && !force) return -1;  // unchanged
 
         // Updated: delete this file's outgoing edges (will be rebuilt) + symbols.
         // Keep incoming edges — those belong to OTHER files' resolve_edges results
@@ -293,7 +294,7 @@ static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root)
     return (int)victims.size();
 }
 
-IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress) {
+IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress, bool force) {
     IndexStats stats;
     auto& conn = db.conn();
 
@@ -345,7 +346,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
 
         int64_t fid = upsert_file(conn, parsed->path,
                                   language_name(parsed->language),
-                                  parsed->hash, byte_size, skeleton);
+                                  parsed->hash, byte_size, skeleton, force);
         if (fid == -1) { stats.files_skipped++; continue; }  // unchanged
 
         insert_symbols(conn, fid, parsed->symbols);

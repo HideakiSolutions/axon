@@ -69,17 +69,24 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── axon index [path] ──────────────────────────────────────────────────
+    // ── axon index [path] [--force] ────────────────────────────────────────
     if (cmd == "index") {
-        std::string path = argc > 2 ? argv[2] : "";
+        std::string path;
+        bool force = false;
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--force" || a == "-f") force = true;
+            else if (path.empty()) path = a;
+        }
         auto cfg = load_config(path);
-        std::cout << "Indexing " << cfg.project_root << " ...\n";
+        std::cout << "Indexing " << cfg.project_root
+                  << (force ? " (force)" : "") << " ...\n";
 
         axon::Database db(cfg.db_path);
 
         auto stats = axon::index_project(cfg, db, [](const std::string& f, int done, int total) {
             std::cerr << "\r[" << done << "/" << total << "] " << f << "    ";
-        });
+        }, force);
         std::cerr << "\n";
 
         std::cout << "Done: " << stats.files_indexed << " files, "

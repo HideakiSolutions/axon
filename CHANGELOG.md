@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-04-25
+
+### Added
+
+**Symbol-granular capsule rendering**
+- `assemble_capsule` now uses semantic embedding hits to render only the matched symbols' bodies (signature + docstring + line range), not the whole file
+- `bfs_symbols_from_pivots()` in `graph.cpp` traverses `symbol_incoming` (callers) when symbol-level edges are populated; depth-0 (pivot only) still wins quality over file-mode when edges are sparse
+- Per-symbol body cap (default `budget/12`) prevents one giant function from consuming the budget; truncated bodies emit a `// … (truncated)` marker
+- File-level support fallback when symbol BFS produces little context
+
+**`axon index --force` flag**
+- Forces re-parse and re-resolution of edges even when file hash is unchanged
+- Required to backfill `from_symbol`/`to_symbol` after enabling `granularity = "symbol"` in `.axon/config.toml`
+
+### Quality
+- Pivots now contain focused symbol code instead of full files. Token count similar to file-mode in aggregate but content is much more relevant to the query.
+- Headers `// === <name> (<kind>) lines X-Y ===` make it explicit which symbols matched, helping LLMs anchor responses.
+
 ## [0.4.1] — 2026-04-25
 
 ### Fixed

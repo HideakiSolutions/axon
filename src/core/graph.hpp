@@ -47,4 +47,18 @@ TraversalResult bfs_from_pivots(
     int max_depth    = 2,
     int token_budget = 8000);
 
+// Symbol-level BFS — expands from pivot symbol IDs via graph.symbol_incoming
+// (callers). Returns symbol IDs in BFS order. Hidration of (name, file_id,
+// signature, etc.) is the caller's responsibility (do a single SELECT IN).
+struct SymbolHit {
+    int64_t symbol_id;
+    int     depth;
+};
+
+std::vector<SymbolHit> bfs_symbols_from_pivots(
+    const DependencyGraph&        graph,
+    const std::vector<int64_t>&   pivot_symbol_ids,
+    int max_depth   = 1,
+    int max_symbols = 30);
+
 } // namespace axon
