@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-04-25
+
+### Fixed
+- **Indexer purges newly-ignored files** — `axon index` now deletes DB entries whose path matches `SKIP_DIRS` or `.axonignore` patterns (previously, ignoring a path only prevented future indexing — already-indexed files lingered)
+- `.worktrees/` added to default `SKIP_DIRS` in `indexer.cpp` and `routes.cpp`, eliminating duplicate file entries from git worktrees
+
+### Impact
+- Removed 20.096 duplicate worktree nodes across registered repos
+- Total graph nodes: 48.805 → 28.709 (−41%)
+- Capsule token usage: −43% on average for queries hitting worktree-heavy repos
+
 ## [0.4.0] — 2026-04-25
 
 ### Added

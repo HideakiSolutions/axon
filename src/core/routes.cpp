@@ -10,7 +10,7 @@ namespace fs = std::filesystem;
 
 static const std::vector<std::string> SKIP_DIRS = {
     "node_modules", ".git", "target", "build", "__pycache__",
-    ".axon", "dist", ".next", "vendor", ".venv", "venv"
+    ".axon", "dist", ".next", "vendor", ".venv", "venv", ".worktrees"
 };
 
 static bool should_skip(const fs::path& p) {

@@ -20,7 +20,7 @@ namespace fs = std::filesystem;
 
 static const std::vector<std::string> SKIP_DIRS = {
     "node_modules", ".git", "target", "build", "__pycache__",
-    ".axon", "dist", ".next", "vendor", ".venv", "venv"
+    ".axon", "dist", ".next", "vendor", ".venv", "venv", ".worktrees"
 };
 
 static std::vector<std::string> g_ignore_patterns;
@@ -251,6 +251,48 @@ static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
     }
 }
 
+// Returns true if any component of path matches a skip dir or ignore pattern.
+static bool path_is_ignored(const fs::path& rel) {
+    for (const auto& part : rel) {
+        const std::string name = part.filename().string();
+        for (const auto& dir : SKIP_DIRS)
+            if (name == dir) return true;
+        for (const auto& pat : g_ignore_patterns)
+            if (name == pat) return true;
+    }
+    return false;
+}
+
+// Remove files from DB whose path no longer exists on disk OR whose path is now ignored.
+// Also cleans up dependent symbols and edges. Returns how many files were pruned.
+static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root) {
+    auto res = conn.Query("SELECT id, path FROM files");
+    if (res->HasError()) return 0;
+    auto& mat = *res;
+
+    struct Victim { int64_t id; std::string path; };
+    std::vector<Victim> victims;
+    for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
+        int64_t fid = mat.GetValue<int64_t>(0, i);
+        std::string rel = mat.GetValue(1, i).ToString();
+        fs::path abs = project_root / rel;
+        if (!fs::exists(abs) || path_is_ignored(fs::path(rel)))
+            victims.push_back({fid, rel});
+    }
+
+    if (victims.empty()) return 0;
+
+    conn.Query("BEGIN TRANSACTION");
+    for (const auto& v : victims) {
+        conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(v.id) +
+                   " OR to_file = " + std::to_string(v.id));
+        conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(v.id));
+        conn.Query("DELETE FROM files WHERE id = " + std::to_string(v.id));
+    }
+    conn.Query("COMMIT");
+    return (int)victims.size();
+}
+
 IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress) {
     IndexStats stats;
     auto& conn = db.conn();
@@ -327,36 +369,10 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     }
     conn.Query("COMMIT");
 
+    // Prune deleted and newly-ignored files
+    stats.files_pruned = sweep_deleted(conn, cfg.project_root);
+
     return stats;
-}
-
-// Remove files from DB whose path no longer exists on disk.
-// Also cleans up dependent symbols and edges. Returns how many files were pruned.
-static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root) {
-    auto res = conn.Query("SELECT id, path FROM files");
-    if (res->HasError()) return 0;
-    auto& mat = *res;
-
-    struct Victim { int64_t id; std::string path; };
-    std::vector<Victim> victims;
-    for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
-        int64_t fid = mat.GetValue<int64_t>(0, i);
-        std::string rel = mat.GetValue(1, i).ToString();
-        fs::path abs = project_root / rel;
-        if (!fs::exists(abs)) victims.push_back({fid, rel});
-    }
-
-    if (victims.empty()) return 0;
-
-    conn.Query("BEGIN TRANSACTION");
-    for (const auto& v : victims) {
-        conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(v.id) +
-                   " OR to_file = " + std::to_string(v.id));
-        conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(v.id));
-        conn.Query("DELETE FROM files WHERE id = " + std::to_string(v.id));
-    }
-    conn.Query("COMMIT");
-    return (int)victims.size();
 }
 
 IndexStats index_files(const Config& cfg, Database& db,
