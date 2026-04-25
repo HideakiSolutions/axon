@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-25
+
+Consolidated minor release covering the v0.4.x cycle. No new code beyond v0.4.3 — promotes the cycle's accumulated improvements into a stable minor.
+
+### Highlights since 0.4.0
+- HTTP REST: `?mode=symbol`, `/api/observations`, `/api/capsule`
+- Symbol-granular capsule rendering — pivots extracted by symbol body, not full file
+- Tree-sitter call graph extraction (13 languages) — `kind='calls'` edges with `from_symbol`/`to_symbol` populated
+- `axon index --force` flag to re-resolve edges/symbols regardless of file hash
+- `.worktrees/` excluded from indexing; `sweep_deleted` purges newly-ignored entries
+- Token reduction (5-query sample): 17.615 → 7.846 (−55.5%) end-to-end vs v0.4.0
+
+### Bumped
+- CMakeLists.txt project version 0.1.0 → 0.5.0
+
 ## [0.4.3] — 2026-04-25
 
 ### Added
