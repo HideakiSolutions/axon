@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-04-25
+
+### Added
+
+**Call-graph extraction via tree-sitter**
+- Parser now collects `CallSite{caller, callee, line}` for every function/method call inside a function body
+- Cross-language coverage: TS/JS/Python/Rust/Go/C#/PHP/Dart/Java/C++/Kotlin
+- Caller resolution: smallest enclosing symbol (line-range containment)
+- Built-in stop-word filter eliminates control-flow keywords and common built-ins
+- New `kind="calls"` edges populate `from_symbol` and `to_symbol` directly
+- Unlocks the BFS path in `assemble_capsule` — pivots now expand to their callers (depth=1)
+
+**Tighter caller rendering**
+- Pivot symbols (matched by query) get `budget/16` token cap each (full body)
+- Caller symbols (BFS depth=1) get `budget/80` cap (signature + 2-3 lines for orientation)
+- Conservative `max_symbols=15` keeps the BFS focused
+
+### Fixed
+- UTF-8 sanitization on extracted body slices — prevents crash when source contains non-UTF-8 bytes (`json.exception.type_error.316`)
+
+### Impact
+- Capsule tokens (avg of 5 queries): 10.125 → 7.846 (−22.5% vs v0.4.1 baseline)
+- Files per capsule: 5 → 8-9 relevant (more context, less tokens)
+- 378 symbol-to-symbol edges populated in axon's own graph (was 0 in v0.4.2)
+
 ## [0.4.2] — 2026-04-25
 
 ### Added

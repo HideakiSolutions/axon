@@ -80,6 +80,31 @@ static std::vector<PivotMatch> select_pivots_by_query(
     return matches;
 }
 
+// Replace invalid UTF-8 bytes with U+FFFD-like marker so nlohmann::json doesn't throw.
+static std::string sanitize_utf8(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = (unsigned char)s[i];
+        size_t bytes = 0;
+        if      (c < 0x80) bytes = 1;
+        else if ((c & 0xE0) == 0xC0) bytes = 2;
+        else if ((c & 0xF0) == 0xE0) bytes = 3;
+        else if ((c & 0xF8) == 0xF0) bytes = 4;
+        else { out += '?'; i++; continue; }
+        if (i + bytes > s.size()) { out += '?'; break; }
+        bool ok = true;
+        for (size_t j = 1; j < bytes; j++) {
+            if ((((unsigned char)s[i + j]) & 0xC0) != 0x80) { ok = false; break; }
+        }
+        if (!ok) { out += '?'; i++; continue; }
+        out.append(s, i, bytes);
+        i += bytes;
+    }
+    return out;
+}
+
 // Extract a slice of source between [start_line, end_line] (1-indexed, inclusive).
 static std::string extract_lines(const std::string& content, int start_line, int end_line) {
     if (start_line < 1) start_line = 1;
@@ -157,7 +182,8 @@ static ContextCapsule assemble_symbol_mode(
     pivot_sym_ids.reserve(pivots.size());
     for (const auto& p : pivots) pivot_sym_ids.push_back(p.symbol_id);
 
-    auto hits = bfs_symbols_from_pivots(graph, pivot_sym_ids, /*max_depth=*/1, /*max_symbols=*/30);
+    // Conservative BFS — small expansion keeps the capsule focused
+    auto hits = bfs_symbols_from_pivots(graph, pivot_sym_ids, /*max_depth=*/1, /*max_symbols=*/15);
 
     std::vector<int64_t> hit_ids;
     hit_ids.reserve(hits.size());
@@ -179,12 +205,13 @@ static ContextCapsule assemble_symbol_mode(
         else        by_file_support[r.file_id].push_back(r);
     }
 
-    // Cap per symbol body to keep one giant function from blowing the budget.
-    // Each symbol gets at most this many tokens worth of body lines.
-    const int per_symbol_cap = std::max(150, token_budget / 12);
+    // Pivot symbols (matched by query) get a generous body cap.
+    // Caller symbols (BFS depth>=1) only need signature+head for orientation.
+    const int pivot_per_symbol_cap   = std::max(150, token_budget / 16);
+    const int support_per_symbol_cap = std::max(40, token_budget / 80);
 
     auto render_file = [&](int64_t fid, const std::vector<SymbolRow>& syms,
-                           int file_token_cap) -> CapsuleFile {
+                           int file_token_cap, int per_symbol_cap) -> CapsuleFile {
         CapsuleFile cf;
         auto path_it = graph.id_to_path.find(fid);
         if (path_it == graph.id_to_path.end()) return cf;
@@ -228,7 +255,7 @@ static ContextCapsule assemble_symbol_mode(
             if (!slice.empty() && slice.back() != '\n') body << "\n";
             used = estimate_tokens(body.str());
         }
-        cf.content        = body.str();
+        cf.content        = sanitize_utf8(body.str());
         cf.is_skeleton    = false;
         cf.token_estimate = estimate_tokens(cf.content);
         return cf;
@@ -239,15 +266,18 @@ static ContextCapsule assemble_symbol_mode(
 
     int tokens_used = 0;
     for (auto& [fid, syms] : by_file_pivot) {
-        auto cf = render_file(fid, syms, pivot_file_cap);
+        if (tokens_used >= token_budget * 90 / 100) break;
+        int remaining = token_budget - tokens_used;
+        auto cf = render_file(fid, syms, std::min(pivot_file_cap, remaining), pivot_per_symbol_cap);
         if (cf.path.empty()) continue;
         tokens_used += cf.token_estimate;
         capsule.pivot_files.push_back(std::move(cf));
     }
-    int support_file_cap = std::max(100, (token_budget - tokens_used) / std::max(1, (int)by_file_support.size()));
+    int support_file_cap = std::max(80, (token_budget - tokens_used) / std::max(1, (int)by_file_support.size()));
     for (auto& [fid, syms] : by_file_support) {
-        if (tokens_used >= token_budget) break;
-        auto cf = render_file(fid, syms, support_file_cap);
+        if (tokens_used >= token_budget * 90 / 100) break;
+        int remaining = token_budget - tokens_used;
+        auto cf = render_file(fid, syms, std::min(support_file_cap, remaining), support_per_symbol_cap);
         if (cf.path.empty()) continue;
         tokens_used += cf.token_estimate;
         capsule.support_files.push_back(std::move(cf));
