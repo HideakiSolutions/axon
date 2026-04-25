@@ -4,3 +4,4 @@ models/*.gguf
 *.o
 *.a
 .DS_Store
+.dev-squad/
