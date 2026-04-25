@@ -18,6 +18,7 @@ static void print_usage() {
 axon — Context Engine for AI Coding Agents
 
 Usage:
+  axon init   [path]                    Initialize .axon/config.toml with defaults
   axon index  [path]                    Index project (parse + graph + embeddings)
   axon index-paths <files...> [--prune] Incrementally reindex specific files
                                         (--prune alone = only sweep deleted files)
@@ -40,6 +41,30 @@ static axon::Config load_config(const std::string& path_arg = "") {
 int main(int argc, char* argv[]) {
     if (argc < 2) { print_usage(); return 1; }
     std::string cmd = argv[1];
+
+    // ── axon init [path] ──────────────────────────────────────────────────
+    if (cmd == "init") {
+        std::string path = argc > 2 ? argv[2] : "";
+        auto cfg = load_config(path);
+        auto config_path = cfg.axon_dir / "config.toml";
+        if (fs::exists(config_path)) {
+            std::cout << "Config already exists: " << config_path << "\n";
+            return 0;
+        }
+        std::ofstream f(config_path);
+        f << "# Axon project configuration\n"
+             "# https://github.com/hideaki/axon\n\n"
+             "# Granularity of dependency edges.\n"
+             "# \"file\"   — edges connect files (default, faster indexing)\n"
+             "# \"symbol\" — edges connect individual functions/classes (more precise callers)\n"
+             "granularity = \"file\"\n\n"
+             "# Set to true to detect and index HTTP routes (Next.js, Express, FastAPI, Django)\n"
+             "index_routes = false\n\n"
+             "# Enable full-text search index for symbol name lookup (BM25)\n"
+             "fts_enabled = true\n";
+        std::cout << "Created " << config_path << "\n";
+        return 0;
+    }
 
     // ── axon index [path] ──────────────────────────────────────────────────
     if (cmd == "index") {
