@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-25
+
+### Added
+
+**Symbol-granular graph mode**
+- `GET /api/graph?mode=symbol` — nodes are symbols (functions, classes, methods, interfaces, types, structs, namespaces) instead of files
+- Symbol nodes carry `kind` field enabling client-side filtering by symbol type
+- Symbol-to-symbol edges derived from edges with `from_symbol`/`to_symbol` populated
+- Node size weighted by edge degree; color-coded by kind
+
+**Backend**
+- `GET /api/observations?q=<text>&limit=N` — list or semantic-search saved observations
+- `GET /api/capsule?q=<query>&budget=N&pivots=<paths>` — assemble context capsule via `assemble_capsule()`
+- `/api/graph` edges now expose `from_symbol` and `to_symbol` names via LEFT JOIN
+
+### Changed
+- `GET /api/graph` default behavior unchanged (file-level mode); symbol mode opt-in via `?mode=symbol`
+
+---
+
 ## [0.3.0] — 2026-04-25
 
 ### Added
