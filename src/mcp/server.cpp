@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "protocol.hpp"
+#include "../core/registry.hpp"
 #include "../core/indexer.hpp"
 #include "../core/capsule.hpp"
 #include "../core/skeleton.hpp"
@@ -89,6 +90,18 @@ static json tools_list() {
          {"description","Given a route path, return its handler file and the full impact graph of files that depend on the handler."},
          {"inputSchema",{{"type","object"},{"required",{"route_path"}},{"properties",{
              {"route_path",{{"type","string"},{"description","Route path to analyze, e.g. /api/users/:id"}}}}}}}},
+        {{"name","detect_changes"},
+         {"description","Detect which symbols and files are affected by recent git changes. Returns changed files, affected symbols (those whose line ranges overlap with the diff hunks), and impacted downstream files."},
+         {"inputSchema",{{"type","object"},{"properties",{
+             {"ref",{{"type","string"},{"default","HEAD"},{"description","Git ref to diff against, e.g. HEAD~1, main, a commit SHA"}}}}}}}},
+        {{"name","group_list"},
+         {"description","List all repos registered in the global Axon registry (~/.axon/registry.json) and their groups."},
+         {"inputSchema",{{"type","object"},{"properties",json::object()}}}},
+        {{"name","group_impact"},
+         {"description","Cross-repo blast radius: given a file path in the current repo, return impacted files in other registered repos that import the same module path."},
+         {"inputSchema",{{"type","object"},{"required",{"file"}},{"properties",{
+             {"file",{{"type","string"},{"description","Relative or absolute path to the file to analyze"}}},
+             {"group",{{"type","string"},{"description","Optional: limit to repos in this group"}}}}}}}},
     })}};
 }
 
@@ -874,6 +887,82 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"handler_file", handler_file},
             {"impacted_files", impacted},
             {"impacted_count", (int)impacted.size()}
+        });
+    }
+
+    if (name == "group_list") {
+        auto reg = axon::load_registry();
+        json repos_arr = json::array();
+        for (auto& r : reg.repos) {
+            repos_arr.push_back({{"name", r.name}, {"root", r.root}, {"db_path", r.db_path}});
+        }
+        json groups_arr = json::array();
+        for (auto& [gname, members] : reg.groups) {
+            groups_arr.push_back({{"name", gname}, {"repos", members}});
+        }
+        return make_tool_result({{"repos", repos_arr}, {"groups", groups_arr}});
+    }
+
+    if (name == "group_impact") {
+        std::string file_arg = args.value("file", "");
+        if (file_arg.empty())
+            return make_tool_result({{"error","file is required"}}, true);
+
+        std::string group_filter = args.value("group", "");
+        auto reg = axon::load_registry();
+
+        // Determine the stem of the target file for cross-repo matching
+        std::filesystem::path file_path(file_arg);
+        std::string stem = file_path.stem().string();
+
+        // Determine repos to scan
+        std::vector<axon::RepoEntry> repos_to_scan;
+        if (!group_filter.empty()) {
+            repos_to_scan = axon::get_group_repos(reg, group_filter);
+        } else {
+            repos_to_scan = axon::get_repos(reg);
+        }
+
+        // Exclude the current repo
+        std::string current_root = ctx.cfg.project_root.string();
+        json cross_impact = json::array();
+
+        for (const auto& r : repos_to_scan) {
+            if (r.root == current_root) continue;
+            if (!std::filesystem::exists(r.db_path)) continue;
+
+            try {
+                duckdb::DuckDB other_db(r.db_path);
+                duckdb::Connection other_conn(other_db);
+
+                std::string sql =
+                    "SELECT DISTINCT f.path FROM files f "
+                    "JOIN edges e ON e.from_id = f.id "
+                    "JOIN files f2 ON e.to_id = f2.id "
+                    "WHERE f2.path LIKE '%" + sql_escape(stem) + "%' LIMIT 50";
+
+                auto res = other_conn.Query(sql);
+                if (res->HasError()) continue;
+
+                json impacted = json::array();
+                for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
+                    impacted.push_back(res->GetValue(0, i).ToString());
+                }
+                cross_impact.push_back({
+                    {"repo",           r.name},
+                    {"repo_root",      r.root},
+                    {"impacted_files", impacted}
+                });
+            } catch (...) {
+                // Skip repos with inaccessible/corrupt DBs
+            }
+        }
+
+        return make_tool_result({
+            {"file",         file_arg},
+            {"stem",         stem},
+            {"group_filter", group_filter},
+            {"cross_repo_impact", cross_impact}
         });
     }
 

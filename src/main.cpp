@@ -1,4 +1,5 @@
 #include "core/config.hpp"
+#include "core/registry.hpp"
 #include "core/db.hpp"
 #include "core/indexer.hpp"
 #include "core/graph.hpp"
@@ -85,6 +86,9 @@ int main(int argc, char* argv[]) {
                   << stats.symbols_found << " symbols, "
                   << stats.edges_found   << " edges\n";
 
+        // Register this repo in the global registry
+        axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
+
         // Attempt to embed symbols if model is available
         try {
             auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
@@ -153,6 +157,9 @@ int main(int argc, char* argv[]) {
         auto cfg = load_config();
         axon::mcp::ServerContext ctx;
         ctx.cfg = cfg;
+
+        // Register this repo in the global registry
+        axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
 
         if (fs::exists(cfg.db_path)) {
             ctx.db = std::make_unique<axon::Database>(cfg.db_path);
