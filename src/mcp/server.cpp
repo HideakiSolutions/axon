@@ -4,7 +4,7 @@
 #include "../core/capsule.hpp"
 #include "../core/skeleton.hpp"
 #include "../core/embeddings.hpp"
-#include "../core/git.hpp"
+#include "../core/rename.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -72,10 +72,12 @@ static json tools_list() {
          {"description","Return test files (by path convention) that import/reference the given files. Use for test-impact analysis before merging."},
          {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
              {"files",{{"type","array"},{"items",{{"type","string"}}}}}}}}}},
-        {{"name","detect_changes"},
-         {"description","Map git diff to affected symbols and their file impact. Runs git diff -U0 against the given ref and returns symbols whose line ranges overlap the changed hunks."},
-         {"inputSchema",{{"type","object"},{"properties",{
-             {"ref",{{"type","string"},{"description","Git ref to diff against (default: HEAD — shows staged+unstaged changes)"},{"default","HEAD"}}}}}}}},
+        {{"name","rename"},
+         {"description","Graph-assisted rename: find all occurrences of a symbol name across the codebase and return line-level edits. With dry_run=false, writes files to disk."},
+         {"inputSchema",{{"type","object"},{"required",{"symbol_name","new_name"}},{"properties",{
+             {"symbol_name",{{"type","string"},{"description","Current name of the symbol to rename"}}},
+             {"new_name",   {{"type","string"},{"description","New name for the symbol"}}},
+             {"dry_run",    {{"type","boolean"},{"default",true},{"description","If true, return edits without writing to disk"}}}}}}}},
     })}};
 }
 
@@ -614,85 +616,94 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         });
     }
 
-    if (name == "detect_changes") {
+    if (name == "rename") {
         if (!ctx.db_ready())
             return make_tool_result({{"error","Run run_pipeline first"}}, true);
 
-        std::string ref = args.value("ref", "HEAD");
-        std::string root = ctx.cfg.project_root.string();
+        std::string old_name = args.value("symbol_name", "");
+        std::string new_name = args.value("new_name", "");
+        bool dry_run = args.value("dry_run", true);
 
-        if (!axon::is_git_repo(root))
-            return make_tool_result({{"error","Not a git repository"}}, true);
+        if (old_name.empty() || new_name.empty())
+            return make_tool_result({{"error","symbol_name and new_name are required"}}, true);
+        if (old_name == new_name)
+            return make_tool_result({{"error","old and new name are the same"}}, true);
 
-        auto diffs = axon::get_git_diffs(root, ref);
-        if (diffs.empty())
-            return make_tool_result({
-                {"ref", ref},
-                {"changed_files", json::array()},
-                {"affected_symbols", json::array()},
-                {"impacted_files", json::array()},
-                {"note", "No changes detected for ref: " + ref}
-            });
+        // Find all files containing the symbol (via DB symbols table + caller files)
+        std::unordered_set<std::string> candidate_files;
 
-        json changed_files = json::array();
-        json affected_symbols = json::array();
-        std::unordered_set<int64_t> impacted_file_ids;
+        // Files that define the symbol
+        auto def_res = ctx.db->conn().Query(
+            "SELECT DISTINCT f.path FROM symbols s JOIN files f ON s.file_id = f.id "
+            "WHERE s.name = '" + sql_escape(old_name) + "'");
+        if (!def_res->HasError()) {
+            for (duckdb::idx_t i = 0; i < def_res->RowCount(); i++) {
+                std::string fpath = def_res->GetValue(0, i).ToString();
+                candidate_files.insert(fpath);
 
-        for (const auto& diff : diffs) {
-            changed_files.push_back(diff.path);
-            if (diff.hunks.empty()) continue;
-
-            // Find file_id for this path
-            auto fid_res = ctx.db->conn().Query(
-                "SELECT id FROM files WHERE path = '" + sql_escape(diff.path) + "'");
-            if (fid_res->HasError() || fid_res->RowCount() == 0) continue;
-            int64_t file_id = fid_res->GetValue<int64_t>(0, 0);
-
-            // For each hunk, find symbols whose line range overlaps
-            for (const auto& hunk : diff.hunks) {
-                auto sym_res = ctx.db->conn().Query(
-                    "SELECT s.name, s.kind, s.start_line, s.end_line, s.signature "
-                    "FROM symbols s WHERE s.file_id = " + std::to_string(file_id) +
-                    " AND s.start_line <= " + std::to_string(hunk.end_line) +
-                    " AND s.end_line   >= " + std::to_string(hunk.start_line));
-                if (sym_res->HasError()) continue;
-                auto& sr = *sym_res;
-                for (duckdb::idx_t i = 0; i < sr.RowCount(); i++) {
-                    affected_symbols.push_back({
-                        {"name",      sr.GetValue(0, i).ToString()},
-                        {"kind",      sr.GetValue(1, i).ToString()},
-                        {"file",      diff.path},
-                        {"start_line",sr.GetValue(2, i).GetValue<int32_t>()},
-                        {"end_line",  sr.GetValue(3, i).GetValue<int32_t>()},
-                        {"signature", sr.GetValue(4, i).ToString()}
-                    });
+                // Also add files that import the defining file (callers)
+                auto fid_res = ctx.db->conn().Query(
+                    "SELECT id FROM files WHERE path = '" + sql_escape(fpath) + "'");
+                if (!fid_res->HasError() && fid_res->RowCount() > 0) {
+                    int64_t fid = fid_res->GetValue<int64_t>(0, 0);
+                    auto it = ctx.graph.incoming.find(fid);
+                    if (it != ctx.graph.incoming.end())
+                        for (int64_t src : it->second) {
+                            auto pit = ctx.graph.id_to_path.find(src);
+                            if (pit != ctx.graph.id_to_path.end())
+                                candidate_files.insert(pit->second);
+                        }
                 }
             }
-
-            // Collect files impacted via graph (files that import the changed file)
-            impacted_file_ids.insert(file_id);
-            auto it = ctx.graph.incoming.find(file_id);
-            if (it != ctx.graph.incoming.end())
-                for (int64_t src : it->second) impacted_file_ids.insert(src);
         }
 
-        // Resolve impacted file IDs to paths (excluding the changed files themselves)
-        std::unordered_set<std::string> changed_set(changed_files.begin(), changed_files.end());
-        json impacted = json::array();
-        for (int64_t fid : impacted_file_ids) {
-            auto pit = ctx.graph.id_to_path.find(fid);
-            if (pit != ctx.graph.id_to_path.end() && !changed_set.count(pit->second))
-                impacted.push_back(pit->second);
+        if (candidate_files.empty())
+            return make_tool_result({
+                {"symbol_name", old_name},
+                {"new_name",    new_name},
+                {"edits",       json::array()},
+                {"note",        "Symbol not found in index. Run run_pipeline first or check the name."}
+            });
+
+        // Collect edits from all candidate files
+        std::vector<axon::RenameEdit> all_edits;
+        std::string root = ctx.cfg.project_root.string();
+        for (const auto& rel_path : candidate_files) {
+            std::string abs_path = root + "/" + rel_path;
+            auto file_edits = axon::collect_rename_edits(abs_path, old_name, new_name);
+            for (auto& e : file_edits) {
+                e.file_path = rel_path;  // store relative path in result
+                all_edits.push_back(e);
+            }
+        }
+
+        json edits_json = json::array();
+        for (const auto& e : all_edits) {
+            edits_json.push_back({
+                {"file", e.file_path},
+                {"line", e.line},
+                {"old",  e.old_text},
+                {"new",  e.new_text}
+            });
+        }
+
+        int files_written = 0;
+        if (!dry_run && !all_edits.empty()) {
+            // Restore absolute paths for writing
+            std::vector<axon::RenameEdit> abs_edits = all_edits;
+            for (auto& e : abs_edits) e.file_path = root + "/" + e.file_path;
+            files_written = axon::apply_rename_edits(abs_edits);
         }
 
         return make_tool_result({
-            {"ref",              ref},
-            {"changed_files",    changed_files},
-            {"affected_symbols", affected_symbols},
-            {"impacted_files",   impacted},
-            {"summary", std::to_string(changed_files.size()) + " files changed, " +
-                        std::to_string(affected_symbols.size()) + " symbols affected, " +
-                        std::to_string(impacted.size()) + " files impacted"}
+            {"symbol_name",    old_name},
+            {"new_name",       new_name},
+            {"dry_run",        dry_run},
+            {"edits",          edits_json},
+            {"total_edits",    (int)all_edits.size()},
+            {"files_affected", (int)candidate_files.size()},
+            {"files_written",  files_written},
+            {"note", dry_run ? "Dry run — no files written. Set dry_run=false to apply." : "Changes applied to disk. Run index_paths to update the index."}
         });
     }
 
