@@ -6,6 +6,7 @@
 #include "core/capsule.hpp"
 #include "core/embeddings.hpp"
 #include "mcp/server.hpp"
+#include "mcp/http_server.hpp"
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -22,7 +23,8 @@ Usage:
   axon index  [path]                    Index project (parse + graph + embeddings)
   axon index-paths <files...> [--prune] Incrementally reindex specific files
                                         (--prune alone = only sweep deleted files)
-  axon serve                            Start MCP server on stdio
+  axon serve  [--http] [--port=7070] [--host=127.0.0.1]
+                                        Start MCP server (stdio default; --http for REST API)
   axon capsule <query>                  Print context capsule for a query
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
@@ -137,6 +139,17 @@ int main(int argc, char* argv[]) {
 
     // ── axon serve ─────────────────────────────────────────────────────────
     if (cmd == "serve") {
+        bool use_http = false;
+        std::string http_host = "127.0.0.1";
+        int http_port = 7070;
+
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--http") use_http = true;
+            else if (a.rfind("--port=", 0) == 0) http_port = std::stoi(a.substr(7));
+            else if (a.rfind("--host=", 0) == 0) http_host = a.substr(7);
+        }
+
         auto cfg = load_config();
         axon::mcp::ServerContext ctx;
         ctx.cfg = cfg;
@@ -150,7 +163,14 @@ int main(int argc, char* argv[]) {
             } catch (...) {}
         }
 
-        axon::mcp::run_stdio(ctx);
+        if (use_http) {
+            axon::mcp::HttpConfig http_cfg;
+            http_cfg.host = http_host;
+            http_cfg.port = http_port;
+            axon::mcp::run_http(ctx, http_cfg);
+        } else {
+            axon::mcp::run_stdio(ctx);
+        }
         return 0;
     }
 
