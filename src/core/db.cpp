@@ -68,6 +68,16 @@ void Database::run_migrations() {
 
     // Index for O(1) symbol-level edge resolution
     try { exec("CREATE INDEX IF NOT EXISTS idx_symbols_file_name ON symbols(file_id, name)"); } catch (...) {}
+
+    // Routes table (created on demand by index_routes, but define here for upgrade path)
+    exec("CREATE TABLE IF NOT EXISTS routes ("
+         "  id           BIGINT PRIMARY KEY,"
+         "  method       VARCHAR NOT NULL,"
+         "  path         VARCHAR NOT NULL,"
+         "  handler_file VARCHAR NOT NULL,"
+         "  framework    VARCHAR NOT NULL DEFAULT 'unknown',"
+         "  file_id      BIGINT"
+         ")");
 }
 
 } // namespace axon

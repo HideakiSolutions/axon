@@ -6,12 +6,14 @@
 #include "../core/embeddings.hpp"
 #include "../core/rename.hpp"
 #include "../core/git.hpp"
+#include "../core/routes.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <sstream>
 #include <filesystem>
 #include <unordered_set>
+#include <queue>
 #include <algorithm>
 
 namespace {
@@ -79,6 +81,14 @@ static json tools_list() {
              {"symbol_name",{{"type","string"},{"description","Current name of the symbol to rename"}}},
              {"new_name",   {{"type","string"},{"description","New name for the symbol"}}},
              {"dry_run",    {{"type","boolean"},{"default",true},{"description","If true, return edits without writing to disk"}}}}}}}},
+        {{"name","route_map"},
+         {"description","List all detected HTTP routes with their handler files and framework. Requires index_routes=true in .axon/config.toml."},
+         {"inputSchema",{{"type","object"},{"properties",{
+             {"framework",{{"type","string"},{"description","Filter by framework: nextjs|express|fastapi|flask"}}}}}}}},
+        {{"name","api_impact"},
+         {"description","Given a route path, return its handler file and the full impact graph of files that depend on the handler."},
+         {"inputSchema",{{"type","object"},{"required",{"route_path"}},{"properties",{
+             {"route_path",{{"type","string"},{"description","Route path to analyze, e.g. /api/users/:id"}}}}}}}},
     })}};
 }
 
@@ -783,6 +793,87 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"summary", std::to_string(changed_files.size()) + " files changed, " +
                         std::to_string(affected_symbols.size()) + " symbols affected, " +
                         std::to_string(impacted.size()) + " files impacted"}
+        });
+    }
+
+    if (name == "route_map") {
+        if (!ctx.db_ready())
+            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+
+        // Trigger route indexing if not done (or if index_routes enabled)
+        if (ctx.cfg.project_cfg.index_routes) {
+            try { axon::index_routes(ctx.cfg, *ctx.db); } catch (...) {}
+        }
+
+        std::string framework_filter = args.value("framework", "");
+        auto routes = axon::get_all_routes(*ctx.db);
+
+        json routes_json = json::array();
+        for (const auto& r : routes) {
+            if (!framework_filter.empty() && r.framework != framework_filter) continue;
+            routes_json.push_back({
+                {"method",       r.method},
+                {"path",         r.path},
+                {"handler_file", r.handler_file},
+                {"framework",    r.framework}
+            });
+        }
+        return make_tool_result({
+            {"routes", routes_json},
+            {"total",  (int)routes_json.size()},
+            {"note", routes_json.empty()
+                ? "No routes found. Set index_routes=true in .axon/config.toml and run run_pipeline."
+                : ""}
+        });
+    }
+
+    if (name == "api_impact") {
+        if (!ctx.db_ready())
+            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+
+        std::string route_path = args.value("route_path", "");
+        if (route_path.empty())
+            return make_tool_result({{"error","route_path is required"}}, true);
+
+        // Find route in DB
+        auto rr = ctx.db->conn().Query(
+            "SELECT method, path, handler_file, framework, file_id "
+            "FROM routes WHERE path = '" + sql_escape(route_path) + "' LIMIT 1");
+        if (rr->HasError() || rr->RowCount() == 0)
+            return make_tool_result({
+                {"error", "Route not found: " + route_path},
+                {"hint", "Run route_map to list available routes, or enable index_routes in config."}
+            }, true);
+
+        std::string handler_file = rr->GetValue(2, 0).ToString();
+        int64_t file_id = rr->GetValue<int64_t>(4, 0);
+
+        // Collect files impacted by changes to this handler
+        json impacted = json::array();
+        std::unordered_set<int64_t> visited;
+        std::queue<int64_t> q;
+        q.push(file_id);
+        while (!q.empty()) {
+            int64_t fid = q.front(); q.pop();
+            if (!visited.insert(fid).second) continue;
+            auto it = ctx.graph.incoming.find(fid);
+            if (it != ctx.graph.incoming.end())
+                for (int64_t src : it->second) q.push(src);
+        }
+        visited.erase(file_id);  // exclude the handler itself
+        for (int64_t fid : visited) {
+            auto pit = ctx.graph.id_to_path.find(fid);
+            if (pit != ctx.graph.id_to_path.end())
+                impacted.push_back(pit->second);
+        }
+
+        return make_tool_result({
+            {"route",        {{"method", rr->GetValue(0,0).ToString()},
+                              {"path",   route_path},
+                              {"framework", rr->GetValue(3,0).ToString()}}},
+            {"handler_file", handler_file},
+            {"impacted_files", impacted},
+            {"impacted_count", (int)impacted.size()}
         });
     }
 
