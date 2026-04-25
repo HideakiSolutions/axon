@@ -5,6 +5,7 @@
 #include "../core/skeleton.hpp"
 #include "../core/embeddings.hpp"
 #include "../core/rename.hpp"
+#include "../core/git.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -704,6 +705,84 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"files_affected", (int)candidate_files.size()},
             {"files_written",  files_written},
             {"note", dry_run ? "Dry run — no files written. Set dry_run=false to apply." : "Changes applied to disk. Run index_paths to update the index."}
+        });
+    }
+
+    if (name == "detect_changes") {
+        if (!ctx.db_ready())
+            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+
+        std::string ref = args.value("ref", "HEAD");
+        std::string root = ctx.cfg.project_root.string();
+
+        if (!axon::is_git_repo(root))
+            return make_tool_result({{"error","Not a git repository"}}, true);
+
+        auto diffs = axon::get_git_diffs(root, ref);
+        if (diffs.empty())
+            return make_tool_result({
+                {"ref", ref},
+                {"changed_files", json::array()},
+                {"affected_symbols", json::array()},
+                {"impacted_files", json::array()},
+                {"note", "No changes detected for ref: " + ref}
+            });
+
+        json changed_files = json::array();
+        json affected_symbols = json::array();
+        std::unordered_set<int64_t> impacted_file_ids;
+
+        for (const auto& diff : diffs) {
+            changed_files.push_back(diff.path);
+            if (diff.hunks.empty()) continue;
+
+            auto fid_res = ctx.db->conn().Query(
+                "SELECT id FROM files WHERE path = '" + sql_escape(diff.path) + "'");
+            if (fid_res->HasError() || fid_res->RowCount() == 0) continue;
+            int64_t file_id = fid_res->GetValue<int64_t>(0, 0);
+
+            for (const auto& hunk : diff.hunks) {
+                auto sym_res = ctx.db->conn().Query(
+                    "SELECT s.name, s.kind, s.start_line, s.end_line, s.signature "
+                    "FROM symbols s WHERE s.file_id = " + std::to_string(file_id) +
+                    " AND s.start_line <= " + std::to_string(hunk.end_line) +
+                    " AND s.end_line   >= " + std::to_string(hunk.start_line));
+                if (sym_res->HasError()) continue;
+                auto& sr = *sym_res;
+                for (duckdb::idx_t i = 0; i < sr.RowCount(); i++) {
+                    affected_symbols.push_back({
+                        {"name",       sr.GetValue(0, i).ToString()},
+                        {"kind",       sr.GetValue(1, i).ToString()},
+                        {"file",       diff.path},
+                        {"start_line", sr.GetValue(2, i).GetValue<int32_t>()},
+                        {"end_line",   sr.GetValue(3, i).GetValue<int32_t>()},
+                        {"signature",  sr.GetValue(4, i).ToString()}
+                    });
+                }
+            }
+
+            impacted_file_ids.insert(file_id);
+            auto it = ctx.graph.incoming.find(file_id);
+            if (it != ctx.graph.incoming.end())
+                for (int64_t src : it->second) impacted_file_ids.insert(src);
+        }
+
+        std::unordered_set<std::string> changed_set(changed_files.begin(), changed_files.end());
+        json impacted = json::array();
+        for (int64_t fid : impacted_file_ids) {
+            auto pit = ctx.graph.id_to_path.find(fid);
+            if (pit != ctx.graph.id_to_path.end() && !changed_set.count(pit->second))
+                impacted.push_back(pit->second);
+        }
+
+        return make_tool_result({
+            {"ref",              ref},
+            {"changed_files",    changed_files},
+            {"affected_symbols", affected_symbols},
+            {"impacted_files",   impacted},
+            {"summary", std::to_string(changed_files.size()) + " files changed, " +
+                        std::to_string(affected_symbols.size()) + " symbols affected, " +
+                        std::to_string(impacted.size()) + " files impacted"}
         });
     }
 
