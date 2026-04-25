@@ -1,4 +1,5 @@
 #include "core/config.hpp"
+#include "core/registry.hpp"
 #include "core/db.hpp"
 #include "core/indexer.hpp"
 #include "core/graph.hpp"
@@ -6,6 +7,7 @@
 #include "core/capsule.hpp"
 #include "core/embeddings.hpp"
 #include "mcp/server.hpp"
+#include "mcp/http_server.hpp"
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -18,10 +20,12 @@ static void print_usage() {
 axon — Context Engine for AI Coding Agents
 
 Usage:
+  axon init   [path]                    Initialize .axon/config.toml with defaults
   axon index  [path]                    Index project (parse + graph + embeddings)
   axon index-paths <files...> [--prune] Incrementally reindex specific files
                                         (--prune alone = only sweep deleted files)
-  axon serve                            Start MCP server on stdio
+  axon serve  [--http] [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
+                                        Start MCP server (stdio default; --http for REST API)
   axon capsule <query>                  Print context capsule for a query
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
@@ -41,22 +45,56 @@ int main(int argc, char* argv[]) {
     if (argc < 2) { print_usage(); return 1; }
     std::string cmd = argv[1];
 
-    // ── axon index [path] ──────────────────────────────────────────────────
-    if (cmd == "index") {
+    // ── axon init [path] ──────────────────────────────────────────────────
+    if (cmd == "init") {
         std::string path = argc > 2 ? argv[2] : "";
         auto cfg = load_config(path);
-        std::cout << "Indexing " << cfg.project_root << " ...\n";
+        auto config_path = cfg.axon_dir / "config.toml";
+        if (fs::exists(config_path)) {
+            std::cout << "Config already exists: " << config_path << "\n";
+            return 0;
+        }
+        std::ofstream f(config_path);
+        f << "# Axon project configuration\n"
+             "# https://github.com/hideaki/axon\n\n"
+             "# Granularity of dependency edges.\n"
+             "# \"file\"   — edges connect files (default, faster indexing)\n"
+             "# \"symbol\" — edges connect individual functions/classes (more precise callers)\n"
+             "granularity = \"file\"\n\n"
+             "# Set to true to detect and index HTTP routes (Next.js, Express, FastAPI, Django)\n"
+             "index_routes = false\n\n"
+             "# Enable full-text search index for symbol name lookup (BM25)\n"
+             "fts_enabled = true\n";
+        std::cout << "Created " << config_path << "\n";
+        return 0;
+    }
+
+    // ── axon index [path] [--force] ────────────────────────────────────────
+    if (cmd == "index") {
+        std::string path;
+        bool force = false;
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--force" || a == "-f") force = true;
+            else if (path.empty()) path = a;
+        }
+        auto cfg = load_config(path);
+        std::cout << "Indexing " << cfg.project_root
+                  << (force ? " (force)" : "") << " ...\n";
 
         axon::Database db(cfg.db_path);
 
         auto stats = axon::index_project(cfg, db, [](const std::string& f, int done, int total) {
             std::cerr << "\r[" << done << "/" << total << "] " << f << "    ";
-        });
+        }, force);
         std::cerr << "\n";
 
         std::cout << "Done: " << stats.files_indexed << " files, "
                   << stats.symbols_found << " symbols, "
                   << stats.edges_found   << " edges\n";
+
+        // Register this repo in the global registry
+        axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
 
         // Attempt to embed symbols if model is available
         try {
@@ -112,9 +150,27 @@ int main(int argc, char* argv[]) {
 
     // ── axon serve ─────────────────────────────────────────────────────────
     if (cmd == "serve") {
+        bool use_http = false;
+        std::string http_host = "127.0.0.1";
+        int http_port = 7070;
+        std::string http_group;
+        bool http_all_repos = false;
+
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--http") use_http = true;
+            else if (a.rfind("--port=", 0) == 0) http_port = std::stoi(a.substr(7));
+            else if (a.rfind("--host=", 0) == 0) http_host = a.substr(7);
+            else if (a.rfind("--group=", 0) == 0) http_group = a.substr(8);
+            else if (a == "--all") http_all_repos = true;
+        }
+
         auto cfg = load_config();
         axon::mcp::ServerContext ctx;
         ctx.cfg = cfg;
+
+        // Register this repo in the global registry
+        axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
 
         if (fs::exists(cfg.db_path)) {
             ctx.db = std::make_unique<axon::Database>(cfg.db_path);
@@ -125,7 +181,16 @@ int main(int argc, char* argv[]) {
             } catch (...) {}
         }
 
-        axon::mcp::run_stdio(ctx);
+        if (use_http) {
+            axon::mcp::HttpConfig http_cfg;
+            http_cfg.host = http_host;
+            http_cfg.port = http_port;
+            http_cfg.group = http_group;
+            http_cfg.all_repos = http_all_repos;
+            axon::mcp::run_http(ctx, http_cfg);
+        } else {
+            axon::mcp::run_stdio(ctx);
+        }
         return 0;
     }
 

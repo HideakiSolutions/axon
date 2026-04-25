@@ -20,7 +20,7 @@ namespace fs = std::filesystem;
 
 static const std::vector<std::string> SKIP_DIRS = {
     "node_modules", ".git", "target", "build", "__pycache__",
-    ".axon", "dist", ".next", "vendor", ".venv", "venv"
+    ".axon", "dist", ".next", "vendor", ".venv", "venv", ".worktrees"
 };
 
 static std::vector<std::string> g_ignore_patterns;
@@ -47,13 +47,14 @@ static bool should_skip(const fs::path& p) {
     return false;
 }
 
-// Returns file id, or -1 if unchanged (same hash)
+// Returns file id, or -1 if unchanged (same hash and !force)
 static int64_t upsert_file(duckdb::Connection& conn,
                            const std::string& rel_path,
                            const std::string& lang,
                            const std::string& hash,
                            int64_t byte_size,
-                           const std::string& skeleton)
+                           const std::string& skeleton,
+                           bool force = false)
 {
     // Check existing
     auto check = conn.Query("SELECT id, hash FROM files WHERE path = '" + sq(rel_path) + "'");
@@ -62,7 +63,7 @@ static int64_t upsert_file(duckdb::Connection& conn,
     if (mat.RowCount() > 0) {
         int64_t fid = mat.GetValue<int64_t>(0, 0);
         std::string existing_hash = mat.GetValue(1, 0).ToString();
-        if (existing_hash == hash) return -1;  // unchanged
+        if (existing_hash == hash && !force) return -1;  // unchanged
 
         // Updated: delete this file's outgoing edges (will be rebuilt) + symbols.
         // Keep incoming edges — those belong to OTHER files' resolve_edges results
@@ -198,17 +199,143 @@ static int64_t resolve_specifier_to_file(duckdb::Connection& conn,
 }
 
 static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
-                          const std::vector<ImportEdge>& imports)
+                          const std::vector<ImportEdge>& imports,
+                          bool symbol_mode)
 {
     if (imports.empty()) return;
     for (const auto& edge : imports) {
         int64_t to_id = resolve_specifier_to_file(conn, edge.to_specifier, from_id);
         if (to_id == 0) continue;
-        conn.Query("INSERT INTO edges (id, from_file, to_file, kind) VALUES (nextval('seq_id'), " + std::to_string(from_id) + ", " + std::to_string(to_id) + ", '" + sq(edge.kind) + "')");
+
+        // Insert file-level edge
+        auto ins = conn.Query(
+            "INSERT INTO edges (id, from_file, to_file, kind) VALUES (nextval('seq_id'), " +
+            std::to_string(from_id) + ", " + std::to_string(to_id) +
+            ", '" + sq(edge.kind) + "') RETURNING id");
+
+        if (!symbol_mode || ins->HasError() || ins->RowCount() == 0) continue;
+
+        int64_t edge_id = ins->GetValue<int64_t>(0, 0);
+
+        // Extract leaf token from specifier as candidate symbol name
+        // e.g. "utils" → "utils", "./auth/parseUser" → "parseUser"
+        std::string spec = edge.to_specifier;
+        size_t slash = spec.find_last_of("/\\");
+        if (slash != std::string::npos) spec = spec.substr(slash + 1);
+        // Strip extension if present (e.g. "utils.js" → "utils")
+        size_t dot = spec.find_last_of('.');
+        if (dot != std::string::npos && dot > 0) spec = spec.substr(0, dot);
+        if (spec.empty()) continue;
+
+        // Try to find a symbol in from_file matching the specifier leaf
+        auto from_sym = conn.Query(
+            "SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
+            " AND name = '" + sq(spec) + "' LIMIT 1");
+        int64_t from_sym_id = (!from_sym->HasError() && from_sym->RowCount() > 0)
+                              ? from_sym->GetValue<int64_t>(0, 0) : 0;
+
+        // Try to find a symbol in to_file with matching name
+        auto to_sym = conn.Query(
+            "SELECT id FROM symbols WHERE file_id = " + std::to_string(to_id) +
+            " AND name = '" + sq(spec) + "' LIMIT 1");
+        int64_t to_sym_id = (!to_sym->HasError() && to_sym->RowCount() > 0)
+                            ? to_sym->GetValue<int64_t>(0, 0) : 0;
+
+        if (from_sym_id > 0 || to_sym_id > 0) {
+            std::string upd = "UPDATE edges SET ";
+            if (from_sym_id > 0) upd += "from_symbol = " + std::to_string(from_sym_id);
+            if (from_sym_id > 0 && to_sym_id > 0) upd += ", ";
+            if (to_sym_id > 0)   upd += "to_symbol = " + std::to_string(to_sym_id);
+            upd += " WHERE id = " + std::to_string(edge_id);
+            conn.Query(upd);
+        }
     }
 }
 
-IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress) {
+// For each call site (caller_name → callee_name) inside file `from_id`,
+// emit a symbol-to-symbol edge `kind=calls`. Resolution rules:
+//   from_symbol = unique symbol named caller_name in this file
+//   to_symbol   = symbol named callee_name in any file (prefer non-test files;
+//                 if multiple matches, take the one with most callers — most
+//                 likely the canonical definition)
+// Drops calls that cannot be resolved on either side.
+static void resolve_calls(duckdb::Connection& conn, int64_t from_id,
+                          const std::vector<CallSite>& calls)
+{
+    if (calls.empty()) return;
+
+    for (const auto& c : calls) {
+        if (c.caller_name.empty() || c.callee_name.empty()) continue;
+
+        auto from_res = conn.Query(
+            "SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
+            " AND name = '" + sq(c.caller_name) + "' LIMIT 1");
+        if (from_res->HasError() || from_res->RowCount() == 0) continue;
+        int64_t from_sym_id = from_res->GetValue<int64_t>(0, 0);
+
+        // Look up callee globally. Prefer same file (intra-module call), then
+        // any other file. Pick the most-defined one when multiple match.
+        auto to_res = conn.Query(
+            "SELECT s.id, s.file_id FROM symbols s "
+            "WHERE s.name = '" + sq(c.callee_name) + "' "
+            "ORDER BY (s.file_id = " + std::to_string(from_id) + ") DESC, s.id ASC "
+            "LIMIT 1");
+        if (to_res->HasError() || to_res->RowCount() == 0) continue;
+        int64_t to_sym_id  = to_res->GetValue<int64_t>(0, 0);
+        int64_t to_file_id = to_res->GetValue<int64_t>(1, 0);
+        if (to_sym_id == from_sym_id) continue;  // self-recursion, drop
+
+        conn.Query(
+            "INSERT INTO edges (id, from_file, to_file, kind, from_symbol, to_symbol) VALUES (" +
+            std::string("nextval('seq_id'), ") +
+            std::to_string(from_id) + ", " + std::to_string(to_file_id) +
+            ", 'calls', " + std::to_string(from_sym_id) + ", " + std::to_string(to_sym_id) + ")");
+    }
+}
+
+// Returns true if any component of path matches a skip dir or ignore pattern.
+static bool path_is_ignored(const fs::path& rel) {
+    for (const auto& part : rel) {
+        const std::string name = part.filename().string();
+        for (const auto& dir : SKIP_DIRS)
+            if (name == dir) return true;
+        for (const auto& pat : g_ignore_patterns)
+            if (name == pat) return true;
+    }
+    return false;
+}
+
+// Remove files from DB whose path no longer exists on disk OR whose path is now ignored.
+// Also cleans up dependent symbols and edges. Returns how many files were pruned.
+static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root) {
+    auto res = conn.Query("SELECT id, path FROM files");
+    if (res->HasError()) return 0;
+    auto& mat = *res;
+
+    struct Victim { int64_t id; std::string path; };
+    std::vector<Victim> victims;
+    for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
+        int64_t fid = mat.GetValue<int64_t>(0, i);
+        std::string rel = mat.GetValue(1, i).ToString();
+        fs::path abs = project_root / rel;
+        if (!fs::exists(abs) || path_is_ignored(fs::path(rel)))
+            victims.push_back({fid, rel});
+    }
+
+    if (victims.empty()) return 0;
+
+    conn.Query("BEGIN TRANSACTION");
+    for (const auto& v : victims) {
+        conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(v.id) +
+                   " OR to_file = " + std::to_string(v.id));
+        conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(v.id));
+        conn.Query("DELETE FROM files WHERE id = " + std::to_string(v.id));
+    }
+    conn.Query("COMMIT");
+    return (int)victims.size();
+}
+
+IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress, bool force) {
     IndexStats stats;
     auto& conn = db.conn();
 
@@ -234,7 +361,11 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     int total = (int)files.size();
 
     // Store parsed results for edge resolution pass
-    struct Pending { std::string path; std::vector<ImportEdge> imports; };
+    struct Pending {
+        std::string path;
+        std::vector<ImportEdge> imports;
+        std::vector<CallSite>  calls;
+    };
     std::vector<Pending> pending_edges;
 
     conn.Query("BEGIN TRANSACTION");
@@ -260,7 +391,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
 
         int64_t fid = upsert_file(conn, parsed->path,
                                   language_name(parsed->language),
-                                  parsed->hash, byte_size, skeleton);
+                                  parsed->hash, byte_size, skeleton, force);
         if (fid == -1) { stats.files_skipped++; continue; }  // unchanged
 
         insert_symbols(conn, fid, parsed->symbols);
@@ -268,10 +399,12 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
         stats.edges_found   += (int)parsed->imports.size();
         stats.files_indexed++;
 
-        if (!parsed->imports.empty())
-            pending_edges.push_back({parsed->path, parsed->imports});
+        if (!parsed->imports.empty() || !parsed->calls.empty())
+            pending_edges.push_back({parsed->path, parsed->imports, parsed->calls});
     }
     conn.Query("COMMIT");
+
+    bool symbol_mode = cfg.project_cfg.granularity == "symbol";
 
     // Resolve edges (second pass — all files now in DB)
     conn.Query("BEGIN TRANSACTION");
@@ -280,40 +413,17 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
         auto& mat = *res;
         if (mat.RowCount() == 0) continue;
         int64_t fid = mat.GetValue<int64_t>(0, 0);
-        resolve_edges(conn, fid, p.imports);
+        resolve_edges(conn, fid, p.imports, symbol_mode);
+        if (symbol_mode && !p.calls.empty()) {
+            resolve_calls(conn, fid, p.calls);
+        }
     }
     conn.Query("COMMIT");
+
+    // Prune deleted and newly-ignored files
+    stats.files_pruned = sweep_deleted(conn, cfg.project_root);
 
     return stats;
-}
-
-// Remove files from DB whose path no longer exists on disk.
-// Also cleans up dependent symbols and edges. Returns how many files were pruned.
-static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root) {
-    auto res = conn.Query("SELECT id, path FROM files");
-    if (res->HasError()) return 0;
-    auto& mat = *res;
-
-    struct Victim { int64_t id; std::string path; };
-    std::vector<Victim> victims;
-    for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
-        int64_t fid = mat.GetValue<int64_t>(0, i);
-        std::string rel = mat.GetValue(1, i).ToString();
-        fs::path abs = project_root / rel;
-        if (!fs::exists(abs)) victims.push_back({fid, rel});
-    }
-
-    if (victims.empty()) return 0;
-
-    conn.Query("BEGIN TRANSACTION");
-    for (const auto& v : victims) {
-        conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(v.id) +
-                   " OR to_file = " + std::to_string(v.id));
-        conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(v.id));
-        conn.Query("DELETE FROM files WHERE id = " + std::to_string(v.id));
-    }
-    conn.Query("COMMIT");
-    return (int)victims.size();
 }
 
 IndexStats index_files(const Config& cfg, Database& db,
@@ -392,7 +502,7 @@ IndexStats index_files(const Config& cfg, Database& db,
             auto& mat = *res;
             if (mat.RowCount() == 0) continue;
             int64_t fid = mat.GetValue<int64_t>(0, 0);
-            resolve_edges(conn, fid, p.imports);
+            resolve_edges(conn, fid, p.imports, cfg.project_cfg.granularity == "symbol");
         }
         conn.Query("COMMIT");
     }

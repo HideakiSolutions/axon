@@ -1,3 +1,4 @@
 # Diretórios excluídos da indexação axon
 third_party
 models
+.worktrees

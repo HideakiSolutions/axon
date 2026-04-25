@@ -28,12 +28,21 @@ struct ImportEdge {
     std::string kind;          // imports|extends|uses
 };
 
+// Call/use site discovered inside a function body.
+// Resolution to symbol IDs happens at indexing time.
+struct CallSite {
+    std::string caller_name;   // enclosing symbol name (function/method/class)
+    std::string callee_name;   // identifier being invoked
+    int         line = 0;
+};
+
 struct ParsedFile {
     std::string path;          // relative to project root
     Language language;
     std::string hash;          // blake3 hex
     std::vector<Symbol> symbols;
     std::vector<ImportEdge> imports;
+    std::vector<CallSite> calls;
 };
 
 // Returns nullopt if language is unsupported or file unreadable

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
+#include <climits>
 #include <blake3.h>
 
 // Grammar declarations (C linkage)
@@ -156,8 +157,88 @@ struct ParseContext {
     const std::string& src;
     std::vector<Symbol>& symbols;
     std::vector<ImportEdge>& imports;
+    std::vector<CallSite>& calls;
     Language lang;
 };
+
+// Cross-language list of AST node kinds that represent function/method calls.
+static bool is_call_kind(const std::string& kind) {
+    static const std::unordered_set<std::string> kinds = {
+        "call_expression",          // TS/JS/Rust/Go/C++/Kotlin/Dart
+        "call",                     // Python
+        "invocation_expression",    // C#
+        "method_invocation",        // Java
+        "function_call_expression", // PHP
+        "member_call_expression",   // PHP
+        "scoped_call_expression",   // PHP
+        "macro_invocation",         // Rust
+    };
+    return kinds.count(kind) > 0;
+}
+
+// Extract the called identifier from a call-kind node.
+// Walks the first chain of children looking for the leaf identifier.
+// Examples:
+//   foo(...)            → "foo"
+//   obj.method(...)     → "method"
+//   ns::path::fn(...)   → "fn"
+//   self.foo(...)       → "foo"
+static std::string extract_callee_name(TSNode call_node, const std::string& src) {
+    // Try field "function" first (TS/JS/Rust/Go/C++/etc)
+    TSNode fn = ts_node_child_by_field_name(call_node, "function", 8);
+    if (ts_node_is_null(fn)) {
+        // Fallback: first named child
+        uint32_t n = ts_node_named_child_count(call_node);
+        if (n == 0) return "";
+        fn = ts_node_named_child(call_node, 0);
+    }
+    if (ts_node_is_null(fn)) return "";
+
+    // Walk down picking the rightmost identifier-like leaf.
+    // Handles member_expression, scoped_identifier, field_expression, etc.
+    while (!ts_node_is_null(fn)) {
+        std::string k = ts_node_type(fn);
+        if (k == "identifier" || k == "field_identifier" || k == "property_identifier" ||
+            k == "simple_identifier" || k == "shorthand_property_identifier") {
+            return node_text(fn, src);
+        }
+        // Common wrappers that hide the name:
+        //   member_expression: object.PROPERTY  → "property" field
+        //   field_expression : object.FIELD     → "field"   field
+        //   scoped_identifier: ns::NAME         → "name"    field
+        TSNode prop = ts_node_child_by_field_name(fn, "property", 8);
+        if (ts_node_is_null(prop)) prop = ts_node_child_by_field_name(fn, "field", 5);
+        if (ts_node_is_null(prop)) prop = ts_node_child_by_field_name(fn, "name", 4);
+        if (!ts_node_is_null(prop)) { fn = prop; continue; }
+
+        // Last resort: pick last named child (closest to leaf)
+        uint32_t n = ts_node_named_child_count(fn);
+        if (n == 0) return "";
+        fn = ts_node_named_child(fn, n - 1);
+    }
+    return "";
+}
+
+// Common identifiers that look like calls but are control flow / built-ins.
+// Filtering these prevents noise in the call graph.
+static bool is_callee_noise(const std::string& name) {
+    static const std::unordered_set<std::string> stop = {
+        // C/C++ keywords disguised as calls
+        "if","while","for","switch","return","sizeof","throw","catch",
+        // Common built-ins / generic placeholders
+        "assert","print","println","printf","fprintf","cout","cerr","cin",
+        "log","trace","debug","info","warn","error","panic",
+        // Pointer-like in C/C++
+        "static_cast","dynamic_cast","reinterpret_cast","const_cast",
+        // JS/Python noise
+        "Object","Array","String","Number","Boolean","JSON","Math",
+        "len","str","int","float","bool","list","dict","set","tuple",
+        // Common noise
+        "main","new","delete",
+    };
+    if (name.size() < 2) return true;
+    return stop.count(name) > 0;
+}
 
 // Extract the real module / path specifier from an import node.
 // Walks children DFS looking for the first path-like or string-literal descendant,
@@ -475,7 +556,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
             std::vector<Symbol> sub_syms;
             std::vector<ImportEdge> sub_imports;
-            ParseContext sub_ctx{sub_src, sub_syms, sub_imports,
+            std::vector<CallSite> sub_calls;
+            ParseContext sub_ctx{sub_src, sub_syms, sub_imports, sub_calls,
                                  is_typescript ? Language::TypeScript : Language::JavaScript};
             visit_node(sub_root, sub_ctx);
 
@@ -488,6 +570,10 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             }
             for (auto& e : sub_imports) {
                 ctx.imports.push_back(std::move(e));
+            }
+            for (auto& c : sub_calls) {
+                c.line += (int)script_start_row;
+                ctx.calls.push_back(std::move(c));
             }
 
             ts_tree_delete(sub_tree);
@@ -630,6 +716,24 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
         ctx.symbols.push_back(std::move(sym));
     }
 
+    // Collect call sites (only when the node is a call kind).
+    // Caller resolution happens in a post-pass once all symbols are known.
+    if (is_call_kind(kind)) {
+        std::string callee = extract_callee_name(node, ctx.src);
+        if (!callee.empty() && !is_callee_noise(callee)) {
+            CallSite cs;
+            cs.caller_name = "";  // resolved post-walk via byte range
+            cs.callee_name = std::move(callee);
+            cs.line        = (int)ts_node_start_point(node).row + 1;
+            // Stash byte position in line slot's high bits — no, keep separate.
+            // We need start_byte to find enclosing symbol; piggyback in caller_name temporarily
+            // and resolve below. Simpler: record byte and resolve after visit.
+            ctx.calls.push_back(std::move(cs));
+            // Append byte position alongside in a parallel vector? Simpler:
+            // we'll re-derive via line in post-pass against symbols' line ranges.
+        }
+    }
+
     // Recurse into children
     uint32_t count = ts_node_child_count(node);
     for (uint32_t i = 0; i < count; i++) {
@@ -667,11 +771,34 @@ std::optional<ParsedFile> parse_file(
     result.language = lang;
     result.hash     = hash;
 
-    ParseContext ctx{src, result.symbols, result.imports, lang};
+    ParseContext ctx{src, result.symbols, result.imports, result.calls, lang};
     visit_node(root, ctx);
 
     ts_tree_delete(tree);
     ts_parser_delete(parser);
+
+    // Post-pass: resolve caller_name for each call site by finding the smallest
+    // enclosing symbol whose [start_line, end_line] contains the call's line.
+    // Calls outside any symbol (e.g. module-level) are dropped — they have no
+    // function-level caller to attribute to.
+    {
+        std::vector<CallSite> resolved;
+        resolved.reserve(result.calls.size());
+        for (auto& c : result.calls) {
+            const Symbol* best = nullptr;
+            int best_span = INT_MAX;
+            for (const auto& s : result.symbols) {
+                if (c.line < s.start_line || c.line > s.end_line) continue;
+                int span = s.end_line - s.start_line;
+                if (span < best_span) { best_span = span; best = &s; }
+            }
+            if (!best) continue;                       // module-level call → drop
+            if (best->name == c.callee_name) continue; // self-recursion → drop
+            c.caller_name = best->name;
+            resolved.push_back(std::move(c));
+        }
+        result.calls = std::move(resolved);
+    }
 
     return result;
 }

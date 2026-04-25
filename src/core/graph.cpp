@@ -80,6 +80,18 @@ DependencyGraph load_graph(Database& db) {
         g.outgoing[from].push_back(to);
         g.incoming[to].push_back(from);
     }
+
+    // Load symbol-level incoming edges when available
+    auto sym_res = dq(conn, "SELECT from_symbol, to_symbol FROM edges "
+                             "WHERE from_symbol IS NOT NULL AND to_symbol IS NOT NULL");
+    if (!sym_res->HasError()) {
+        auto& sym_edges = *sym_res;
+        for (duckdb::idx_t i = 0; i < sym_edges.RowCount(); i++) {
+            int64_t from_sym = sym_edges.GetValue<int64_t>(0, i);
+            int64_t to_sym   = sym_edges.GetValue<int64_t>(1, i);
+            g.symbol_incoming[to_sym].push_back(from_sym);
+        }
+    }
     return g;
 }
 
@@ -141,6 +153,40 @@ TraversalResult bfs_from_pivots(
     std::sort(result.support_files.begin(), result.support_files.end(),
               [](const GraphNode& a, const GraphNode& b) { return a.degree > b.degree; });
 
+    return result;
+}
+
+std::vector<SymbolHit> bfs_symbols_from_pivots(
+    const DependencyGraph&        graph,
+    const std::vector<int64_t>&   pivot_symbol_ids,
+    int max_depth,
+    int max_symbols)
+{
+    std::vector<SymbolHit> result;
+    std::unordered_set<int64_t> visited;
+    std::queue<std::pair<int64_t, int>> q;
+
+    for (int64_t sid : pivot_symbol_ids) {
+        if (visited.count(sid)) continue;
+        visited.insert(sid);
+        q.push({sid, 0});
+    }
+
+    while (!q.empty() && (int)result.size() < max_symbols) {
+        auto [sid, depth] = q.front(); q.pop();
+        result.push_back({sid, depth});
+
+        if (depth >= max_depth) continue;
+
+        // Expand via callers (symbol_incoming maps to_sym -> [from_sym...])
+        auto it = graph.symbol_incoming.find(sid);
+        if (it == graph.symbol_incoming.end()) continue;
+        for (int64_t caller : it->second) {
+            if (visited.count(caller)) continue;
+            visited.insert(caller);
+            q.push({caller, depth + 1});
+        }
+    }
     return result;
 }
 

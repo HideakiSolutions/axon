@@ -1,15 +1,20 @@
 #include "server.hpp"
 #include "protocol.hpp"
+#include "../core/registry.hpp"
 #include "../core/indexer.hpp"
 #include "../core/capsule.hpp"
 #include "../core/skeleton.hpp"
 #include "../core/embeddings.hpp"
+#include "../core/rename.hpp"
+#include "../core/git.hpp"
+#include "../core/routes.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <sstream>
 #include <filesystem>
 #include <unordered_set>
+#include <queue>
 #include <algorithm>
 
 namespace {
@@ -71,6 +76,32 @@ static json tools_list() {
          {"description","Return test files (by path convention) that import/reference the given files. Use for test-impact analysis before merging."},
          {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
              {"files",{{"type","array"},{"items",{{"type","string"}}}}}}}}}},
+        {{"name","rename"},
+         {"description","Graph-assisted rename: find all occurrences of a symbol name across the codebase and return line-level edits. With dry_run=false, writes files to disk."},
+         {"inputSchema",{{"type","object"},{"required",{"symbol_name","new_name"}},{"properties",{
+             {"symbol_name",{{"type","string"},{"description","Current name of the symbol to rename"}}},
+             {"new_name",   {{"type","string"},{"description","New name for the symbol"}}},
+             {"dry_run",    {{"type","boolean"},{"default",true},{"description","If true, return edits without writing to disk"}}}}}}}},
+        {{"name","route_map"},
+         {"description","List all detected HTTP routes with their handler files and framework. Requires index_routes=true in .axon/config.toml."},
+         {"inputSchema",{{"type","object"},{"properties",{
+             {"framework",{{"type","string"},{"description","Filter by framework: nextjs|express|fastapi|flask"}}}}}}}},
+        {{"name","api_impact"},
+         {"description","Given a route path, return its handler file and the full impact graph of files that depend on the handler."},
+         {"inputSchema",{{"type","object"},{"required",{"route_path"}},{"properties",{
+             {"route_path",{{"type","string"},{"description","Route path to analyze, e.g. /api/users/:id"}}}}}}}},
+        {{"name","detect_changes"},
+         {"description","Detect which symbols and files are affected by recent git changes. Returns changed files, affected symbols (those whose line ranges overlap with the diff hunks), and impacted downstream files."},
+         {"inputSchema",{{"type","object"},{"properties",{
+             {"ref",{{"type","string"},{"default","HEAD"},{"description","Git ref to diff against, e.g. HEAD~1, main, a commit SHA"}}}}}}}},
+        {{"name","group_list"},
+         {"description","List all repos registered in the global Axon registry (~/.axon/registry.json) and their groups."},
+         {"inputSchema",{{"type","object"},{"properties",json::object()}}}},
+        {{"name","group_impact"},
+         {"description","Cross-repo blast radius: given a file path in the current repo, return impacted files in other registered repos that import the same module path."},
+         {"inputSchema",{{"type","object"},{"required",{"file"}},{"properties",{
+             {"file",{{"type","string"},{"description","Relative or absolute path to the file to analyze"}}},
+             {"group",{{"type","string"},{"description","Optional: limit to repos in this group"}}}}}}}},
     })}};
 }
 
@@ -523,13 +554,36 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 }
             }
 
+            // Symbol-level callers (populated when granularity=symbol)
+            json caller_symbols = json::array();
+            int64_t sym_id = sm.GetValue<int64_t>(0, i);
+            auto sym_it = ctx.graph.symbol_incoming.find(sym_id);
+            if (sym_it != ctx.graph.symbol_incoming.end()) {
+                for (int64_t src_sym_id : sym_it->second) {
+                    // Buscar detalhes do símbolo chamador
+                    auto src_res = ctx.db->conn().Query(
+                        "SELECT s.name, s.kind, f.path, s.start_line "
+                        "FROM symbols s JOIN files f ON s.file_id = f.id "
+                        "WHERE s.id = " + std::to_string(src_sym_id));
+                    if (!src_res->HasError() && src_res->RowCount() > 0) {
+                        caller_symbols.push_back({
+                            {"name", src_res->GetValue(0, 0).ToString()},
+                            {"kind", src_res->GetValue(1, 0).ToString()},
+                            {"file", src_res->GetValue(2, 0).ToString()},
+                            {"line", src_res->GetValue(3, 0).GetValue<int32_t>()}
+                        });
+                    }
+                }
+            }
+
             matches.push_back({
-                {"symbol",     sm.GetValue(2, i).ToString()},
-                {"kind",       sm.GetValue(3, i).ToString()},
-                {"file",       callee_file},
-                {"line",       sm.GetValue(4, i).GetValue<int32_t>()},
-                {"signature",  sm.GetValue(5, i).ToString()},
-                {"caller_files", callers}
+                {"symbol",         sm.GetValue(2, i).ToString()},
+                {"kind",           sm.GetValue(3, i).ToString()},
+                {"file",           callee_file},
+                {"line",           sm.GetValue(4, i).GetValue<int32_t>()},
+                {"signature",      sm.GetValue(5, i).ToString()},
+                {"caller_files",   callers},
+                {"caller_symbols", caller_symbols}
             });
             if (total_callers >= limit) break;
         }
@@ -537,7 +591,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         return make_tool_result({
             {"symbol_name",    sym_name},
             {"matches",        matches},
-            {"note", "Callers are file-granular (files importing the defining file). Use get_skeleton(caller_files) to narrow to specific call sites."}
+            {"note", "caller_files: files importing the defining file. caller_symbols: symbol-level callers (populated when granularity=symbol). Use get_skeleton(caller_files) to narrow to specific call sites."}
         });
     }
 
@@ -583,6 +637,332 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"all_tests",    std::vector<std::string>(all_tests.begin(), all_tests.end())},
             {"total_tests",  (int)all_tests.size()},
             {"note", "Tests are detected by path convention (_test.*, *.spec.*, /tests/, etc) among files that import the target. Check get_skeleton(tests) to confirm coverage."}
+        });
+    }
+
+    if (name == "rename") {
+        if (!ctx.db_ready())
+            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+
+        std::string old_name = args.value("symbol_name", "");
+        std::string new_name = args.value("new_name", "");
+        bool dry_run = args.value("dry_run", true);
+
+        if (old_name.empty() || new_name.empty())
+            return make_tool_result({{"error","symbol_name and new_name are required"}}, true);
+        if (old_name == new_name)
+            return make_tool_result({{"error","old and new name are the same"}}, true);
+
+        // Find all files containing the symbol (via DB symbols table + caller files)
+        std::unordered_set<std::string> candidate_files;
+
+        // Files that define the symbol
+        auto def_res = ctx.db->conn().Query(
+            "SELECT DISTINCT f.path FROM symbols s JOIN files f ON s.file_id = f.id "
+            "WHERE s.name = '" + sql_escape(old_name) + "'");
+        if (!def_res->HasError()) {
+            for (duckdb::idx_t i = 0; i < def_res->RowCount(); i++) {
+                std::string fpath = def_res->GetValue(0, i).ToString();
+                candidate_files.insert(fpath);
+
+                // Also add files that import the defining file (callers)
+                auto fid_res = ctx.db->conn().Query(
+                    "SELECT id FROM files WHERE path = '" + sql_escape(fpath) + "'");
+                if (!fid_res->HasError() && fid_res->RowCount() > 0) {
+                    int64_t fid = fid_res->GetValue<int64_t>(0, 0);
+                    auto it = ctx.graph.incoming.find(fid);
+                    if (it != ctx.graph.incoming.end())
+                        for (int64_t src : it->second) {
+                            auto pit = ctx.graph.id_to_path.find(src);
+                            if (pit != ctx.graph.id_to_path.end())
+                                candidate_files.insert(pit->second);
+                        }
+                }
+            }
+        }
+
+        if (candidate_files.empty())
+            return make_tool_result({
+                {"symbol_name", old_name},
+                {"new_name",    new_name},
+                {"edits",       json::array()},
+                {"note",        "Symbol not found in index. Run run_pipeline first or check the name."}
+            });
+
+        // Collect edits from all candidate files
+        std::vector<axon::RenameEdit> all_edits;
+        std::string root = ctx.cfg.project_root.string();
+        for (const auto& rel_path : candidate_files) {
+            std::string abs_path = root + "/" + rel_path;
+            auto file_edits = axon::collect_rename_edits(abs_path, old_name, new_name);
+            for (auto& e : file_edits) {
+                e.file_path = rel_path;  // store relative path in result
+                all_edits.push_back(e);
+            }
+        }
+
+        json edits_json = json::array();
+        for (const auto& e : all_edits) {
+            edits_json.push_back({
+                {"file", e.file_path},
+                {"line", e.line},
+                {"old",  e.old_text},
+                {"new",  e.new_text}
+            });
+        }
+
+        int files_written = 0;
+        if (!dry_run && !all_edits.empty()) {
+            // Restore absolute paths for writing
+            std::vector<axon::RenameEdit> abs_edits = all_edits;
+            for (auto& e : abs_edits) e.file_path = root + "/" + e.file_path;
+            files_written = axon::apply_rename_edits(abs_edits);
+        }
+
+        return make_tool_result({
+            {"symbol_name",    old_name},
+            {"new_name",       new_name},
+            {"dry_run",        dry_run},
+            {"edits",          edits_json},
+            {"total_edits",    (int)all_edits.size()},
+            {"files_affected", (int)candidate_files.size()},
+            {"files_written",  files_written},
+            {"note", dry_run ? "Dry run — no files written. Set dry_run=false to apply." : "Changes applied to disk. Run index_paths to update the index."}
+        });
+    }
+
+    if (name == "detect_changes") {
+        if (!ctx.db_ready())
+            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+
+        std::string ref = args.value("ref", "HEAD");
+        std::string root = ctx.cfg.project_root.string();
+
+        if (!axon::is_git_repo(root))
+            return make_tool_result({{"error","Not a git repository"}}, true);
+
+        auto diffs = axon::get_git_diffs(root, ref);
+        if (diffs.empty())
+            return make_tool_result({
+                {"ref", ref},
+                {"changed_files", json::array()},
+                {"affected_symbols", json::array()},
+                {"impacted_files", json::array()},
+                {"note", "No changes detected for ref: " + ref}
+            });
+
+        json changed_files = json::array();
+        json affected_symbols = json::array();
+        std::unordered_set<int64_t> impacted_file_ids;
+
+        for (const auto& diff : diffs) {
+            changed_files.push_back(diff.path);
+            if (diff.hunks.empty()) continue;
+
+            auto fid_res = ctx.db->conn().Query(
+                "SELECT id FROM files WHERE path = '" + sql_escape(diff.path) + "'");
+            if (fid_res->HasError() || fid_res->RowCount() == 0) continue;
+            int64_t file_id = fid_res->GetValue<int64_t>(0, 0);
+
+            for (const auto& hunk : diff.hunks) {
+                auto sym_res = ctx.db->conn().Query(
+                    "SELECT s.name, s.kind, s.start_line, s.end_line, s.signature "
+                    "FROM symbols s WHERE s.file_id = " + std::to_string(file_id) +
+                    " AND s.start_line <= " + std::to_string(hunk.end_line) +
+                    " AND s.end_line   >= " + std::to_string(hunk.start_line));
+                if (sym_res->HasError()) continue;
+                auto& sr = *sym_res;
+                for (duckdb::idx_t i = 0; i < sr.RowCount(); i++) {
+                    affected_symbols.push_back({
+                        {"name",       sr.GetValue(0, i).ToString()},
+                        {"kind",       sr.GetValue(1, i).ToString()},
+                        {"file",       diff.path},
+                        {"start_line", sr.GetValue(2, i).GetValue<int32_t>()},
+                        {"end_line",   sr.GetValue(3, i).GetValue<int32_t>()},
+                        {"signature",  sr.GetValue(4, i).ToString()}
+                    });
+                }
+            }
+
+            impacted_file_ids.insert(file_id);
+            auto it = ctx.graph.incoming.find(file_id);
+            if (it != ctx.graph.incoming.end())
+                for (int64_t src : it->second) impacted_file_ids.insert(src);
+        }
+
+        std::unordered_set<std::string> changed_set(changed_files.begin(), changed_files.end());
+        json impacted = json::array();
+        for (int64_t fid : impacted_file_ids) {
+            auto pit = ctx.graph.id_to_path.find(fid);
+            if (pit != ctx.graph.id_to_path.end() && !changed_set.count(pit->second))
+                impacted.push_back(pit->second);
+        }
+
+        return make_tool_result({
+            {"ref",              ref},
+            {"changed_files",    changed_files},
+            {"affected_symbols", affected_symbols},
+            {"impacted_files",   impacted},
+            {"summary", std::to_string(changed_files.size()) + " files changed, " +
+                        std::to_string(affected_symbols.size()) + " symbols affected, " +
+                        std::to_string(impacted.size()) + " files impacted"}
+        });
+    }
+
+    if (name == "route_map") {
+        if (!ctx.db_ready())
+            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+
+        // Trigger route indexing if not done (or if index_routes enabled)
+        if (ctx.cfg.project_cfg.index_routes) {
+            try { axon::index_routes(ctx.cfg, *ctx.db); } catch (...) {}
+        }
+
+        std::string framework_filter = args.value("framework", "");
+        auto routes = axon::get_all_routes(*ctx.db);
+
+        json routes_json = json::array();
+        for (const auto& r : routes) {
+            if (!framework_filter.empty() && r.framework != framework_filter) continue;
+            routes_json.push_back({
+                {"method",       r.method},
+                {"path",         r.path},
+                {"handler_file", r.handler_file},
+                {"framework",    r.framework}
+            });
+        }
+        return make_tool_result({
+            {"routes", routes_json},
+            {"total",  (int)routes_json.size()},
+            {"note", routes_json.empty()
+                ? "No routes found. Set index_routes=true in .axon/config.toml and run run_pipeline."
+                : ""}
+        });
+    }
+
+    if (name == "api_impact") {
+        if (!ctx.db_ready())
+            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+
+        std::string route_path = args.value("route_path", "");
+        if (route_path.empty())
+            return make_tool_result({{"error","route_path is required"}}, true);
+
+        // Find route in DB
+        auto rr = ctx.db->conn().Query(
+            "SELECT method, path, handler_file, framework, file_id "
+            "FROM routes WHERE path = '" + sql_escape(route_path) + "' LIMIT 1");
+        if (rr->HasError() || rr->RowCount() == 0)
+            return make_tool_result({
+                {"error", "Route not found: " + route_path},
+                {"hint", "Run route_map to list available routes, or enable index_routes in config."}
+            }, true);
+
+        std::string handler_file = rr->GetValue(2, 0).ToString();
+        int64_t file_id = rr->GetValue<int64_t>(4, 0);
+
+        // Collect files impacted by changes to this handler
+        json impacted = json::array();
+        std::unordered_set<int64_t> visited;
+        std::queue<int64_t> q;
+        q.push(file_id);
+        while (!q.empty()) {
+            int64_t fid = q.front(); q.pop();
+            if (!visited.insert(fid).second) continue;
+            auto it = ctx.graph.incoming.find(fid);
+            if (it != ctx.graph.incoming.end())
+                for (int64_t src : it->second) q.push(src);
+        }
+        visited.erase(file_id);  // exclude the handler itself
+        for (int64_t fid : visited) {
+            auto pit = ctx.graph.id_to_path.find(fid);
+            if (pit != ctx.graph.id_to_path.end())
+                impacted.push_back(pit->second);
+        }
+
+        return make_tool_result({
+            {"route",        {{"method", rr->GetValue(0,0).ToString()},
+                              {"path",   route_path},
+                              {"framework", rr->GetValue(3,0).ToString()}}},
+            {"handler_file", handler_file},
+            {"impacted_files", impacted},
+            {"impacted_count", (int)impacted.size()}
+        });
+    }
+
+    if (name == "group_list") {
+        auto reg = axon::load_registry();
+        json repos_arr = json::array();
+        for (auto& r : reg.repos) {
+            repos_arr.push_back({{"name", r.name}, {"root", r.root}, {"db_path", r.db_path}});
+        }
+        json groups_arr = json::array();
+        for (auto& [gname, members] : reg.groups) {
+            groups_arr.push_back({{"name", gname}, {"repos", members}});
+        }
+        return make_tool_result({{"repos", repos_arr}, {"groups", groups_arr}});
+    }
+
+    if (name == "group_impact") {
+        std::string file_arg = args.value("file", "");
+        if (file_arg.empty())
+            return make_tool_result({{"error","file is required"}}, true);
+
+        std::string group_filter = args.value("group", "");
+        auto reg = axon::load_registry();
+
+        // Determine the stem of the target file for cross-repo matching
+        std::filesystem::path file_path(file_arg);
+        std::string stem = file_path.stem().string();
+
+        // Determine repos to scan
+        std::vector<axon::RepoEntry> repos_to_scan;
+        if (!group_filter.empty()) {
+            repos_to_scan = axon::get_group_repos(reg, group_filter);
+        } else {
+            repos_to_scan = axon::get_repos(reg);
+        }
+
+        // Exclude the current repo
+        std::string current_root = ctx.cfg.project_root.string();
+        json cross_impact = json::array();
+
+        for (const auto& r : repos_to_scan) {
+            if (r.root == current_root) continue;
+            if (!std::filesystem::exists(r.db_path)) continue;
+
+            try {
+                duckdb::DuckDB other_db(r.db_path);
+                duckdb::Connection other_conn(other_db);
+
+                std::string sql =
+                    "SELECT DISTINCT f.path FROM files f "
+                    "JOIN edges e ON e.from_id = f.id "
+                    "JOIN files f2 ON e.to_id = f2.id "
+                    "WHERE f2.path LIKE '%" + sql_escape(stem) + "%' LIMIT 50";
+
+                auto res = other_conn.Query(sql);
+                if (res->HasError()) continue;
+
+                json impacted = json::array();
+                for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
+                    impacted.push_back(res->GetValue(0, i).ToString());
+                }
+                cross_impact.push_back({
+                    {"repo",           r.name},
+                    {"repo_root",      r.root},
+                    {"impacted_files", impacted}
+                });
+            } catch (...) {
+                // Skip repos with inaccessible/corrupt DBs
+            }
+        }
+
+        return make_tool_result({
+            {"file",         file_arg},
+            {"stem",         stem},
+            {"group_filter", group_filter},
+            {"cross_repo_impact", cross_impact}
         });
     }
 

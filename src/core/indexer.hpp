@@ -20,7 +20,8 @@ using ProgressCallback = std::function<void(const std::string& current_file, int
 IndexStats index_project(
     const Config& cfg,
     Database& db,
-    ProgressCallback on_progress = nullptr);
+    ProgressCallback on_progress = nullptr,
+    bool force = false);
 
 // Incrementally index only the given files (no filesystem walk).
 // Paths may be absolute or relative to cfg.project_root; both are accepted.
