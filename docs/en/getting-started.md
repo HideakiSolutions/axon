@@ -9,11 +9,14 @@ This guide walks you through installing axon, indexing your first project, and u
 ```mermaid
 flowchart TD
     A[axon index /path/to/project] --> B[(DuckDB index)]
+    A2[.axon/config.toml<br/>granularity=symbol] -->|opt-in| A
+    A3[axon index --force] -->|reprocess unchanged files| A
     B --> C{How to serve?}
-    C -->|stdio MCP| D[axon serve\nClaude Code MCP]
-    C -->|HTTP REST| E[axon serve --http\naxon-web frontend]
-    E -->|--all flag| F[Aggregate all\nregistered repos]
-    E -->|--group=name| G[Aggregate\nnamed group]
+    C -->|stdio MCP| D[axon serve<br/>Claude Code MCP]
+    C -->|HTTP REST| E[axon serve --http<br/>axon-web frontend]
+    E -->|--all flag| F[Aggregate all<br/>registered repos]
+    E -->|--group=name| G[Aggregate<br/>named group]
+    E -->|?mode=symbol| H[Symbol-level graph<br/>function/class/method nodes]
 ```
 
 ## Glossary
@@ -30,6 +33,9 @@ flowchart TD
 | **Group** | A named set of repos in the registry, used with `--group=<name>` for targeted aggregation |
 | **Write-through** | Axon hooks that auto-reindex files after every `Edit`/`Write` in Claude Code |
 | **MCP** | Model Context Protocol — the stdio JSON-RPC protocol Claude Code uses to talk to axon |
+| **Granularity** | `"file"` (default) emits file-to-file edges; `"symbol"` adds tree-sitter call graph extraction — `kind='calls'` edges with `from_symbol`/`to_symbol` populated |
+| **Call site** | A `call_expression` AST node — recorded as `CallSite{caller, callee, line}`; the caller is the smallest enclosing symbol whose line range contains it |
+| **Symbol BFS** | Breadth-first traversal over `symbol_incoming` (callers). Expands a pivot symbol to its caller symbols (depth=1) for the capsule |
 
 ---
 
@@ -173,6 +179,29 @@ axon serve --http --port=7070 &
 # In axon-web directory:
 npm run dev
 # Open http://localhost:5173
+```
+
+### 6. (Optional) Enable symbol-level granularity
+
+By default, axon indexes file-level edges. Symbol-level edges (`kind='calls'`) unlock the granular BFS in `get_context_capsule` — pivots expand to their callers, and the capsule extracts only matched symbol bodies instead of full files.
+
+To enable, create `.axon/config.toml` in your project root:
+
+```toml
+granularity = "symbol"
+```
+
+Then force-reindex so the existing files get the new edge resolution:
+
+```bash
+axon index --force
+```
+
+Verify the call graph was populated:
+
+```bash
+curl -s "http://localhost:7070/api/graph?mode=symbol" | jq '.edges | length'
+# Should print > 0 once symbol-level edges exist
 ```
 
 ---

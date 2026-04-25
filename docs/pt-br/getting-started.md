@@ -9,11 +9,14 @@ Este guia orienta a instalação do axon, indexação do primeiro projeto e uso 
 ```mermaid
 flowchart TD
     A[axon index /caminho/do/projeto] --> B[(Índice DuckDB)]
+    A2[.axon/config.toml<br/>granularity=symbol] -->|opt-in| A
+    A3[axon index --force] -->|reprocessa arquivos inalterados| A
     B --> C{Como servir?}
-    C -->|stdio MCP| D[axon serve\nClaude Code MCP]
-    C -->|HTTP REST| E[axon serve --http\nfrontend axon-web]
-    E -->|flag --all| F[Agrega todos os\nrepos registrados]
-    E -->|--group=nome| G[Agrega grupo\nnomeado]
+    C -->|stdio MCP| D[axon serve<br/>Claude Code MCP]
+    C -->|HTTP REST| E[axon serve --http<br/>frontend axon-web]
+    E -->|flag --all| F[Agrega todos os<br/>repos registrados]
+    E -->|--group=nome| G[Agrega grupo<br/>nomeado]
+    E -->|?mode=symbol| H[Grafo symbol-level<br/>nós são function/class/method]
 ```
 
 ## Glossário
@@ -30,6 +33,9 @@ flowchart TD
 | **Grupo** | Conjunto nomeado de repos no registro, usado com `--group=<nome>` |
 | **Write-through** | Hooks do axon que reindexam arquivos automaticamente após cada `Edit`/`Write` no Claude Code |
 | **MCP** | Model Context Protocol — protocolo stdio JSON-RPC que o Claude Code usa para falar com o axon |
+| **Granularidade** | `"file"` (padrão) emite arestas arquivo-a-arquivo; `"symbol"` adiciona extração do call graph via tree-sitter — arestas `kind='calls'` com `from_symbol`/`to_symbol` populados |
+| **Call site** | Nó AST `call_expression` — registrado como `CallSite{caller, callee, line}`; o caller é o menor símbolo cuja faixa de linhas contém a chamada |
+| **Symbol BFS** | Travessia em largura sobre `symbol_incoming` (chamadores). Expande um pivô para os símbolos que o chamam (depth=1) na cápsula |
 
 ---
 
@@ -112,6 +118,22 @@ axon status
 # 3. Iniciar o servidor MCP
 axon serve
 ```
+
+### (Opcional) Habilitar granularidade symbol-level
+
+Por padrão, o axon emite apenas arestas arquivo-a-arquivo. Para habilitar o call graph (arestas `kind='calls'` com `from_symbol`/`to_symbol`), crie `.axon/config.toml`:
+
+```toml
+granularity = "symbol"
+```
+
+Depois force a reindexação para reprocessar arquivos cujo hash não mudou:
+
+```bash
+axon index --force
+```
+
+Isso ativa o BFS granular em `get_context_capsule` — pivôs expandem para seus chamadores, e a cápsula extrai apenas os corpos dos símbolos relevantes em vez de arquivos inteiros.
 
 ---
 

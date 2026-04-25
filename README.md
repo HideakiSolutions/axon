@@ -176,9 +176,12 @@ axon serve --http --port=7070 --group=hideakisolutions
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/graph` | Full node+edge graph (JSON) |
+| `GET` | `/api/graph` | Full node+edge graph (file-level by default) |
+| `GET` | `/api/graph?mode=symbol` | Symbol-level graph: nodes are functions/classes/methods/interfaces/types/structs/namespaces |
 | `GET` | `/api/symbol/:id` | Symbol detail with callers |
 | `GET` | `/api/search?q=` | Full-text + semantic search |
+| `GET` | `/api/observations?q=&limit=` | List or semantic-search saved observations |
+| `GET` | `/api/capsule?q=&budget=&pivots=` | Assemble token-budget context capsule |
 
 The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend consumes this API to render an interactive force-directed graph with per-repo filtering, file tree navigation, impact analysis, memory index, and context capsule views (Axon Surgical Dark design system).
 
@@ -308,6 +311,11 @@ export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
 # 1. Index your project
 axon index /path/to/your-project
 
+# 1a. (Optional) Force re-resolution of edges/symbols even when file hashes are unchanged
+#     Required after changing .axon/config.toml granularity or after edits outside the
+#     write-through hook flow.
+axon index --force
+
 # 2. Check what was indexed
 axon status
 
@@ -318,6 +326,18 @@ axon serve
 axon serve --http --port=7070
 # Then open http://localhost:5173 with axon-web running
 ```
+
+### Project config — symbol-level granularity
+
+Create `.axon/config.toml` in your project root to opt into symbol-level edges:
+
+```toml
+granularity = "symbol"   # default: "file"
+```
+
+When set, `axon index` runs the tree-sitter call graph extraction pass and populates `kind='calls'` edges with `from_symbol`/`to_symbol`. This unlocks the granular BFS path in `get_context_capsule` and the `?mode=symbol` HTTP endpoint.
+
+Run `axon index --force` after toggling this setting so that already-indexed files are reprocessed.
 
 Install axon into a Claude Code project (wires hooks + injects workflow guide):
 
@@ -391,9 +411,15 @@ graph TD
 ```sql
 files        (id, path, language, hash, byte_size, indexed_at)
 symbols      (id, file_id, name, kind, start_line, end_line, signature, docstring, embedding FLOAT[768])
-edges        (id, from_file, to_file, from_symbol, to_symbol, kind)
+edges        (id, from_file, to_file, from_symbol, to_symbol, kind)  -- kind: imports | calls | extends
 observations (id, content, file_path, embedding FLOAT[768], created_at)
 ```
+
+`from_symbol`/`to_symbol` are populated by:
+- **Import resolution** (`kind='imports'`) — tries to match the import leaf name against a symbol with the same name on either side
+- **Call graph extraction** (`kind='calls'`) — tree-sitter walks every function body and emits one edge per call site, with `from_symbol = enclosing function`, `to_symbol = matched callee anywhere in the project`
+
+Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots expand to their callers (depth=1), giving the LLM a focused map of relationships instead of full files.
 
 ---
 
@@ -418,13 +444,17 @@ observations (id, content, file_path, embedding FLOAT[768], created_at)
 | Feature | Status | Notes |
 |---------|--------|-------|
 | 15 MCP tools | ✅ Done | Including multi-repo + git diff tools |
-| HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree |
+| HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
+| Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |
+| Symbol-granular capsule rendering | ✅ Done | `assemble_capsule` extracts only matched symbol bodies (signature + lines), not full files |
+| Worktree exclusion + sweep purge | ✅ Done | `.worktrees/` ignored; `axon index` purges newly-ignored entries from DB |
+| `axon index --force` | ✅ Done | Rebuild edges/symbols even when file hash unchanged |
 | File watcher (inotify/FSEvents) | 🔄 Planned | Reindex on edits outside Claude Code |
-| Symbol-granular edges | 🔄 Planned | Populate `from_symbol`/`to_symbol` — improves `get_callers` precision |
 | HNSW vector index (DuckDB VSS) | 🔄 Planned | Projects > 100k symbols |
 | Filtered tags in `search_memory` | 🔄 Planned | |
 | Capsule cache by query hash | 🔄 Planned | |
+| Caller resolution beyond name match | 🔄 Planned | Type-aware resolution for overloaded callees |
 
 ---
 
