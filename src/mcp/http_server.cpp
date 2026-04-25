@@ -1,5 +1,6 @@
 #include "http_server.hpp"
 #include "../core/git.hpp"
+#include "../core/registry.hpp"
 #include <nlohmann/json.hpp>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -86,7 +87,7 @@ static std::string url_decode(const std::string& s) {
 
 static std::string handle_request(const std::string& method, const std::string& path,
                                   const std::string& query, const std::string& body,
-                                  ServerContext& ctx) {
+                                  ServerContext& ctx, const HttpConfig& cfg) {
     // Escape SQL strings
     auto sq = [](const std::string& s) {
         std::string out;
@@ -121,6 +122,58 @@ static std::string handle_request(const std::string& method, const std::string& 
                                  {"source", from_it->second},
                                  {"target", to_it->second},
                                  {"kind", "imports"}});
+            }
+        }
+
+        // Aggregate extra repos if --group or --all was specified
+        std::vector<axon::RepoEntry> extra_repos;
+        if (cfg.all_repos) {
+            auto reg = axon::load_registry();
+            extra_repos = axon::get_repos(reg);
+        } else if (!cfg.group.empty()) {
+            auto reg = axon::load_registry();
+            extra_repos = axon::get_group_repos(reg, cfg.group);
+        }
+
+        for (auto& repo : extra_repos) {
+            if (repo.db_path == ctx.cfg.db_path.string()) continue; // skip self
+            try {
+                duckdb::DuckDB other_db(repo.db_path);
+                duckdb::Connection other_conn(other_db);
+
+                // Query nodes
+                auto res = other_conn.Query(
+                    "SELECT f.path, COUNT(DISTINCT e_out.to_id) + COUNT(DISTINCT e_in.from_id) as degree "
+                    "FROM files f "
+                    "LEFT JOIN edges e_out ON e_out.from_id = f.id "
+                    "LEFT JOIN edges e_in ON e_in.to_id = f.id "
+                    "GROUP BY f.path");
+                if (!res->HasError()) {
+                    for (size_t i = 0; i < res->RowCount(); i++) {
+                        std::string path = repo.name + "/" + res->GetValue(0, i).ToString();
+                        int degree = std::stoi(res->GetValue(1, i).ToString());
+                        std::string label = fs::path(path).filename().string();
+                        nodes.push_back({{"id", path}, {"label", label}, {"degree", degree},
+                                         {"path", path}, {"size", degree}, {"kind", "file"},
+                                         {"repo", repo.name}});
+                    }
+                }
+
+                // Query edges
+                auto eres = other_conn.Query(
+                    "SELECT f1.path, f2.path FROM edges e "
+                    "JOIN files f1 ON e.from_id = f1.id "
+                    "JOIN files f2 ON e.to_id = f2.id");
+                if (!eres->HasError()) {
+                    for (size_t i = 0; i < eres->RowCount(); i++) {
+                        std::string from = repo.name + "/" + eres->GetValue(0, i).ToString();
+                        std::string to   = repo.name + "/" + eres->GetValue(1, i).ToString();
+                        edges.push_back({{"id", from + "->" + to}, {"source", from}, {"target", to},
+                                         {"kind", "imports"}, {"repo", repo.name}});
+                    }
+                }
+            } catch (...) {
+                // skip unreachable repo DB silently
             }
         }
 
@@ -316,7 +369,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             if (method == "OPTIONS") {
                 response_body = "";
             } else {
-                response_body = handle_request(method, path, query, body, ctx);
+                response_body = handle_request(method, path, query, body, ctx, cfg);
             }
             build_response(client_fd, 200, response_body);
         }

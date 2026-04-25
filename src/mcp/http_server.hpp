@@ -7,6 +7,8 @@ namespace axon::mcp {
 struct HttpConfig {
     std::string host = "127.0.0.1";
     int         port = 7070;
+    std::string group;        // if set, serve aggregate of this group
+    bool        all_repos = false; // if true, serve all registered repos
 };
 
 // Runs a simple HTTP/1.1 server exposing:

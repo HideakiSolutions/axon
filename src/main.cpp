@@ -24,7 +24,7 @@ Usage:
   axon index  [path]                    Index project (parse + graph + embeddings)
   axon index-paths <files...> [--prune] Incrementally reindex specific files
                                         (--prune alone = only sweep deleted files)
-  axon serve  [--http] [--port=7070] [--host=127.0.0.1]
+  axon serve  [--http] [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
                                         Start MCP server (stdio default; --http for REST API)
   axon capsule <query>                  Print context capsule for a query
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
@@ -146,12 +146,16 @@ int main(int argc, char* argv[]) {
         bool use_http = false;
         std::string http_host = "127.0.0.1";
         int http_port = 7070;
+        std::string http_group;
+        bool http_all_repos = false;
 
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
             if (a == "--http") use_http = true;
             else if (a.rfind("--port=", 0) == 0) http_port = std::stoi(a.substr(7));
             else if (a.rfind("--host=", 0) == 0) http_host = a.substr(7);
+            else if (a.rfind("--group=", 0) == 0) http_group = a.substr(8);
+            else if (a == "--all") http_all_repos = true;
         }
 
         auto cfg = load_config();
@@ -174,6 +178,8 @@ int main(int argc, char* argv[]) {
             axon::mcp::HttpConfig http_cfg;
             http_cfg.host = http_host;
             http_cfg.port = http_port;
+            http_cfg.group = http_group;
+            http_cfg.all_repos = http_all_repos;
             axon::mcp::run_http(ctx, http_cfg);
         } else {
             axon::mcp::run_stdio(ctx);
