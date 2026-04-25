@@ -180,7 +180,7 @@ axon serve --http --port=7070 --group=hideakisolutions
 | `GET` | `/api/symbol/:id` | Symbol detail with callers |
 | `GET` | `/api/search?q=` | Full-text + semantic search |
 
-The companion [axon-web](../axon-web) frontend consumes this API to render an interactive force-directed graph with per-repo filtering and file tree navigation.
+The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend consumes this API to render an interactive force-directed graph with per-repo filtering, file tree navigation, impact analysis, memory index, and context capsule views (Axon Surgical Dark design system).
 
 ---
 
