@@ -20,6 +20,8 @@ struct DependencyGraph {
     std::unordered_map<int64_t, std::string>          id_to_path;
     std::unordered_map<std::string, int64_t>          path_to_id;
     std::unordered_map<int64_t, int64_t>              file_byte_size;
+    // Symbol-level adjacency (populated when granularity=symbol edges exist)
+    std::unordered_map<int64_t, std::vector<int64_t>> symbol_incoming;
 
     int degree(int64_t file_id) const;
 

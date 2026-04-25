@@ -523,13 +523,36 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 }
             }
 
+            // Symbol-level callers (populated when granularity=symbol)
+            json caller_symbols = json::array();
+            int64_t sym_id = sm.GetValue<int64_t>(0, i);
+            auto sym_it = ctx.graph.symbol_incoming.find(sym_id);
+            if (sym_it != ctx.graph.symbol_incoming.end()) {
+                for (int64_t src_sym_id : sym_it->second) {
+                    // Buscar detalhes do símbolo chamador
+                    auto src_res = ctx.db->conn().Query(
+                        "SELECT s.name, s.kind, f.path, s.start_line "
+                        "FROM symbols s JOIN files f ON s.file_id = f.id "
+                        "WHERE s.id = " + std::to_string(src_sym_id));
+                    if (!src_res->HasError() && src_res->RowCount() > 0) {
+                        caller_symbols.push_back({
+                            {"name", src_res->GetValue(0, 0).ToString()},
+                            {"kind", src_res->GetValue(1, 0).ToString()},
+                            {"file", src_res->GetValue(2, 0).ToString()},
+                            {"line", src_res->GetValue(3, 0).GetValue<int32_t>()}
+                        });
+                    }
+                }
+            }
+
             matches.push_back({
-                {"symbol",     sm.GetValue(2, i).ToString()},
-                {"kind",       sm.GetValue(3, i).ToString()},
-                {"file",       callee_file},
-                {"line",       sm.GetValue(4, i).GetValue<int32_t>()},
-                {"signature",  sm.GetValue(5, i).ToString()},
-                {"caller_files", callers}
+                {"symbol",         sm.GetValue(2, i).ToString()},
+                {"kind",           sm.GetValue(3, i).ToString()},
+                {"file",           callee_file},
+                {"line",           sm.GetValue(4, i).GetValue<int32_t>()},
+                {"signature",      sm.GetValue(5, i).ToString()},
+                {"caller_files",   callers},
+                {"caller_symbols", caller_symbols}
             });
             if (total_callers >= limit) break;
         }
@@ -537,7 +560,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         return make_tool_result({
             {"symbol_name",    sym_name},
             {"matches",        matches},
-            {"note", "Callers are file-granular (files importing the defining file). Use get_skeleton(caller_files) to narrow to specific call sites."}
+            {"note", "caller_files: files importing the defining file. caller_symbols: symbol-level callers (populated when granularity=symbol). Use get_skeleton(caller_files) to narrow to specific call sites."}
         });
     }
 

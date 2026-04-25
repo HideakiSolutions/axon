@@ -65,6 +65,9 @@ void Database::run_migrations() {
          "  embedding  FLOAT[768],"
          "  created_at TIMESTAMP NOT NULL DEFAULT now()"
          ")");
+
+    // Index for O(1) symbol-level edge resolution
+    try { exec("CREATE INDEX IF NOT EXISTS idx_symbols_file_name ON symbols(file_id, name)"); } catch (...) {}
 }
 
 } // namespace axon

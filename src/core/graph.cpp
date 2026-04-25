@@ -80,6 +80,18 @@ DependencyGraph load_graph(Database& db) {
         g.outgoing[from].push_back(to);
         g.incoming[to].push_back(from);
     }
+
+    // Load symbol-level incoming edges when available
+    auto sym_res = dq(conn, "SELECT from_symbol, to_symbol FROM edges "
+                             "WHERE from_symbol IS NOT NULL AND to_symbol IS NOT NULL");
+    if (!sym_res->HasError()) {
+        auto& sym_edges = *sym_res;
+        for (duckdb::idx_t i = 0; i < sym_edges.RowCount(); i++) {
+            int64_t from_sym = sym_edges.GetValue<int64_t>(0, i);
+            int64_t to_sym   = sym_edges.GetValue<int64_t>(1, i);
+            g.symbol_incoming[to_sym].push_back(from_sym);
+        }
+    }
     return g;
 }
 

@@ -198,13 +198,56 @@ static int64_t resolve_specifier_to_file(duckdb::Connection& conn,
 }
 
 static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
-                          const std::vector<ImportEdge>& imports)
+                          const std::vector<ImportEdge>& imports,
+                          bool symbol_mode)
 {
     if (imports.empty()) return;
     for (const auto& edge : imports) {
         int64_t to_id = resolve_specifier_to_file(conn, edge.to_specifier, from_id);
         if (to_id == 0) continue;
-        conn.Query("INSERT INTO edges (id, from_file, to_file, kind) VALUES (nextval('seq_id'), " + std::to_string(from_id) + ", " + std::to_string(to_id) + ", '" + sq(edge.kind) + "')");
+
+        // Insert file-level edge
+        auto ins = conn.Query(
+            "INSERT INTO edges (id, from_file, to_file, kind) VALUES (nextval('seq_id'), " +
+            std::to_string(from_id) + ", " + std::to_string(to_id) +
+            ", '" + sq(edge.kind) + "') RETURNING id");
+
+        if (!symbol_mode || ins->HasError() || ins->RowCount() == 0) continue;
+
+        int64_t edge_id = ins->GetValue<int64_t>(0, 0);
+
+        // Extract leaf token from specifier as candidate symbol name
+        // e.g. "utils" → "utils", "./auth/parseUser" → "parseUser"
+        std::string spec = edge.to_specifier;
+        size_t slash = spec.find_last_of("/\\");
+        if (slash != std::string::npos) spec = spec.substr(slash + 1);
+        // Strip extension if present (e.g. "utils.js" → "utils")
+        size_t dot = spec.find_last_of('.');
+        if (dot != std::string::npos && dot > 0) spec = spec.substr(0, dot);
+        if (spec.empty()) continue;
+
+        // Try to find a symbol in from_file matching the specifier leaf
+        auto from_sym = conn.Query(
+            "SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
+            " AND name = '" + sq(spec) + "' LIMIT 1");
+        int64_t from_sym_id = (!from_sym->HasError() && from_sym->RowCount() > 0)
+                              ? from_sym->GetValue<int64_t>(0, 0) : 0;
+
+        // Try to find a symbol in to_file with matching name
+        auto to_sym = conn.Query(
+            "SELECT id FROM symbols WHERE file_id = " + std::to_string(to_id) +
+            " AND name = '" + sq(spec) + "' LIMIT 1");
+        int64_t to_sym_id = (!to_sym->HasError() && to_sym->RowCount() > 0)
+                            ? to_sym->GetValue<int64_t>(0, 0) : 0;
+
+        if (from_sym_id > 0 || to_sym_id > 0) {
+            std::string upd = "UPDATE edges SET ";
+            if (from_sym_id > 0) upd += "from_symbol = " + std::to_string(from_sym_id);
+            if (from_sym_id > 0 && to_sym_id > 0) upd += ", ";
+            if (to_sym_id > 0)   upd += "to_symbol = " + std::to_string(to_sym_id);
+            upd += " WHERE id = " + std::to_string(edge_id);
+            conn.Query(upd);
+        }
     }
 }
 
@@ -280,7 +323,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
         auto& mat = *res;
         if (mat.RowCount() == 0) continue;
         int64_t fid = mat.GetValue<int64_t>(0, 0);
-        resolve_edges(conn, fid, p.imports);
+        resolve_edges(conn, fid, p.imports, cfg.project_cfg.granularity == "symbol");
     }
     conn.Query("COMMIT");
 
@@ -392,7 +435,7 @@ IndexStats index_files(const Config& cfg, Database& db,
             auto& mat = *res;
             if (mat.RowCount() == 0) continue;
             int64_t fid = mat.GetValue<int64_t>(0, 0);
-            resolve_edges(conn, fid, p.imports);
+            resolve_edges(conn, fid, p.imports, cfg.project_cfg.granularity == "symbol");
         }
         conn.Query("COMMIT");
     }
