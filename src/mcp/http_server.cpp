@@ -1,6 +1,7 @@
 #include "http_server.hpp"
 #include "../core/git.hpp"
 #include "../core/registry.hpp"
+#include "../core/capsule.hpp"
 #include <nlohmann/json.hpp>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -97,6 +98,77 @@ static std::string handle_request(const std::string& method, const std::string& 
 
     // GET /api/graph
     if (method == "GET" && path == "/api/graph") {
+        // Parse query params
+        bool symbol_mode = false;
+        {
+            auto amp = query.find("mode=symbol");
+            if (amp != std::string::npos) symbol_mode = true;
+        }
+
+        // ── SYMBOL MODE ────────────────────────────────────────────────────
+        if (symbol_mode && ctx.db_ready()) {
+            json nodes = json::array();
+            json edges = json::array();
+
+            // Nodes = symbols
+            auto sr = ctx.db->conn().Query(
+                "SELECT s.id, s.name, s.kind, f.path "
+                "FROM symbols s JOIN files f ON s.file_id = f.id");
+            if (!sr->HasError()) {
+                for (duckdb::idx_t i = 0; i < sr->RowCount(); i++) {
+                    std::string sid  = std::to_string(sr->GetValue<int64_t>(0, i));
+                    std::string name = sr->GetValue(1, i).ToString();
+                    std::string kind = sr->GetValue(2, i).ToString();
+                    std::string fpath = sr->GetValue(3, i).ToString();
+                    // Compute rough degree in edges below — use 1 for now, updated after edge scan
+                    nodes.push_back({{"id", sid}, {"label", name}, {"kind", kind},
+                                     {"path", fpath}, {"size", 1}});
+                }
+            }
+
+            // Edges = symbol-to-symbol
+            auto er = ctx.db->conn().Query(
+                "SELECT CAST(e.from_symbol AS VARCHAR), CAST(e.to_symbol AS VARCHAR), e.kind "
+                "FROM edges e "
+                "WHERE e.from_symbol IS NOT NULL AND e.to_symbol IS NOT NULL");
+            if (!er->HasError()) {
+                // Count degrees
+                std::map<std::string, int> deg;
+                for (duckdb::idx_t i = 0; i < er->RowCount(); i++) {
+                    deg[er->GetValue(0, i).ToString()]++;
+                    deg[er->GetValue(1, i).ToString()]++;
+                }
+                // Update sizes
+                for (auto& n : nodes) {
+                    std::string id = n["id"];
+                    if (deg.count(id)) n["size"] = deg[id];
+                }
+                // Reset and re-iterate for edges
+                er = ctx.db->conn().Query(
+                    "SELECT CAST(e.from_symbol AS VARCHAR), CAST(e.to_symbol AS VARCHAR), e.kind "
+                    "FROM edges e "
+                    "WHERE e.from_symbol IS NOT NULL AND e.to_symbol IS NOT NULL");
+                if (!er->HasError()) {
+                    for (duckdb::idx_t i = 0; i < er->RowCount(); i++) {
+                        std::string from = er->GetValue(0, i).ToString();
+                        std::string to   = er->GetValue(1, i).ToString();
+                        std::string kind = er->GetValue(2, i).ToString();
+                        edges.push_back({{"id", from + "->" + to},
+                                         {"source", from}, {"target", to}, {"kind", kind}});
+                    }
+                }
+            }
+
+            json meta = {
+                {"files",   (int)nodes.size()},
+                {"symbols", (int)nodes.size()},
+                {"edges",   (int)edges.size()},
+                {"project", ctx.cfg.project_root.filename().string()}
+            };
+            return json{{"nodes", nodes}, {"edges", edges}, {"meta", meta}}.dump();
+        }
+
+        // ── FILE MODE (default) ────────────────────────────────────────────
         json nodes = json::array();
         json edges = json::array();
 
@@ -112,16 +184,41 @@ static std::string handle_request(const std::string& method, const std::string& 
                              {"path", fpath}, {"size", deg}, {"kind", "file"}});
         }
 
-        for (const auto& [from_id, targets] : ctx.graph.outgoing) {
-            auto from_it = ctx.graph.id_to_path.find(from_id);
-            if (from_it == ctx.graph.id_to_path.end()) continue;
-            for (int64_t to_id : targets) {
-                auto to_it = ctx.graph.id_to_path.find(to_id);
-                if (to_it == ctx.graph.id_to_path.end()) continue;
-                edges.push_back({{"id", from_it->second + "->" + to_it->second},
-                                 {"source", from_it->second},
-                                 {"target", to_it->second},
-                                 {"kind", "imports"}});
+        // Prefer DB query to get symbol-granular edge info; fall back to in-memory
+        if (ctx.db_ready()) {
+            auto eres = ctx.db->conn().Query(
+                "SELECT f1.path, f2.path, e.kind, s1.name, s2.name "
+                "FROM edges e "
+                "JOIN files f1 ON e.from_file = f1.id "
+                "JOIN files f2 ON e.to_file   = f2.id "
+                "LEFT JOIN symbols s1 ON e.from_symbol = s1.id "
+                "LEFT JOIN symbols s2 ON e.to_symbol   = s2.id");
+            if (!eres->HasError()) {
+                for (duckdb::idx_t i = 0; i < eres->RowCount(); i++) {
+                    std::string from = eres->GetValue(0, i).ToString();
+                    std::string to   = eres->GetValue(1, i).ToString();
+                    std::string kind = eres->GetValue(2, i).ToString();
+                    json edge = {{"id", from + "->" + to}, {"source", from},
+                                 {"target", to}, {"kind", kind}};
+                    auto fsym = eres->GetValue(3, i);
+                    auto tsym = eres->GetValue(4, i);
+                    if (!fsym.IsNull()) edge["from_symbol"] = fsym.ToString();
+                    if (!tsym.IsNull()) edge["to_symbol"]   = tsym.ToString();
+                    edges.push_back(edge);
+                }
+            }
+        } else {
+            for (const auto& [from_id, targets] : ctx.graph.outgoing) {
+                auto from_it = ctx.graph.id_to_path.find(from_id);
+                if (from_it == ctx.graph.id_to_path.end()) continue;
+                for (int64_t to_id : targets) {
+                    auto to_it = ctx.graph.id_to_path.find(to_id);
+                    if (to_it == ctx.graph.id_to_path.end()) continue;
+                    edges.push_back({{"id", from_it->second + "->" + to_it->second},
+                                     {"source", from_it->second},
+                                     {"target", to_it->second},
+                                     {"kind", "imports"}});
+                }
             }
         }
 
@@ -328,6 +425,87 @@ static std::string handle_request(const std::string& method, const std::string& 
                    {"affected_symbols", affected_symbols}}.dump();
     }
 
+    // GET /api/observations?q=<text>&limit=N
+    if (method == "GET" && path == "/api/observations") {
+        json obs = json::array();
+        if (ctx.db_ready()) {
+            std::string q = url_decode(get_query_param(query, "q"));
+            std::string limit_str = get_query_param(query, "limit");
+            int limit = limit_str.empty() ? 10 : std::stoi(limit_str);
+
+            if (!q.empty() && ctx.model_ready()) {
+                auto emb = ctx.model->embed(q);
+                std::ostringstream vs;
+                vs << "[";
+                for (size_t i = 0; i < emb.size(); i++) { if (i) vs << ","; vs << emb[i]; }
+                vs << "]";
+                auto res = ctx.db->conn().Query(
+                    "SELECT id, content, file_path, created_at FROM observations "
+                    "WHERE embedding IS NOT NULL "
+                    "ORDER BY array_cosine_similarity(embedding, " + vs.str() + "::FLOAT[768]) DESC "
+                    "LIMIT " + std::to_string(limit));
+                if (!res->HasError())
+                    for (duckdb::idx_t i = 0; i < res->RowCount(); i++)
+                        obs.push_back({{"id",         res->GetValue<int64_t>(0, i)},
+                                      {"content",    res->GetValue(1, i).ToString()},
+                                      {"file_path",  res->GetValue(2, i).ToString()},
+                                      {"created_at", res->GetValue(3, i).ToString()}});
+            } else {
+                auto res = ctx.db->conn().Query(
+                    "SELECT id, content, file_path, created_at FROM observations "
+                    "ORDER BY created_at DESC LIMIT " + std::to_string(limit));
+                if (!res->HasError())
+                    for (duckdb::idx_t i = 0; i < res->RowCount(); i++)
+                        obs.push_back({{"id",         res->GetValue<int64_t>(0, i)},
+                                      {"content",    res->GetValue(1, i).ToString()},
+                                      {"file_path",  res->GetValue(2, i).ToString()},
+                                      {"created_at", res->GetValue(3, i).ToString()}});
+            }
+        }
+        return json{{"observations", obs}, {"count", (int)obs.size()}}.dump();
+    }
+
+    // GET /api/capsule?q=<query>&budget=8000&pivots=file1.ts,file2.ts
+    if (method == "GET" && path == "/api/capsule") {
+        std::string q = url_decode(get_query_param(query, "q"));
+        std::string budget_str = get_query_param(query, "budget");
+        std::string pivots_param = url_decode(get_query_param(query, "pivots"));
+        int budget = budget_str.empty() ? 8000 : std::stoi(budget_str);
+
+        if (q.empty() || !ctx.db_ready())
+            return json{{"error", "q parameter required and DB must be ready"}}.dump();
+
+        std::vector<std::string> explicit_pivots;
+        if (!pivots_param.empty()) {
+            std::istringstream ps(pivots_param);
+            std::string pivot;
+            while (std::getline(ps, pivot, ','))
+                if (!pivot.empty()) explicit_pivots.push_back(pivot);
+        }
+
+        if (!ctx.model_ready())
+            return json{{"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}.dump();
+
+        auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model,
+                                              ctx.graph, ctx.cfg.project_root, budget);
+
+        json pivot_files = json::array();
+        for (const auto& f : capsule.pivot_files)
+            pivot_files.push_back({{"path", f.path}, {"content", f.content},
+                                   {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
+
+        json support_files = json::array();
+        for (const auto& f : capsule.support_files)
+            support_files.push_back({{"path", f.path}, {"content", f.content},
+                                     {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
+
+        return json{{"capsule", {{"query",          capsule.query},
+                                 {"pivot_files",    pivot_files},
+                                 {"support_files",  support_files},
+                                 {"token_estimate", capsule.token_estimate},
+                                 {"total_files",    capsule.total_files}}}}.dump();
+    }
+
     return json{{"error","Not found"}}.dump();
 }
 
@@ -353,7 +531,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
     }
     listen(server_fd, 16);
     std::cout << "Axon HTTP API listening on http://" << cfg.host << ":" << cfg.port << "\n";
-    std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  /api/detect-changes\n";
+    std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  /api/detect-changes  /api/observations  /api/capsule\n";
 
     while (g_running) {
         fd_set fds;
