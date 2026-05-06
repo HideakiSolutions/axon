@@ -2,53 +2,93 @@
 
 Session date: 2026-05-06
 Audit plan: `~/.claude/plans/fa-a-uma-an-lise-profunda-idempotent-clarke.md`
-Branch: `feature/audit-fixes-v0.5.1` (8 commits ahead of `develop`)
+Branch: `feature/audit-fixes-v0.5.1` (~22 commits ahead of `develop`)
 
 ## What landed this session (v0.5.1)
 
-| Commit  | Task     | Area                                         |
-|---------|----------|----------------------------------------------|
-| fde49a4 | W2.T05   | `axon --version` / `-V` with git SHA         |
-| 5cf5b00 | W2.T04   | `AXON_EMBEDDING_MODEL`/`TOKEN_BUDGET`/`TELEMETRY` env vars |
-| 3ff02f6 | W2.T03   | `pending-writes.txt` 1 MiB cap with rotation |
-| 0bca347 | W1.T03   | Rust traits, enums, unions, modules, macros; split `impl Trait for T` from inherent impl |
-| f2162df | W1.T02   | Python decorators (`@router.get`, `@dataclass`) into docstring; `async_function` kind |
-| 8a0eceb | W1.T08   | Java records, sealed classes/interfaces, enums, annotation types; `@Annotation`s into docstring |
-| 2fdde05 | W1.T09   | Bash `export`/`readonly`/`declare` variable symbols |
-| 8543d82 | docs     | CHANGELOG `[0.5.1]` section                  |
+### Wave 1 — parser coverage (12/12 langs ✅)
 
-Build: `cmake --build build -j 2` → green.
-Smoke: 18 symbols extracted from a 4-file multi-lang fixture (Python+Rust+Java+Bash); `axon --version` returns `axon 0.5.1 (build <sha>)`; `AXON_TOKEN_BUDGET=4096 axon index` honors env override.
+All 13 language blocks in `src/parser/parser.cpp` refreshed against the audit:
 
-## Remaining audit findings (8 parser langs + 2 engine + W3-W5)
+| Task   | Lang        | New / refined kinds |
+|--------|-------------|---------------------|
+| W1.T01 | TS/JS       | decorators on classes/methods (docstring), `namespace`, `enum`, `async_function` |
+| W1.T02 | Python      | `@deco` lists in docstring, `async_function` |
+| W1.T03 | Rust        | `trait`, `enum`, `union`, `module`, `macro`; `impl Trait for T` vs inherent split |
+| W1.T04 | Go          | `interface`, `struct`, `type_alias` (was all `type`) |
+| W1.T05 | C#          | `property`, `record`, `enum`, `namespace`, `partial_class`, `async_method`, attributes in docstring |
+| W1.T06 | PHP         | `namespace`, `trait`, `interface`, `enum`; `#[Attribute]` in docstring |
+| W1.T07 | Dart        | `mixin`, `extension`, `enum`, `factory`, async-prefixed kinds |
+| W1.T08 | Java        | `record`, `enum`, `annotation_type`, `sealed_class`/`sealed_interface`, `@Annotation` in docstring |
+| W1.T09 | Bash        | `variable` for `export`/`readonly`/`declare`/`typeset` |
+| W1.T10 | C++         | `enum`, `union`, `friend`; `template<…>` in docstring |
+| W1.T11 | Kotlin      | `extension_function`, `suspend_function`, `sealed_class`, `data_class`, `enum_class`, `companion_object`, `type_alias` |
+| W1.T12 | Vue         | one-shot stderr warning when `<script>` lacks `lang` attribute |
 
-Pick up from this branch (or rebase fresh from `develop` if other work landed).
+### Wave 2 — engine quick-wins (4/5 ✅; cache deferred)
 
-### Wave 1 — parser blocks still on the original v0.5.0 implementation
+- W2.T02 ✅ `.axonignore` gitignore-style globbing (`*`, `**`, `?`, `/anchored`, `dir/`, `!negate`)
+- W2.T03 ✅ `pending-writes.txt` 1 MiB cap with flock-safe rotation
+- W2.T04 ✅ `AXON_EMBEDDING_MODEL` / `AXON_TOKEN_BUDGET` / `AXON_TELEMETRY` env-var overrides
+- W2.T05 ✅ `axon --version` / `-V` / `version` with git SHA via CMake `configure_file`
+- W2.T01 ⏳ deferred — capsule cache needs DB schema + JSON serialization + invalidation epoch (separate task)
 
-| Task   | Lang        | Section in `src/parser/parser.cpp` | Headline gaps                                                              |
-|--------|-------------|------------------------------------|----------------------------------------------------------------------------|
-| W1.T01 | TS/JS       | ~313–356                            | decorators (TS), namespaces, generics in signature, JSX/TSX components, `.d.ts` ambient flag, `import()` dynamic |
-| W1.T04 | Go          | ~586–604                            | `interface_type_element`, generics 1.18+ type parameter list               |
-| W1.T05 | C#          | ~402–431                            | `property_declaration`, `attribute_list`, `partial`/`async` flags          |
-| W1.T06 | PHP         | ~433–458                            | `namespace_definition`, `trait_declaration`, PHP 8 `attribute_list`        |
-| W1.T07 | Dart        | ~460–483                            | `mixin_declaration`, `extension_declaration`, `factory_constructor_signature`, async flag |
-| W1.T10 | C++         | ~630–672                            | `template_declaration` in signature, overload `#N` suffix, `friend_declaration`, header vs impl split |
-| W1.T11 | Kotlin      | ~674–704                            | extension functions, `sealed class`, `companion_object`, top-level flag    |
-| W1.T12 | Vue         | ~516–584                            | `<template>` parsing, `<style>` ignored deliberately, warn when `lang` attr absent |
+### Wave 4 — CI/CD partial (2/9 ✅)
 
-**Pattern to copy from this session:** the Rust/Python/Java commits are the reference. Each lang got: new symbol kinds in the existing `if (kind == ...)` chain, a small `collect_<modifier>` lambda for decorators/annotations, and back-compat retained on legacy kinds (`struct_item` stayed `kind="class"` to preserve existing edge queries).
+- W4.T01 ✅ `build.yml` (ubuntu-22.04 + macos-14 matrix, third_party cache, smoke step)
+- W4.T04 ✅ `lint.yml` (shellcheck + clang-format-15 advisory) plus `.clang-format`
+- W4.T02/T03/T05/T06/T07/T08/T09 — open (test.yml, sanitizers.yml, hook logging, build-guard `--parallel`, MCP health, EXIT trap)
 
-### Wave 2 — engine quick-wins still open
+### Wave 5 — packaging partial (5/10 ✅)
 
-- **W2.T01 — capsule cache by query hash.** New table `capsule_cache(query_hash BLAKE3, payload BLOB, created_at TIMESTAMP)` in `src/core/db.cpp`; cache key = BLAKE3(query + "|" + project_epoch). TTL via project config; `--no-cache` flag on the capsule subcommand. Hit ratio target ≥10× speedup for repeated queries.
-- **W2.T02 — `.axonignore` gitignore-style globbing.** Replace the filename-only equality at `src/core/indexer.cpp:20-48` with a recursive matcher supporting `*`, `**`, `?`, leading `/`, and `!negation`. New `src/core/glob.{cpp,hpp}`. Keep back-compat for plain-name patterns.
+- W5.T01 ✅ clean-state audit: README placeholders genericized, `.dev-squad/` confirmed gitignored
+- W5.T02 ✅ `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
+- W5.T03 ✅ `.github/dependabot.yml` (github-actions weekly + submodules monthly)
+- W5.T04 ✅ `release.yml` (tag-driven multi-target tarballs + checksums + auto release notes)
+- W5.T07/T08/T09 ✅ examples: `ts-mini`, `python-mini`, `rust-mini` with per-example READMEs
+- W5.T10 ✅ multi-stage `Dockerfile` (ubuntu builder → debian:12-slim runtime) + `.dockerignore`
+- W5.T05 ⏳ install.sh dependency-detection hardening — open
+- W5.T06 ⏳ telemetry HTTP client — env-var plumbing landed; consent UX/endpoint open
 
-### Waves 3–5 — not started
+### Build + smoke
 
-- **W3 (test foundation)** — GoogleTest+CTest setup, fixtures per language, golden capsule snapshot tests, `tests/e2e/smoke.sh`. Audit confirmed zero unit tests in 4,558 LOC of C++. This is the highest-leverage wave for safety as the project goes public.
-- **W4 (CI/CD + sanitizers)** — `.github/workflows/{build,test,sanitizers,lint,release}.yml`, ASAN/UBSAN nightly, `.clang-format`/`.clang-tidy`. Hooks gain structured `.axon/logs/<hook>.jsonl` with rotation; `axon-build-guard.sh` to cover `cmake --parallel N`.
-- **W5 (public release packaging)** — clean-state audit, `CODE_OF_CONDUCT.md`, `.github/dependabot.yml`, release.yml with multi-platform binaries, hardened install.sh with model download, opt-in telemetry client (env var already wired this session), `examples/{ts-mini,python-mini,rust-mini}`, multi-stage Dockerfile. The W6 roadmap (HNSW, type-aware `resolve_calls`, file watcher) stays out of scope — separate effort.
+- `cmake --build build -j 2` → green twice (after W1+W2 batch, then again unchanged across packaging YAML/MD).
+- `axon --version` → `axon 0.5.1 (build <sha>)`.
+- 12 symbols extracted from a 4-file multi-lang fixture (TS+C#+Dart+Kotlin).
+- `.axonignore` with `*.log`, `**/generated/**`, `!keep.log` correctly skips `foo.log` + `generated/skip.ts` while keeping `keep.log`.
+
+## What remains for v0.6.0
+
+### Priority 1 — needed before public release
+
+- **W3 (test foundation)** — zero unit tests across 4,558 LOC of C++ remains the highest-leverage gap. GoogleTest+CTest via FetchContent, fixtures per language under `tests/fixtures/<lang>/`, golden capsule snapshots, `tests/e2e/smoke.sh` exercising `examples/`. ~17 tasks.
+- **W4.T02 / T03** — `test.yml` (CTest after build, e2e/smoke), `sanitizers.yml` (ASAN/UBSAN nightly).
+- **W5.T05** — `install.sh` robust dependency detection (`jq`, `cmake>=3.20`, `python3`, `git`); embedding-model download with SHA-256 verification.
+
+### Priority 2 — quality, can ship without
+
+- **W2.T01** — capsule cache by query hash. New `capsule_cache` DuckDB table, BLAKE3(query + project_epoch) key, TTL config, `--no-cache` flag.
+- **W4.T06** — structured hook logging (`.axon/logs/<hook>.jsonl` + rotation via shared `_log.sh`).
+- **W4.T07/T08/T09** — `cmake --parallel N` coverage in build-guard, MCP server health probe in auto-index, EXIT trap for post-edit cleanup.
+- **W5.T06** — telemetry HTTP client. The opt-in env var `AXON_TELEMETRY` is already plumbed into `ProjectConfig.telemetry`; what's missing is the actual sender (`src/core/telemetry.{cpp,hpp}`) plus `docs/{en,pt-br}/telemetry.md` describing the consent/payload model.
+
+### Out of scope until v0.6.x+ (W6 roadmap)
+
+- HNSW vector index for sub-millisecond ANN search
+- Type-aware `resolve_calls` with overload disambiguation
+- File watcher (`inotify`/`FSEvents`) replacing the post-edit hook
+- Homebrew tap (`brew install axon`)
+- Reproducible benchmark suite for the `−55.5%` token-reduction claim
+
+## How to resume
+
+```bash
+git checkout feature/audit-fixes-v0.5.1
+git log --oneline develop..HEAD       # confirm the 22-ish commits
+cmake --build build --target axon -j 2  # smoke build before adding work
+```
+
+The branch is ready for PR review against `develop`. Open the PR via `gh pr create` (human gate per the dev-squad protocol — agents must not push to remote or open PRs unprompted). After merge, tag `v0.5.1` to trigger the new `release.yml`.
 
 ## How to resume
 

@@ -9,27 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.1] — 2026-05-06
 
-Audit-driven hardening cycle. Output of a deep coverage audit (13 languages × parser blocks × hooks × engine quick-wins). Closes the highest-impact parser gaps and adds operator-facing knobs.
+Audit-driven hardening cycle. Output of a deep coverage audit (13 languages × parser blocks × hooks × engine quick-wins × packaging readiness). Closes the highest-impact parser gaps, adds operator-facing knobs, and prepares the project for public distribution.
 
 ### Added
 
-**Parser coverage (W1)**
-- **Rust**: extract `trait_item` → `kind="trait"`, `enum_item` → `"enum"`, `union_item` → `"union"`, `mod_item` → `"module"`, `macro_definition` → `"macro"`. `impl_item` now disambiguates `impl Trait for Type` (name = `"Trait for Type"`) vs inherent `impl Type` (name = `"impl Type"`); both share `kind="impl"`. The trait↔implementor relationship is preserved in the call graph for the first time.
-- **Python**: `decorated_definition` parents are walked to capture `@router.get`, `@dataclass`, `@property` etc. into the symbol's docstring field — framework wiring becomes searchable. `async def` functions emit `kind="async_function"`. Plain functions/classes unchanged.
-- **Java**: new symbol kinds for `record_declaration` (`"record"`, Java 14+), `enum_declaration` (`"enum"`), `annotation_type_declaration` (`"annotation_type"`). `class_declaration` / `interface_declaration` with the `sealed`/`non-sealed` modifier emit `kind="sealed_class"` / `"sealed_interface"` (Java 15+). `@Override`, `@Path("/foo")` etc. on methods/classes/records are concatenated into the docstring.
-- **Bash**: `declaration_command` with `export`/`readonly`/`declare`/`typeset` now emits `kind="variable"` for the assigned name — config knobs become symbol-searchable.
+**Parser coverage — all 13 languages refreshed (W1)**
+- **TypeScript / JavaScript**: decorators on classes/methods captured into docstring; `enum_declaration` → `"enum"`; `internal_module` / `module` → `"namespace"`; `function_declaration` with leading `async` → `"async_function"`.
+- **Python**: `decorated_definition` parents walked to capture `@router.get`, `@dataclass`, `@property` etc. into docstring; `async def` → `"async_function"`.
+- **Rust**: `trait_item` → `"trait"`, `enum_item` → `"enum"`, `union_item` → `"union"`, `mod_item` → `"module"`, `macro_definition` → `"macro"`. `impl_item` disambiguates `impl Trait for Type` (name = `"Trait for Type"`) vs inherent `impl Type`.
+- **Go**: `type_declaration` now classifies via inner spec — `interface_type` → `"interface"`, `struct_type` → `"struct"`, `type_alias` → `"type_alias"`.
+- **C#**: `property_declaration` → `"property"`, `record_declaration` → `"record"` (C# 9+), `enum_declaration` → `"enum"`, `namespace_declaration` → `"namespace"`. `partial`/`async` modifiers shift kind to `"partial_class"` / `"async_method"`. `[Attribute]` lists folded into docstring.
+- **PHP**: `namespace_definition` → `"namespace"`, `trait_declaration` → `"trait"`, `interface_declaration` → `"interface"`, `enum_declaration` → `"enum"` (PHP 8.1+). `#[Attribute]` lists folded into docstring.
+- **Dart**: `mixin_declaration` → `"mixin"`, `extension_declaration` → `"extension"`, `enum_declaration` → `"enum"`, `factory_constructor_signature` → `"factory"`. Async marker on functions/methods promotes kind to async-prefixed.
+- **Java**: `record_declaration` → `"record"` (Java 14+), `enum_declaration` → `"enum"`, `annotation_type_declaration` → `"annotation_type"`, `sealed`/`non-sealed` modifier promotes class/interface kind. `@Annotation` lists folded into docstring.
+- **Bash**: `declaration_command` with `export`/`readonly`/`declare`/`typeset` emits `kind="variable"`.
+- **C++**: `enum_specifier` → `"enum"`, `union_specifier` → `"union"`, `friend_declaration` → `"friend"`. Surrounding `template<…>` parameter list folded into docstring.
+- **Kotlin**: extension functions → `"extension_function"`, `suspend` → `"suspend_function"`, `sealed`/`data`/`enum class` modifiers promote kind, `companion_object` → `"companion_object"`, `type_alias` → `"type_alias"`.
+- **Vue**: `<script>` without `lang` attribute now emits a one-shot stderr warning (parsing still falls back to JS per spec).
 
-**Engine (W2)**
-- `axon --version` / `axon -V` / `axon version` print version + short git SHA. Wired via CMake `configure_file` populating `src/version.hpp` from `version.hpp.in` at build time.
+**Engine quick-wins (W2)**
+- `axon --version` / `-V` / `version` print version + short git SHA. Wired via CMake `configure_file` populating `src/version.hpp` from `version.hpp.in` at build time.
 - Environment variable overrides on top of `.axon/config.toml`, applied in `make_config()`:
-  - `AXON_EMBEDDING_MODEL` — absolute or relative path to `.gguf` (consumed by `find_model`)
-  - `AXON_TOKEN_BUDGET` — default capsule token budget (overrides `ProjectConfig.token_budget`)
-  - `AXON_TELEMETRY` — opt-in flag (1/true/yes/on); off by default. Stored on `ProjectConfig.telemetry`; consumed by the W5 telemetry client when it lands.
+  - `AXON_EMBEDDING_MODEL` — absolute or relative path to `.gguf`
+  - `AXON_TOKEN_BUDGET` — default capsule token budget
+  - `AXON_TELEMETRY` — opt-in flag (1/true/yes/on); off by default
 - New TOML keys: `token_budget` (int, default 8000) and `telemetry` (bool, default false).
+- `.axonignore` now supports gitignore-style globbing: `*`, `**`, `?`, leading `/` (anchored), trailing `/` (dir-only), `!negation`. Last-rule-wins semantics. Plain-string patterns retain the fast equality path for back-compat.
+
+**CI / lint (W4)**
+- `.github/workflows/build.yml`: ubuntu-22.04 + macos-14 build matrix with third_party caching and post-build `axon --version` / `axon help` smoke.
+- `.github/workflows/release.yml`: tag-driven (`v*.*.*`) multi-target binary release. Stages `axon-<version>-<target>.tar.gz` containing `bin/axon`, `lib/libduckdb.{so,dylib}`, README, LICENSE, CHANGELOG, install.sh; generates SHA-256 sidecar; auto-extracts the matching `[X.Y.Z]` slice of CHANGELOG as release notes; creates the GitHub Release via softprops/action-gh-release.
+- `.github/workflows/lint.yml`: shellcheck + clang-format-15 (advisory pass via `continue-on-error: true`). New `.clang-format` (LLVM base, 4-space indent, 100-col, c++20).
+
+**Packaging for public release (W5)**
+- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1).
+- `.github/dependabot.yml` tracking github-actions weekly + git submodules monthly.
+- `examples/{ts-mini,python-mini,rust-mini}` — runnable mini-projects exercising the parser surface, each with a README listing expected symbol kinds.
+- `Dockerfile` (multi-stage builder + debian:12-slim runtime) plus `.dockerignore` matching the release tarball layout.
 
 ### Fixed
 
-- **`pending-writes.txt`** is now capped at 1 MiB. The hook (`axon-post-edit.sh`) checks size under the existing flock before each append; above the cap it rotates the live file to `pending-writes.<epoch>.bak` and touches `sync-requested` so the next MCP server tool call does a full BLAKE3-skip walk. Prevents unbounded growth when the server is offline.
+- **`pending-writes.txt`** capped at 1 MiB. The hook (`axon-post-edit.sh`) checks size under the existing flock before each append; above the cap it rotates the live file to `pending-writes.<epoch>.bak` and touches `sync-requested` so the next MCP server tool call does a full BLAKE3-skip walk. Prevents unbounded growth when the server is offline.
+
+### Changed
+
+- README example snippets genericized — `--group=hideakisolutions` and `/opt/hideakisolutions/axon` replaced with `--group=backend` and `/home/alice/projects/axon` placeholders. Email contacts retain the legitimate `hideakiservicos@gmail.com` public maintainer address.
+
+### Out of scope (deferred)
+
+- W2.T01 (capsule cache by query hash) — needs DB schema design + JSON serialization protocol + invalidation epoch logic; sized for a focused follow-up rather than a quick-win commit.
+- W3 (test foundation: GoogleTest+CTest, fixtures per language, golden snapshots, e2e/smoke.sh) — see `docs/audit-2026-05-handoff.md`.
+- W4.T02 (test.yml), T03 (sanitizers.yml), T06 (hook structured logging), T07 (`cmake --parallel` coverage in build-guard), T08 (MCP health probe in auto-index), T09 (post-edit cleanup trap).
+- W5.T05 (install.sh dependency-detection hardening), T06 (telemetry client implementation — env-var plumbing landed; HTTP path waits on consent UX).
 
 ### Bumped
 
