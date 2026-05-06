@@ -588,20 +588,62 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // PHP
     if (ctx.lang == Language::PHP) {
+        // PHP 8 introduced #[Attribute] syntax; tree-sitter-php emits these as
+        // attribute_list children of declarations. Same shape as C# attributes.
+        auto collect_attrs_php = [&](TSNode def_node) -> std::optional<std::string> {
+            std::string out;
+            uint32_t cc = ts_node_child_count(def_node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(def_node, i);
+                if (std::string(ts_node_type(c)) == "attribute_list") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(c, ctx.src);
+                }
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "function_definition") {
             sym.kind = "function";
+            sym.docstring = collect_attrs_php(node);
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "method_declaration") {
             sym.kind = "method";
+            sym.docstring = collect_attrs_php(node);
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_declaration") {
             sym.kind = "class";
+            sym.docstring = collect_attrs_php(node);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "trait_declaration") {
+            sym.kind = "trait";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "interface_declaration") {
+            sym.kind = "interface";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "namespace_definition") {
+            sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
