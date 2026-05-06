@@ -1,0 +1,74 @@
+name: build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same ref to avoid stacking compile minutes.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }} (${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            compiler: gcc
+          - os: macos-14
+            compiler: clang
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential ninja-build ccache jq
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja ccache jq
+
+      - name: Cache third_party
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/duckdb/lib
+            third_party/llama.cpp/build
+          key: ${{ matrix.os }}-third-party-${{ hashFiles('CMakeLists.txt', '.gitmodules') }}
+          restore-keys: |
+            ${{ matrix.os }}-third-party-
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja
+
+      - name: Build
+        # Project policy enforces -j2 (host runs MCP server + embeddings + multiple
+        # Claude sessions concurrently) but CI hosts are dedicated, so two parallel
+        # jobs is the right cap regardless.
+        run: cmake --build build --target axon -j 2
+
+      - name: Smoke
+        run: |
+          ./build/axon --version
+          ./build/axon help
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: axon-${{ matrix.os }}
+          path: |
+            build/axon
+            third_party/duckdb/lib/libduckdb.*
+          retention-days: 7
