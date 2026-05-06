@@ -357,17 +357,43 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Python
     if (ctx.lang == Language::Python) {
+        // When the parent is a `decorated_definition`, gather the @decorator lines
+        // and stash them in docstring so capsule consumers see framework usage
+        // (e.g. @router.get, @app.task, @dataclass) without re-parsing source.
+        auto collect_decorators = [&](TSNode def_node) -> std::optional<std::string> {
+            TSNode parent = ts_node_parent(def_node);
+            if (ts_node_is_null(parent)) return std::nullopt;
+            if (std::string(ts_node_type(parent)) != "decorated_definition") return std::nullopt;
+            std::string out;
+            uint32_t pcc = ts_node_child_count(parent);
+            for (uint32_t i = 0; i < pcc; i++) {
+                TSNode pc = ts_node_child(parent, i);
+                if (std::string(ts_node_type(pc)) == "decorator") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(pc, ctx.src);
+                }
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "function_definition") {
+            // Detect `async def`: first unnamed child is the "async" keyword.
             sym.kind = "function";
+            if (ts_node_child_count(node) > 0) {
+                std::string fc = ts_node_type(ts_node_child(node, 0));
+                if (fc == "async") sym.kind = "async_function";
+            }
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_definition") {
             sym.kind = "class";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "import_statement" || kind == "import_from_statement") {
             push_import_edge(node, ctx.src, ctx.imports);
