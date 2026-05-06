@@ -311,9 +311,30 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // TypeScript / JavaScript
     if (ctx.lang == Language::TypeScript || ctx.lang == Language::JavaScript) {
+        // TS decorators sit as direct children of the declaration (no
+        // `decorated_definition` wrapper like Python). Concatenate them
+        // into the docstring so framework wiring (@Component, @Injectable,
+        // @Get('/path')) is searchable via capsule.
+        auto collect_decorators_ts = [&](TSNode def_node) -> std::optional<std::string> {
+            std::string out;
+            uint32_t cc = ts_node_child_count(def_node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(def_node, i);
+                if (std::string(ts_node_type(c)) == "decorator") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(c, ctx.src);
+                }
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "function_declaration" || kind == "generator_function_declaration") {
+            // Detect `async function` via first unnamed child.
             sym.kind = "function";
-            // name = first named child "identifier"
+            if (ts_node_child_count(node) > 0) {
+                std::string fc = ts_node_type(ts_node_child(node, 0));
+                if (fc == "async") sym.kind = "async_function";
+            }
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -323,12 +344,14 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators_ts(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "method_definition") {
             sym.kind = "method";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators_ts(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "interface_declaration") {
             sym.kind = "interface";
@@ -338,6 +361,20 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             is_symbol = !sym.name.empty();
         } else if (kind == "type_alias_declaration") {
             sym.kind = "type";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "internal_module" || kind == "module") {
+            // tree-sitter-typescript: `namespace Foo {}` -> internal_module;
+            // `module "foo" {}` (ambient) -> module.
+            sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
