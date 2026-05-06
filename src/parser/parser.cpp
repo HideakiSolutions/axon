@@ -751,10 +751,35 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "type_declaration") {
+            // Inspect the inner type_spec / type_alias to classify the kind.
+            // v0.5.0 collapsed everything under kind="type" with a name derived
+            // from first_line — interfaces and structs were indistinguishable.
             sym.kind = "type";
-            sym.name = first_line(node, ctx.src).substr(0, 40);
-            sym.signature = first_line(node, ctx.src);
-            is_symbol = true;
+            uint32_t cc = ts_node_child_count(node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode spec = ts_node_child(node, i);
+                std::string sk = ts_node_type(spec);
+                if (sk != "type_spec" && sk != "type_alias") continue;
+                TSNode name_n = ts_node_child_by_field_name(spec, "name", 4);
+                if (ts_node_is_null(name_n)) continue;
+                sym.name = node_text(name_n, ctx.src);
+                TSNode type_n = ts_node_child_by_field_name(spec, "type", 4);
+                std::string tk = ts_node_is_null(type_n) ? "" : ts_node_type(type_n);
+                if (tk == "interface_type") sym.kind = "interface";
+                else if (tk == "struct_type") sym.kind = "struct";
+                else if (sk == "type_alias") sym.kind = "type_alias";
+                sym.signature = first_line(node, ctx.src);
+                is_symbol = true;
+                // Multi-spec blocks (`type ( A int; B string )`) only emit the
+                // first spec — matches v0.5.0 behavior; precise multi-emit lands
+                // when the visit_node emitter supports it.
+                break;
+            }
+            if (!is_symbol) {
+                sym.name = first_line(node, ctx.src).substr(0, 40);
+                sym.signature = first_line(node, ctx.src);
+                is_symbol = true;
+            }
         } else if (kind == "import_spec") {
             // Capture per-spec; the surrounding import_declaration is walked
             // and enters each spec as a child — so only the leaf is needed.
