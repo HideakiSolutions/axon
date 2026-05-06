@@ -390,15 +390,35 @@ static void resolve_calls(duckdb::Connection& conn, int64_t from_id,
 }
 
 // Returns true if any component of path matches a skip dir or ignore pattern.
+// Hooked into sweep_deleted: a previously-indexed file becomes ignored when
+// the user adds a matching .axonignore rule, and we want it pruned on the
+// next indexing pass even though the file still exists on disk.
 static bool path_is_ignored(const fs::path& rel) {
     for (const auto& part : rel) {
         const std::string name = part.filename().string();
         for (const auto& dir : SKIP_DIRS)
             if (name == dir) return true;
-        for (const auto& pat : g_ignore_patterns)
-            if (name == pat) return true;
     }
-    return false;
+    // Match against the compiled .axonignore rules: we only need a pruning
+    // signal here, so reuse the same rule semantics as the walker — anchored
+    // patterns get the project-relative path; bare patterns also test against
+    // the basename. Negation rules can re-include.
+    if (g_ignore_rules.empty()) return false;
+    const std::string fname = rel.filename().string();
+    const std::string rel_str = rel.generic_string();
+    bool ignored = false;
+    for (const auto& rule : g_ignore_rules) {
+        bool hit = false;
+        if (rule.has_glob) {
+            if (std::regex_match(rel_str, rule.re)) hit = true;
+            else if (!rule.anchored && std::regex_match(fname, rule.re)) hit = true;
+        } else {
+            if (rule.anchored) hit = (rel_str == rule.raw);
+            else hit = (fname == rule.raw);
+        }
+        if (hit) ignored = !rule.negate;
+    }
+    return ignored;
 }
 
 // Remove files from DB whose path no longer exists on disk OR whose path is now ignored.

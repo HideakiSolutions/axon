@@ -139,16 +139,38 @@ set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/llama.cpp)
 
 # ── blake3 ───────────────────────────────────────────────────────────────────
-add_library(blake3_lib STATIC
+# The hand-written assembly variants are x86-64-only; on arm64 (macOS Apple
+# Silicon, Linux aarch64) they fail to assemble. The portable C path and the
+# dispatcher already cover those platforms — the dispatcher's runtime CPU
+# detection never reaches the SIMD code path on arm64, so dropping the .S
+# files there is safe and matches BLAKE3's upstream build.
+set(BLAKE3_SOURCES
     third_party/blake3/c/blake3.c
     third_party/blake3/c/blake3_dispatch.c
     third_party/blake3/c/blake3_portable.c
-    third_party/blake3/c/blake3_sse2_x86-64_unix.S
-    third_party/blake3/c/blake3_sse41_x86-64_unix.S
-    third_party/blake3/c/blake3_avx2_x86-64_unix.S
-    third_party/blake3/c/blake3_avx512_x86-64_unix.S
 )
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
+    list(APPEND BLAKE3_SOURCES
+        third_party/blake3/c/blake3_sse2_x86-64_unix.S
+        third_party/blake3/c/blake3_sse41_x86-64_unix.S
+        third_party/blake3/c/blake3_avx2_x86-64_unix.S
+        third_party/blake3/c/blake3_avx512_x86-64_unix.S
+    )
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64)")
+    # Optional: arm64 NEON acceleration via the portable-headers neon source.
+    if(EXISTS ${CMAKE_SOURCE_DIR}/third_party/blake3/c/blake3_neon.c)
+        list(APPEND BLAKE3_SOURCES third_party/blake3/c/blake3_neon.c)
+    endif()
+endif()
+add_library(blake3_lib STATIC ${BLAKE3_SOURCES})
 target_include_directories(blake3_lib PUBLIC third_party/blake3/c)
+# On arm64 we lose the runtime SIMD dispatch tables; tell BLAKE3 to omit
+# the SSE/AVX entry points so the dispatcher links against the C fallback.
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
+    target_compile_definitions(blake3_lib PRIVATE
+        BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512
+    )
+endif()
 
 # ── axon executable ──────────────────────────────────────────────────────────
 file(GLOB_RECURSE AXON_SOURCES src/*.cpp)
