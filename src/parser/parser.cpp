@@ -498,26 +498,85 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // C#
     if (ctx.lang == Language::CSharp) {
+        // C# attributes ([Serializable], [HttpGet("/users")]) are emitted as
+        // `attribute_list` siblings of the declaration. They land in docstring
+        // alongside detected modifier flags so capsule queries surface the
+        // ASP.NET / Serializer wiring without re-grepping.
+        auto collect_attrs_cs = [&](TSNode def_node, bool& out_async, bool& out_partial) {
+            out_async = false;
+            out_partial = false;
+            std::string out;
+            uint32_t cc = ts_node_child_count(def_node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(def_node, i);
+                std::string ck = ts_node_type(c);
+                if (ck == "attribute_list") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(c, ctx.src);
+                } else if (ck == "modifier") {
+                    std::string mt = node_text(c, ctx.src);
+                    if (mt == "async") out_async = true;
+                    else if (mt == "partial") out_partial = true;
+                }
+            }
+            return out.empty() ? std::optional<std::string>{} : std::optional<std::string>(out);
+        };
+
         if (kind == "method_declaration") {
-            sym.kind = "method";
+            bool is_async = false, is_partial = false;
+            sym.docstring = collect_attrs_cs(node, is_async, is_partial);
+            sym.kind = is_async ? "async_method" : "method";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "property_declaration") {
+            sym.kind = "property";
+            bool dummy_a = false, dummy_p = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, dummy_p);
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_declaration") {
-            sym.kind = "class";
+            bool dummy_a = false, is_partial = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, is_partial);
+            sym.kind = is_partial ? "partial_class" : "class";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "interface_declaration") {
             sym.kind = "interface";
+            bool dummy_a = false, dummy_p = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, dummy_p);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "record_declaration") {
+            // C# 9+ records — first-class for DTOs / immutable values.
+            sym.kind = "record";
+            bool dummy_a = false, dummy_p = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, dummy_p);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "constructor_declaration") {
             sym.kind = "method";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "namespace_declaration") {
+            sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
