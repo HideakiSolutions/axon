@@ -46,16 +46,32 @@ if echo "$CMD" | grep -Eq -- '-j[[:space:]]*[`$]'; then
   deny "$REASON_BASE Detectado: -j com expansão dinâmica (\$(nproc) ou similar)."
 fi
 
+# --parallel $(nproc) / `nproc` / ${nproc}
+if echo "$CMD" | grep -Eq -- '--parallel[[:space:]]*[`$]'; then
+  deny "$REASON_BASE Detectado: cmake --parallel com expansão dinâmica."
+fi
+
 # -j N (com número explícito)
 JOBS=$(echo "$CMD" | grep -oE -- '-j[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1)
 if [ -n "$JOBS" ] && [ "$JOBS" -gt "$MAX_JOBS" ]; then
   deny "$REASON_BASE Detectado: -j${JOBS} (máximo permitido: -j${MAX_JOBS})."
 fi
 
+# cmake --parallel N (with explicit number)
+PJOBS=$(echo "$CMD" | grep -oE -- '--parallel[[:space:]]+[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1)
+if [ -n "$PJOBS" ] && [ "$PJOBS" -gt "$MAX_JOBS" ]; then
+  deny "$REASON_BASE Detectado: cmake --parallel ${PJOBS} (máximo: ${MAX_JOBS})."
+fi
+
 # -j sozinho (make interpreta como ilimitado)
 # Match -j seguido por espaço+não-número, fim de linha, ou separador de comando
 if echo "$CMD" | grep -Eq -- '-j([[:space:]]+[^0-9]|[[:space:]]*$|[[:space:]]*[;&|])'; then
   deny "$REASON_BASE Detectado: -j sem número (make interpreta como ilimitado)."
+fi
+
+# cmake --build ... --parallel sem número (interpreta como nproc)
+if echo "$CMD" | grep -Eq -- '--parallel([[:space:]]+[^0-9]|[[:space:]]*$|[[:space:]]*[;&|])'; then
+  deny "$REASON_BASE Detectado: cmake --parallel sem número (default é nproc)."
 fi
 
 # ninja sem -j explícito também é ilimitado por default
