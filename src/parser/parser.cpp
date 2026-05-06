@@ -1,5 +1,6 @@
 #include "parser.hpp"
 #include <tree_sitter/api.h>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
@@ -819,6 +820,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
     if (ctx.lang == Language::Vue) {
         if (kind == "script_element") {
             bool is_typescript = false;
+            bool saw_lang_attr = false;
             uint32_t raw_start = 0, raw_end = 0;
             uint32_t script_start_row = 0;
             bool found_raw = false;
@@ -832,6 +834,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                         TSNode a = ts_node_child(c, j);
                         if (std::string(ts_node_type(a)) == "attribute") {
                             std::string atxt = node_text(a, ctx.src);
+                            if (atxt.find("lang=") != std::string::npos) saw_lang_attr = true;
                             if (atxt.find("lang=\"ts\"") != std::string::npos ||
                                 atxt.find("lang='ts'") != std::string::npos ||
                                 atxt.find("lang=\"typescript\"") != std::string::npos) {
@@ -847,6 +850,20 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                 }
             }
             if (!found_raw || raw_end <= raw_start) return;
+            // Vue 3 SFCs that omit `lang` default to JavaScript per the
+            // single-file-component spec. We honor the spec but emit a
+            // one-line stderr warning so users grepping for missing types
+            // notice — the same TS code parsed as JS will silently lose
+            // generic / decorator coverage.
+            if (!saw_lang_attr) {
+                static thread_local bool warned_once = false;
+                if (!warned_once) {
+                    std::fprintf(stderr,
+                        "[warn] Vue SFC <script> without `lang` attribute — "
+                        "parsing as JavaScript. Add `lang=\"ts\"` for TypeScript.\n");
+                    warned_once = true;
+                }
+            }
 
             std::string sub_src = ctx.src.substr(raw_start, raw_end - raw_start);
             TSParser* sub_parser = ts_parser_new();
