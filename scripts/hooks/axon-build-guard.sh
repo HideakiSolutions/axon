@@ -8,11 +8,16 @@
 #
 # Configurado em: <project>/.claude/settings.json com matcher "Bash"
 
+# shellcheck disable=SC1091
+[ -f "$(dirname "${BASH_SOURCE[0]}")/_log.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/_log.sh"
+log() { command -v axon_log &>/dev/null && axon_log "axon-build-guard" "$@"; }
+
 if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
 if [ "${AXON_ALLOW_HIGH_PARALLELISM:-0}" = "1" ]; then
+  log "pass" '{"reason":"escape-hatch"}'
   exit 0
 fi
 
@@ -26,6 +31,7 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 MAX_JOBS=2
 
 deny() {
+  log "deny" "$(jq -n --arg r "$1" '{reason:$r}')"
   jq -n --arg reason "$1" '{
     "hookSpecificOutput": {
       "hookEventName": "PreToolUse",

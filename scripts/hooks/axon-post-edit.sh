@@ -20,6 +20,10 @@ SYNC_MARKER="$AXON_DIR/sync-requested"
 # while keeping the live queue bounded even if the server has been idle.
 QUEUE_MAX_BYTES=1048576
 
+# shellcheck disable=SC1091
+[ -f "$(dirname "${BASH_SOURCE[0]}")/_log.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/_log.sh"
+log() { command -v axon_log &>/dev/null && axon_log "axon-post-edit" "$@"; }
+
 # Pass-through se o projeto não for indexado pelo axon
 [ ! -d "$AXON_DIR" ] && exit 0
 command -v jq &>/dev/null || exit 0
@@ -50,12 +54,14 @@ case "$TOOL" in
     FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
     [ -z "$FILE" ] && exit 0
     append_to_queue "$FILE"
+    log "queued" "$(jq -n --arg t "$TOOL" --arg f "$FILE" '{tool:$t,file:$f}')"
     ;;
 
   NotebookEdit)
     FILE=$(echo "$INPUT" | jq -r '.tool_input.notebook_path // empty')
     [ -z "$FILE" ] && exit 0
     append_to_queue "$FILE"
+    log "queued" "$(jq -n --arg f "$FILE" '{tool:"NotebookEdit",file:$f}')"
     ;;
 
   Bash)
@@ -64,6 +70,7 @@ case "$TOOL" in
     # BLAKE3 skip + prune no próximo tool call. Custo amortizado via
     # BLAKE3 para arquivos não-mudados.
     touch "$SYNC_MARKER" 2>/dev/null || true
+    log "sync-requested" '{"tool":"Bash"}'
     ;;
 
   *)
