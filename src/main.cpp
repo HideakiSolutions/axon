@@ -218,7 +218,8 @@ int main(int argc, char* argv[]) {
         auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
         axon::EmbeddingModel model(model_path);
 
-        auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root);
+        auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root,
+                                              cfg.project_cfg.token_budget);
 
         std::cout << "{\n";
         std::cout << "  \"query\": \"" << query << "\",\n";
