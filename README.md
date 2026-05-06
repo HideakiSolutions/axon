@@ -1,7 +1,8 @@
 # axon — Context Engine for AI Coding Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/HideakiSolutions/axon/actions/workflows/ci.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/ci.yml)
+[![Build](https://github.com/HideakiSolutions/axon/actions/workflows/build.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/build.yml)
+[![Lint](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)](CMakeLists.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-blue)](https://docs.anthropic.com/claude-code)
 [![MCP](https://img.shields.io/badge/MCP-15%20tools-8b5cf6)](src/mcp/server.cpp)

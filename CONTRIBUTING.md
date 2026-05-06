@@ -8,9 +8,34 @@ Thank you for your interest in contributing. Axon welcomes bug fixes, new langua
 git clone --recurse-submodules https://github.com/HideakiSolutions/axon.git
 cd axon && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug
-make -j2
+cmake --build . --target axon -j 2
 export LD_LIBRARY_PATH=$(pwd)/../third_party/duckdb/lib
 ```
+
+> The build-guard hook caps CMake/Make/Ninja at `-j 2` while a Claude Code
+> session is active (host runs MCP server + embeddings concurrently). Set
+> `AXON_ALLOW_HIGH_PARALLELISM=1` for a one-off bump.
+
+### Running the test suite
+
+```bash
+cmake -S . -B build -DAXON_BUILD_TESTS=ON
+cmake --build build --target test_parser_smoke -j 2
+ctest --test-dir build --output-on-failure
+```
+
+GoogleTest is pulled via FetchContent; a full network round-trip happens on
+the first configure. The `AXON_BUILD_TESTS` option defaults ON when this
+project is top-level and OFF when embedded.
+
+### CI / lint workflows
+
+| Workflow | Trigger | Scope |
+|----------|---------|-------|
+| `.github/workflows/build.yml`   | push/PR to main+develop | matrix build (ubuntu-22.04 + macos-14) + ctest |
+| `.github/workflows/lint.yml`    | push/PR to main+develop | shellcheck + clang-format-15 (advisory) |
+| `.github/workflows/release.yml` | tag push (`v*.*.*`)     | multi-target tarball + GitHub Release |
+| `.github/workflows/ci.yml`      | push/PR                 | shellcheck only — kept for compatibility |
 
 ## Adding a Language Parser
 
@@ -20,7 +45,9 @@ export LD_LIBRARY_PATH=$(pwd)/../third_party/duckdb/lib
    ```
 2. Register in `src/parser/parser.cpp`: add extensions, grammar init, symbol extraction, import extraction
 3. Add to `CMakeLists.txt`: include dir + source file
-4. Test: `axon index /path/to/sample-<lang>-project && axon status`
+4. Add a fixture + assertions to `tests/unit/test_parser_smoke.cpp` covering the new symbol kinds — the test suite is the contract for what `parse_file()` is expected to emit
+5. Run `ctest --test-dir build --output-on-failure` to validate
+6. Smoke against a real project: `axon index /path/to/sample-<lang>-project && axon status`
 
 ## Adding a New MCP Tool
 
