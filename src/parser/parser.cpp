@@ -312,19 +312,28 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // TypeScript / JavaScript
     if (ctx.lang == Language::TypeScript || ctx.lang == Language::JavaScript) {
-        // TS decorators sit as direct children of the declaration (no
-        // `decorated_definition` wrapper like Python). Concatenate them
-        // into the docstring so framework wiring (@Component, @Injectable,
-        // @Get('/path')) is searchable via capsule.
+        // TS decorators have two emission shapes depending on grammar version:
+        //   1. Direct children of the declaration (plain `@Foo class X {}`)
+        //   2. Siblings under `export_statement` for `@Foo export class X {}`
+        // We walk both so capsule queries surface @Component/@Injectable/@Get
+        // regardless of whether the class is exported.
         auto collect_decorators_ts = [&](TSNode def_node) -> std::optional<std::string> {
             std::string out;
-            uint32_t cc = ts_node_child_count(def_node);
-            for (uint32_t i = 0; i < cc; i++) {
-                TSNode c = ts_node_child(def_node, i);
-                if (std::string(ts_node_type(c)) == "decorator") {
-                    if (!out.empty()) out += '\n';
-                    out += node_text(c, ctx.src);
+            auto scan = [&](TSNode container) {
+                uint32_t cc = ts_node_child_count(container);
+                for (uint32_t i = 0; i < cc; i++) {
+                    TSNode c = ts_node_child(container, i);
+                    if (std::string(ts_node_type(c)) == "decorator") {
+                        if (!out.empty()) out += '\n';
+                        out += node_text(c, ctx.src);
+                    }
                 }
+            };
+            scan(def_node);
+            TSNode parent = ts_node_parent(def_node);
+            if (!ts_node_is_null(parent) &&
+                std::string(ts_node_type(parent)) == "export_statement") {
+                scan(parent);
             }
             return out.empty() ? std::nullopt : std::optional<std::string>(out);
         };
