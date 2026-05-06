@@ -36,16 +36,26 @@ Audit-driven hardening cycle. Output of a deep coverage audit (13 languages × p
 - New TOML keys: `token_budget` (int, default 8000) and `telemetry` (bool, default false).
 - `.axonignore` now supports gitignore-style globbing: `*`, `**`, `?`, leading `/` (anchored), trailing `/` (dir-only), `!negation`. Last-rule-wins semantics. Plain-string patterns retain the fast equality path for back-compat.
 
+**Test foundation (W3)**
+- GoogleTest+CTest via FetchContent. New `AXON_BUILD_TESTS` CMake option (default ON when top-level). Tests live under `tests/unit/` with the `add_axon_test(name, sources...)` helper from `tests/CMakeLists.txt`. The parser is exposed to tests as an `axon_parser_objs` OBJECT library so unit tests don't drag in DuckDB/llama.cpp.
+- `tests/unit/test_parser_smoke.cpp` — first cross-language parser smoke: 6 cases asserting that the W1 audit closures actually emit the new kinds (Rust traits/macros/impl, Python decorators+async, Java records/sealed/annotations, Bash variables, Kotlin sealed/data, TypeScript decorators+namespaces+async). Caught and fixed a TS gap on exported decorated declarations during bootstrap.
+
 **CI / lint (W4)**
-- `.github/workflows/build.yml`: ubuntu-22.04 + macos-14 build matrix with third_party caching and post-build `axon --version` / `axon help` smoke.
+- `.github/workflows/build.yml`: ubuntu-22.04 + macos-14 build matrix with third_party caching, ctest run, and post-build `axon --version` / `axon help` smoke.
 - `.github/workflows/release.yml`: tag-driven (`v*.*.*`) multi-target binary release. Stages `axon-<version>-<target>.tar.gz` containing `bin/axon`, `lib/libduckdb.{so,dylib}`, README, LICENSE, CHANGELOG, install.sh; generates SHA-256 sidecar; auto-extracts the matching `[X.Y.Z]` slice of CHANGELOG as release notes; creates the GitHub Release via softprops/action-gh-release.
 - `.github/workflows/lint.yml`: shellcheck + clang-format-15 (advisory pass via `continue-on-error: true`). New `.clang-format` (LLVM base, 4-space indent, 100-col, c++20).
+- README badges refreshed to point at build.yml + lint.yml; CONTRIBUTING.md grew "Running the test suite" + "CI / lint workflows" sections plus a fixture step for new-parser PRs.
+
+**Hook hardening (W4)**
+- `axon-build-guard.sh` now covers `cmake --build … --parallel N` alongside the existing `-j` rules (deny on dynamic expansion, on N>cap, on `--parallel` with no number).
+- New `scripts/hooks/_log.sh` shared helper. The four hooks (`axon-guard`, `axon-build-guard`, `axon-auto-index`, `axon-post-edit`) source it (silent fallback if absent) and emit one JSON line per invocation to `.axon/logs/<hook>.jsonl` (project-local) or `~/.axon/logs/<hook>.jsonl` (fallback). Live log rotates to `<hook>.<epoch>.jsonl.gz` above `AXON_LOG_MAX_BYTES` (default 5 MiB). Best-effort throughout — every IO branch is `|| true` so a full disk never breaks a hook.
 
 **Packaging for public release (W5)**
 - `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1).
 - `.github/dependabot.yml` tracking github-actions weekly + git submodules monthly.
 - `examples/{ts-mini,python-mini,rust-mini}` — runnable mini-projects exercising the parser surface, each with a README listing expected symbol kinds.
 - `Dockerfile` (multi-stage builder + debian:12-slim runtime) plus `.dockerignore` matching the release tarball layout.
+- `scripts/install.sh` rewritten for distribution: layout-aware path resolution (accepts both source-tree and release-tarball), `require_cmd` dependency detection with OS-specific install hints (apt/brew), optional embedding model download with interactive prompt and `AXON_DOWNLOAD_MODEL` / `AXON_EMBEDDING_MODEL_URL` / `AXON_EMBEDDING_MODEL_SHA256` environment overrides for unattended installs.
 
 ### Fixed
 
@@ -58,9 +68,9 @@ Audit-driven hardening cycle. Output of a deep coverage audit (13 languages × p
 ### Out of scope (deferred)
 
 - W2.T01 (capsule cache by query hash) — needs DB schema design + JSON serialization protocol + invalidation epoch logic; sized for a focused follow-up rather than a quick-win commit.
-- W3 (test foundation: GoogleTest+CTest, fixtures per language, golden snapshots, e2e/smoke.sh) — see `docs/audit-2026-05-handoff.md`.
-- W4.T02 (test.yml), T03 (sanitizers.yml), T06 (hook structured logging), T07 (`cmake --parallel` coverage in build-guard), T08 (MCP health probe in auto-index), T09 (post-edit cleanup trap).
-- W5.T05 (install.sh dependency-detection hardening), T06 (telemetry client implementation — env-var plumbing landed; HTTP path waits on consent UX).
+- W3.T02–T17 — per-language test files beyond the shared smoke + golden capsule snapshots + `tests/e2e/smoke.sh`. The W3.T01 foundation is in place; remaining tasks are mechanical fixture writing.
+- W4.T03 (sanitizers.yml — ASAN/UBSAN nightly), T08 (MCP health probe in auto-index), T09 (post-edit cleanup EXIT trap — the existing flock-based design already handles partial failures, marking won't-fix-without-evidence).
+- W5.T06 — telemetry HTTP client implementation. The opt-in env var (`AXON_TELEMETRY`) is plumbed end-to-end into `ProjectConfig.telemetry`; what remains is the actual sender (`src/core/telemetry.{cpp,hpp}`) plus consent UX docs.
 
 ### Bumped
 
