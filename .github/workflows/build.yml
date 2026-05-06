@@ -51,15 +51,24 @@ jobs:
             ${{ matrix.os }}-third-party-
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAXON_BUILD_TESTS=ON -GNinja
 
-      - name: Build
+      - name: Build axon
         # Project policy enforces -j2 (host runs MCP server + embeddings + multiple
         # Claude sessions concurrently) but CI hosts are dedicated, so two parallel
         # jobs is the right cap regardless.
         run: cmake --build build --target axon -j 2
 
-      - name: Smoke
+      - name: Build tests
+        run: cmake --build build --target test_parser_smoke -j 2
+
+      - name: Run unit tests
+        # CTest aggregates every test registered via add_axon_test().
+        # --output-on-failure so a regression surfaces in the workflow log
+        # without re-running.
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke binary
         run: |
           ./build/axon --version
           ./build/axon help
