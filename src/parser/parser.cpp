@@ -544,20 +544,80 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Java
     if (ctx.lang == Language::Java) {
+        // Walk a `modifiers` child of a declaration and pull out @-annotations
+        // and the `sealed`/`non-sealed` keywords (Java 15+) for capsule rendering.
+        auto collect_modifiers = [&](TSNode decl_node, bool& out_is_sealed) -> std::optional<std::string> {
+            out_is_sealed = false;
+            TSNode mods = ts_node_child_by_field_name(decl_node, "modifiers", 9);
+            // Fallback: tree-sitter-java sometimes emits modifiers as the first
+            // unnamed child of kind "modifiers" rather than via a field.
+            if (ts_node_is_null(mods)) {
+                uint32_t cc = ts_node_child_count(decl_node);
+                for (uint32_t i = 0; i < cc; i++) {
+                    TSNode c = ts_node_child(decl_node, i);
+                    if (std::string(ts_node_type(c)) == "modifiers") { mods = c; break; }
+                }
+            }
+            if (ts_node_is_null(mods)) return std::nullopt;
+            std::string out;
+            uint32_t cc = ts_node_child_count(mods);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(mods, i);
+                std::string ck = ts_node_type(c);
+                if (ck == "marker_annotation" || ck == "annotation" ||
+                    ck == "single_element_annotation") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(c, ctx.src);
+                } else if (ck == "sealed" || ck == "non-sealed") {
+                    out_is_sealed = true;
+                }
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "method_declaration") {
             sym.kind = "method";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_declaration") {
-            sym.kind = "class";
+            bool sealed = false;
+            sym.docstring = collect_modifiers(node, sealed);
+            sym.kind = sealed ? "sealed_class" : "class";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "interface_declaration") {
-            sym.kind = "interface";
+            bool sealed = false;
+            sym.docstring = collect_modifiers(node, sealed);
+            sym.kind = sealed ? "sealed_interface" : "interface";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "record_declaration") {
+            // Java 14+ `record Point(int x, int y) { }` — first-class data carrier.
+            sym.kind = "record";
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "annotation_type_declaration") {
+            sym.kind = "annotation_type";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -567,6 +627,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
             is_symbol = !sym.name.empty();
         } else if (kind == "import_declaration") {
             push_import_edge(node, ctx.src, ctx.imports);
