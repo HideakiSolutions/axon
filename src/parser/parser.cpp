@@ -657,8 +657,22 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Dart
     if (ctx.lang == Language::Dart) {
+        // Detect `async` / `async*` body modifier on functions/methods. In
+        // tree-sitter-dart the modifier token appears before the function_body
+        // child, so we scan for an "async" or "async*" leaf in node's subtree
+        // shallow-enough to be cheap (first 6 children).
+        auto is_async_dart = [&](TSNode def_node) {
+            uint32_t cc = ts_node_child_count(def_node);
+            uint32_t scan = cc < 6 ? cc : 6;
+            for (uint32_t i = 0; i < scan; i++) {
+                std::string ck = ts_node_type(ts_node_child(def_node, i));
+                if (ck == "async" || ck == "async_marker" || ck == "async*") return true;
+            }
+            return false;
+        };
+
         if (kind == "function_signature" || kind == "function_declaration") {
-            sym.kind = "function";
+            sym.kind = is_async_dart(node) ? "async_function" : "function";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -669,8 +683,36 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
+        } else if (kind == "mixin_declaration") {
+            sym.kind = "mixin";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "extension_declaration") {
+            // `extension X on Type { ... }` — Dart's open-class mechanism.
+            sym.kind = "extension";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "factory_constructor_signature" ||
+                   kind == "constructor_signature") {
+            // factory + named/redirecting constructors — both important for
+            // capsule rendering of DI/factory patterns common in Flutter.
+            sym.kind = (kind == "factory_constructor_signature") ? "factory" : "constructor";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
         } else if (kind == "method_signature" || kind == "function_body") {
-            sym.kind = "method";
+            sym.kind = is_async_dart(node) ? "async_method" : "method";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
