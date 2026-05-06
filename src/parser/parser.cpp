@@ -1061,9 +1061,55 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Kotlin
     if (ctx.lang == Language::Kotlin) {
+        // Walk the modifiers child list (when present) for sealed/suspend/data
+        // markers. tree-sitter-kotlin emits these as either modifier_list /
+        // modifiers children or as scattered keyword tokens — we cover both.
+        auto kotlin_flags = [&](TSNode def_node, bool& sealed, bool& data,
+                                bool& suspend, bool& enum_class) {
+            sealed = data = suspend = enum_class = false;
+            uint32_t cc = ts_node_child_count(def_node);
+            uint32_t scan = cc < 8 ? cc : 8;
+            for (uint32_t i = 0; i < scan; i++) {
+                TSNode c = ts_node_child(def_node, i);
+                std::string ck = ts_node_type(c);
+                if (ck == "modifier_list" || ck == "modifiers") {
+                    uint32_t mc = ts_node_child_count(c);
+                    for (uint32_t j = 0; j < mc; j++) {
+                        std::string mk = node_text(ts_node_child(c, j), ctx.src);
+                        if (mk == "sealed") sealed = true;
+                        else if (mk == "data") data = true;
+                        else if (mk == "suspend") suspend = true;
+                        else if (mk == "enum") enum_class = true;
+                    }
+                } else {
+                    std::string txt = node_text(c, ctx.src);
+                    if (txt == "sealed") sealed = true;
+                    else if (txt == "data") data = true;
+                    else if (txt == "suspend") suspend = true;
+                    else if (txt == "enum") enum_class = true;
+                }
+            }
+        };
+
         if (kind == "function_declaration") {
-            sym.kind = "function";
+            bool sealed = false, data = false, suspend = false, ec = false;
+            kotlin_flags(node, sealed, data, suspend, ec);
+            // Detect extension functions: a `receiver_type` (or
+            // `user_type`/`type_reference`) appears before the function name.
+            bool is_extension = false;
             uint32_t cc = ts_node_child_count(node);
+            int seen_ident = -1;
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(node, i);
+                std::string ct = ts_node_type(c);
+                if (ct == "simple_identifier") { seen_ident = (int)i; break; }
+                if (ct == "user_type" || ct == "receiver_type" || ct == "type_reference") {
+                    is_extension = true;
+                }
+            }
+            sym.kind = is_extension ? "extension_function"
+                       : suspend     ? "suspend_function"
+                                     : "function";
             for (uint32_t i = 0; i < cc; i++) {
                 TSNode c = ts_node_child(node, i);
                 if (std::string(ts_node_type(c)) == "simple_identifier") {
@@ -1073,13 +1119,59 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             }
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
-        } else if (kind == "class_declaration" || kind == "object_declaration") {
-            sym.kind = "class";
+            (void)seen_ident;
+        } else if (kind == "class_declaration") {
+            bool sealed = false, data = false, suspend = false, enum_class = false;
+            kotlin_flags(node, sealed, data, suspend, enum_class);
+            if      (sealed)     sym.kind = "sealed_class";
+            else if (data)       sym.kind = "data_class";
+            else if (enum_class) sym.kind = "enum_class";
+            else                 sym.kind = "class";
             uint32_t cc = ts_node_child_count(node);
             for (uint32_t i = 0; i < cc; i++) {
                 TSNode c = ts_node_child(node, i);
                 std::string ct = ts_node_type(c);
                 if (ct == "simple_identifier" || ct == "type_identifier") {
+                    sym.name = node_text(c, ctx.src);
+                    break;
+                }
+            }
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "object_declaration") {
+            // Plain object vs companion object: companion objects appear
+            // wrapped in a companion_object node OR carry a "companion"
+            // modifier; both surface as kind="companion_object".
+            bool is_companion = false;
+            uint32_t cc = ts_node_child_count(node);
+            for (uint32_t i = 0; i < cc; i++) {
+                std::string txt = node_text(ts_node_child(node, i), ctx.src);
+                if (txt == "companion") { is_companion = true; break; }
+            }
+            sym.kind = is_companion ? "companion_object" : "object";
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(node, i);
+                std::string ct = ts_node_type(c);
+                if (ct == "simple_identifier" || ct == "type_identifier") {
+                    sym.name = node_text(c, ctx.src);
+                    break;
+                }
+            }
+            if (sym.name.empty() && is_companion) sym.name = "Companion";
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "companion_object") {
+            sym.kind = "companion_object";
+            sym.name = "Companion";
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = true;
+        } else if (kind == "type_alias") {
+            sym.kind = "type_alias";
+            uint32_t cc = ts_node_child_count(node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(node, i);
+                std::string ct = ts_node_type(c);
+                if (ct == "type_identifier" || ct == "simple_identifier") {
                     sym.name = node_text(c, ctx.src);
                     break;
                 }
