@@ -79,6 +79,7 @@ All 13 language blocks in `src/parser/parser.cpp` refreshed against the audit:
 
 - **W3.T02–T17** — extend `tests/unit/test_parser_smoke.cpp` with cases for the remaining langs (Go, C#, PHP, Dart, C++, Vue). Add capsule golden snapshots (`tests/golden/*.json`), an `.axonignore` glob suite, and `tests/e2e/smoke.sh` driving `examples/`. The W3.T01 foundation (FetchContent, helper, OBJECT lib) is the template.
 - **W4.T03** — `sanitizers.yml` running ASAN+UBSAN on a nightly schedule against the same matrix.
+- **macOS build matrix** — currently commented out in `.github/workflows/build.yml`. Vendored `third_party/duckdb/lib/libduckdb.so` is Linux ELF; macOS-arm64 needs `libduckdb.dylib` staged alongside it (download from DuckDB's GitHub release in the workflow, or vendor both). Same blocker affects `release.yml` macos-arm64 target — for v0.5.1 release the macOS tarball will skip until this is wired.
 
 ### Priority 2 — quality, can ship without
 

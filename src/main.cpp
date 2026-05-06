@@ -54,6 +54,15 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // ── axon help | --help | -h ───────────────────────────────────────────
+    // print_usage() writes to stderr (consistent with the error fall-through
+    // at the end of main); the difference for help is the exit code — 0 here,
+    // 1 for unknown command at the bottom.
+    if (cmd == "help" || cmd == "--help" || cmd == "-h") {
+        print_usage();
+        return 0;
+    }
+
     // ── axon init [path] ──────────────────────────────────────────────────
     if (cmd == "init") {
         std::string path = argc > 2 ? argv[2] : "";

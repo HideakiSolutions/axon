@@ -22,8 +22,11 @@ jobs:
         include:
           - os: ubuntu-22.04
             compiler: gcc
-          - os: macos-14
-            compiler: clang
+          # macos-14 (arm64) build is gated until libduckdb.dylib is staged
+          # alongside the Linux .so under third_party/duckdb/lib/. Tracked in
+          # docs/audit-2026-05-handoff.md as a v0.6.x packaging task.
+          # - os: macos-14
+          #   compiler: clang
     steps:
       - uses: actions/checkout@v4
         with:
