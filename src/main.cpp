@@ -8,6 +8,7 @@
 #include "core/embeddings.hpp"
 #include "mcp/server.hpp"
 #include "mcp/http_server.hpp"
+#include "version.hpp"
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -30,6 +31,7 @@ Usage:
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
   axon help                             Show this help
+  axon --version | -V                   Print version and git SHA
 
 )";
 }
@@ -44,6 +46,22 @@ static axon::Config load_config(const std::string& path_arg = "") {
 int main(int argc, char* argv[]) {
     if (argc < 2) { print_usage(); return 1; }
     std::string cmd = argv[1];
+
+    // ── axon --version | -V | version ─────────────────────────────────────
+    if (cmd == "--version" || cmd == "-V" || cmd == "version") {
+        std::cout << "axon " << axon::VERSION
+                  << " (build " << axon::GIT_SHA << ")\n";
+        return 0;
+    }
+
+    // ── axon help | --help | -h ───────────────────────────────────────────
+    // print_usage() writes to stderr (consistent with the error fall-through
+    // at the end of main); the difference for help is the exit code — 0 here,
+    // 1 for unknown command at the bottom.
+    if (cmd == "help" || cmd == "--help" || cmd == "-h") {
+        print_usage();
+        return 0;
+    }
 
     // ── axon init [path] ──────────────────────────────────────────────────
     if (cmd == "init") {
@@ -209,7 +227,8 @@ int main(int argc, char* argv[]) {
         auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
         axon::EmbeddingModel model(model_path);
 
-        auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root);
+        auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root,
+                                              cfg.project_cfg.token_budget);
 
         std::cout << "{\n";
         std::cout << "  \"query\": \"" << query << "\",\n";

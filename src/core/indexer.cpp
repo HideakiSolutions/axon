@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <vector>
 #include <sstream>
 
@@ -23,28 +24,123 @@ static const std::vector<std::string> SKIP_DIRS = {
     ".axon", "dist", ".next", "vendor", ".venv", "venv", ".worktrees"
 };
 
-static std::vector<std::string> g_ignore_patterns;
+// Compiled .axonignore entry. Patterns with no glob meta-chars retain a fast
+// equality path; patterns containing *, **, or ? compile to regex once and
+// match repeatedly. Last-rule-wins for conflicting include/exclude (gitignore
+// semantics).
+struct IgnoreRule {
+    std::string raw;            // original line, post-trim
+    bool        negate = false; // leading `!` flips include/exclude
+    bool        anchored = false; // leading `/` matches only at project root
+    bool        dir_only = false; // trailing `/` matches directories only
+    bool        has_glob = false; // any of * ? **
+    std::regex  re;             // compiled if has_glob, else unused
+};
+
+static std::vector<IgnoreRule> g_ignore_rules;
+static fs::path g_project_root;
+
+// Translate a single gitignore-style glob pattern into an anchored ECMAScript
+// regex. Honors `*` (no slashes), `**` (any), `?` (one char no slash), and
+// escapes regex meta-chars. The resulting regex matches the *full* candidate
+// string, so callers should pass either a filename or a project-relative path
+// based on the rule's `anchored` flag.
+static std::regex glob_to_regex(const std::string& pat) {
+    std::string re;
+    re.reserve(pat.size() * 2 + 4);
+    re += "^";
+    for (size_t i = 0; i < pat.size(); i++) {
+        char c = pat[i];
+        if (c == '*') {
+            if (i + 1 < pat.size() && pat[i+1] == '*') {
+                re += ".*";
+                i++;  // consume the second *
+            } else {
+                re += "[^/]*";
+            }
+        } else if (c == '?') {
+            re += "[^/]";
+        } else if (c == '.' || c == '+' || c == '(' || c == ')' || c == '[' ||
+                   c == ']' || c == '{' || c == '}' || c == '^' || c == '$' ||
+                   c == '|' || c == '\\') {
+            re += '\\';
+            re += c;
+        } else {
+            re += c;
+        }
+    }
+    re += "$";
+    return std::regex(re);
+}
 
 static void load_axonignore(const fs::path& project_root) {
-    g_ignore_patterns.clear();
+    g_ignore_rules.clear();
+    g_project_root = project_root;
     auto ignore_file = project_root / ".axonignore";
     std::ifstream f(ignore_file);
     if (!f) return;
     std::string line;
     while (std::getline(f, line)) {
+        // Strip trailing whitespace + CR
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' ||
+                                 line.back() == '\t')) line.pop_back();
+        // Skip empty + comment lines
         if (line.empty() || line[0] == '#') continue;
-        while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
-            line.pop_back();
-        if (!line.empty()) g_ignore_patterns.push_back(line);
+        IgnoreRule rule;
+        if (!line.empty() && line[0] == '!') { rule.negate = true; line = line.substr(1); }
+        if (!line.empty() && line[0] == '/') { rule.anchored = true; line = line.substr(1); }
+        if (!line.empty() && line.back() == '/') { rule.dir_only = true; line.pop_back(); }
+        if (line.empty()) continue;
+        rule.raw = line;
+        rule.has_glob = (line.find('*') != std::string::npos ||
+                        line.find('?') != std::string::npos);
+        if (rule.has_glob) {
+            try { rule.re = glob_to_regex(line); }
+            catch (...) {
+                std::cerr << "[warn] .axonignore: invalid pattern '" << line << "', skipping\n";
+                continue;
+            }
+        }
+        g_ignore_rules.push_back(std::move(rule));
     }
 }
 
 static bool should_skip(const fs::path& p) {
+    // Hard-coded skip dirs always apply, regardless of .axonignore — these
+    // are not user-overridable for safety (re-indexing a node_modules would
+    // tank performance and pollute the symbol space).
     for (const auto& dir : SKIP_DIRS)
         if (p.filename() == dir) return true;
-    for (const auto& pat : g_ignore_patterns)
-        if (p.filename() == pat) return true;
-    return false;
+    if (g_ignore_rules.empty()) return false;
+    // Compute filename + project-relative path once.
+    std::string fname = p.filename().string();
+    std::string rel;
+    {
+        std::error_code ec;
+        auto rel_path = fs::relative(p, g_project_root, ec);
+        rel = ec ? fname : rel_path.generic_string();
+    }
+    bool is_dir = fs::is_directory(p);
+    // gitignore semantics: last matching rule wins. Default = not skipped;
+    // a non-negated rule excludes, a negated rule re-includes.
+    bool skipped = false;
+    for (const auto& rule : g_ignore_rules) {
+        if (rule.dir_only && !is_dir) continue;
+        bool hit = false;
+        if (rule.has_glob) {
+            // Anchored rules match against the project-relative path; bare
+            // patterns also match if any path segment matches the filename
+            // (gitignore convention for `*.log` etc.)
+            if (std::regex_match(rel, rule.re)) hit = true;
+            else if (!rule.anchored && std::regex_match(fname, rule.re)) hit = true;
+        } else {
+            // Plain string: anchored vs filename-eq, matches v0.5.0 behavior.
+            if (rule.anchored) hit = (rel == rule.raw);
+            else hit = (fname == rule.raw);
+        }
+        if (hit) skipped = !rule.negate;
+    }
+    return skipped;
 }
 
 // Returns file id, or -1 if unchanged (same hash and !force)
@@ -294,15 +390,35 @@ static void resolve_calls(duckdb::Connection& conn, int64_t from_id,
 }
 
 // Returns true if any component of path matches a skip dir or ignore pattern.
+// Hooked into sweep_deleted: a previously-indexed file becomes ignored when
+// the user adds a matching .axonignore rule, and we want it pruned on the
+// next indexing pass even though the file still exists on disk.
 static bool path_is_ignored(const fs::path& rel) {
     for (const auto& part : rel) {
         const std::string name = part.filename().string();
         for (const auto& dir : SKIP_DIRS)
             if (name == dir) return true;
-        for (const auto& pat : g_ignore_patterns)
-            if (name == pat) return true;
     }
-    return false;
+    // Match against the compiled .axonignore rules: we only need a pruning
+    // signal here, so reuse the same rule semantics as the walker — anchored
+    // patterns get the project-relative path; bare patterns also test against
+    // the basename. Negation rules can re-include.
+    if (g_ignore_rules.empty()) return false;
+    const std::string fname = rel.filename().string();
+    const std::string rel_str = rel.generic_string();
+    bool ignored = false;
+    for (const auto& rule : g_ignore_rules) {
+        bool hit = false;
+        if (rule.has_glob) {
+            if (std::regex_match(rel_str, rule.re)) hit = true;
+            else if (!rule.anchored && std::regex_match(fname, rule.re)) hit = true;
+        } else {
+            if (rule.anchored) hit = (rel_str == rule.raw);
+            else hit = (fname == rule.raw);
+        }
+        if (hit) ignored = !rule.negate;
+    }
+    return ignored;
 }
 
 // Remove files from DB whose path no longer exists on disk OR whose path is now ignored.

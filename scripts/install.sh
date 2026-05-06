@@ -15,8 +15,19 @@
 set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AXON_BIN="$(dirname "$SCRIPTS_DIR")/build/axon"
-AXON_LIB="$(dirname "$SCRIPTS_DIR")/third_party/duckdb/lib"
+AXON_ROOT="$(dirname "$SCRIPTS_DIR")"
+AXON_BIN="$AXON_ROOT/build/axon"
+# Both the source-tree (third_party/duckdb/lib) and the release-tarball
+# layout (lib/) are accepted so the same script ships in both contexts.
+if [ -f "$AXON_ROOT/third_party/duckdb/lib/libduckdb.so" ] || \
+   [ -f "$AXON_ROOT/third_party/duckdb/lib/libduckdb.dylib" ]; then
+  AXON_LIB="$AXON_ROOT/third_party/duckdb/lib"
+elif [ -d "$AXON_ROOT/lib" ]; then
+  AXON_LIB="$AXON_ROOT/lib"
+  AXON_BIN="$AXON_ROOT/bin/axon"
+else
+  AXON_LIB="$AXON_ROOT/third_party/duckdb/lib"
+fi
 
 PROJECT="${1:-$(pwd)}"
 PROJECT="$(realpath "$PROJECT")"
@@ -26,11 +37,55 @@ CLAUDE_DIR="$PROJECT/.claude"
 
 echo "[axon] Installing for: $PROJECT"
 
-# Verificar dependências
-if ! command -v jq &>/dev/null; then
-  echo "[axon] ERROR: jq não encontrado. Instale: sudo apt install jq" >&2
-  exit 1
+# ── Dependency detection ────────────────────────────────────────────────────
+# OS hint per missing tool keeps the failure message useful regardless of
+# where the user is — apt for Linux, brew for macOS, scoop/winget hint for
+# WSL users coming from PowerShell muscle-memory.
+detect_os() {
+  case "$(uname -s)" in
+    Linux*)  echo linux  ;;
+    Darwin*) echo macos  ;;
+    *)       echo other  ;;
+  esac
+}
+
+install_hint() {
+  local pkg="$1"
+  case "$(detect_os)" in
+    linux)  echo "  sudo apt install $pkg     # Debian/Ubuntu" ;;
+    macos)  echo "  brew install $pkg         # macOS" ;;
+    *)      echo "  Install '$pkg' via your platform's package manager" ;;
+  esac
+}
+
+require_cmd() {
+  local cmd="$1" pkg="${2:-$1}"
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "[axon] ERROR: '$cmd' not found." >&2
+    install_hint "$pkg" >&2
+    return 1
+  fi
+}
+
+missing=0
+require_cmd jq       || missing=1
+require_cmd git      || missing=1
+require_cmd realpath coreutils || missing=1
+# cmake + python3 are only needed when building from source. If a pre-built
+# binary is staged at $AXON_BIN we skip those checks so the release-tarball
+# install path doesn't demand a full toolchain.
+if [ ! -x "$AXON_BIN" ]; then
+  require_cmd cmake   || missing=1
+  require_cmd python3 || missing=1
+  require_cmd ninja   || true   # optional — CMake will fall back to make
 fi
+# Either curl or wget is fine for the embedding model download.
+if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+  echo "[axon] ERROR: neither 'curl' nor 'wget' found (needed if the embedding model has to be downloaded)." >&2
+  install_hint curl >&2
+  missing=1
+fi
+[ "$missing" = 0 ] || exit 1
 
 # 1. Instalar hooks globais
 mkdir -p "$HOOKS_DIR"
@@ -133,14 +188,56 @@ fi
 
 echo "[axon] ✓ Settings: $SETTINGS"
 
-# 5. Indexar o projeto
-if [ -f "$AXON_BIN" ]; then
-  echo "[axon] Indexando projeto (pode levar alguns instantes)..."
+# 5. Optional embedding model download
+# AXON_EMBEDDING_MODEL=<path>          → user provides their own; skip download.
+# AXON_DOWNLOAD_MODEL=1 (or 0)         → explicit opt-in/out override.
+# Default                              → only download when model is absent
+#                                        AND the user is interactive (TTY).
+MODEL_DIR="${AXON_MODEL_DIR:-$AXON_ROOT/models}"
+DEFAULT_MODEL_NAME="nomic-embed-text-v1.5.Q4_K_M.gguf"
+DEFAULT_MODEL_URL="${AXON_EMBEDDING_MODEL_URL:-https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/$DEFAULT_MODEL_NAME}"
+
+if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME" ]; then
+  do_download=0
+  if [ "${AXON_DOWNLOAD_MODEL:-}" = "1" ]; then
+    do_download=1
+  elif [ "${AXON_DOWNLOAD_MODEL:-}" = "0" ]; then
+    do_download=0
+  elif [ -t 0 ]; then
+    read -r -p "[axon] Download embedding model (~150 MiB) to $MODEL_DIR? [y/N] " yn
+    [[ "$yn" =~ ^[Yy] ]] && do_download=1
+  fi
+  if [ "$do_download" = 1 ]; then
+    mkdir -p "$MODEL_DIR"
+    echo "[axon] Downloading $DEFAULT_MODEL_NAME ..."
+    if command -v curl &>/dev/null; then
+      curl -fL --progress-bar "$DEFAULT_MODEL_URL" -o "$MODEL_DIR/$DEFAULT_MODEL_NAME"
+    else
+      wget -q --show-progress "$DEFAULT_MODEL_URL" -O "$MODEL_DIR/$DEFAULT_MODEL_NAME"
+    fi
+    if [ -n "${AXON_EMBEDDING_MODEL_SHA256:-}" ]; then
+      echo "[axon] Verifying SHA-256 ..."
+      actual=$(shasum -a 256 "$MODEL_DIR/$DEFAULT_MODEL_NAME" | awk '{print $1}')
+      if [ "$actual" != "$AXON_EMBEDDING_MODEL_SHA256" ]; then
+        echo "[axon] ERROR: SHA-256 mismatch (expected $AXON_EMBEDDING_MODEL_SHA256, got $actual)" >&2
+        rm -f "$MODEL_DIR/$DEFAULT_MODEL_NAME"
+        exit 1
+      fi
+    fi
+    echo "[axon] ✓ Model: $MODEL_DIR/$DEFAULT_MODEL_NAME"
+  else
+    echo "[axon] (skipped model download — set AXON_EMBEDDING_MODEL=<path> or AXON_DOWNLOAD_MODEL=1 later)"
+  fi
+fi
+
+# 6. Index the project
+if [ -x "$AXON_BIN" ]; then
+  echo "[axon] Indexing project (this may take a moment)..."
   LD_LIBRARY_PATH="$AXON_LIB" "$AXON_BIN" index "$PROJECT"
-  echo "[axon] ✓ Indexação concluída"
+  echo "[axon] ✓ Indexed"
 else
-  echo "[axon] AVISO: binário não encontrado em $AXON_BIN — indexe manualmente com: axon index $PROJECT"
+  echo "[axon] WARN: binary not found at $AXON_BIN — index manually with: axon index $PROJECT"
 fi
 
 echo ""
-echo "[axon] Instalação concluída. Reinicie o Claude Code para ativar os hooks."
+echo "[axon] Install complete. Restart Claude Code to activate the hooks."

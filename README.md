@@ -1,7 +1,8 @@
 # axon — Context Engine for AI Coding Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/HideakiSolutions/axon/actions/workflows/ci.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/ci.yml)
+[![Build](https://github.com/HideakiSolutions/axon/actions/workflows/build.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/build.yml)
+[![Lint](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)](CMakeLists.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-blue)](https://docs.anthropic.com/claude-code)
 [![MCP](https://img.shields.io/badge/MCP-15%20tools-8b5cf6)](src/mcp/server.cpp)
@@ -169,7 +170,7 @@ axon serve --http --port=7070
 axon serve --http --port=7070 --all
 
 # Specific group from registry
-axon serve --http --port=7070 --group=hideakisolutions
+axon serve --http --port=7070 --group=backend
 ```
 
 **REST endpoints:**
@@ -204,10 +205,10 @@ Registry format (`~/.axon/registry.json`):
 ```json
 {
   "repos": [
-    { "name": "axon", "root": "/opt/hideakisolutions/axon", "db_path": "..." }
+    { "name": "axon", "root": "/home/alice/projects/axon", "db_path": "..." }
   ],
   "groups": {
-    "hideakisolutions": ["axon", "mcp-factory", "poynt-hub"]
+    "backend": ["axon", "api-service", "worker-pool"]
   }
 }
 ```

@@ -8,11 +8,16 @@
 #
 # Configurado em: <project>/.claude/settings.json com matcher "Bash"
 
+# shellcheck disable=SC1091
+[ -f "$(dirname "${BASH_SOURCE[0]}")/_log.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/_log.sh"
+log() { command -v axon_log &>/dev/null && axon_log "axon-build-guard" "$@"; }
+
 if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
 if [ "${AXON_ALLOW_HIGH_PARALLELISM:-0}" = "1" ]; then
+  log "pass" '{"reason":"escape-hatch"}'
   exit 0
 fi
 
@@ -26,6 +31,7 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 MAX_JOBS=2
 
 deny() {
+  log "deny" "$(jq -n --arg r "$1" '{reason:$r}')"
   jq -n --arg reason "$1" '{
     "hookSpecificOutput": {
       "hookEventName": "PreToolUse",
@@ -46,16 +52,32 @@ if echo "$CMD" | grep -Eq -- '-j[[:space:]]*[`$]'; then
   deny "$REASON_BASE Detectado: -j com expansão dinâmica (\$(nproc) ou similar)."
 fi
 
+# --parallel $(nproc) / `nproc` / ${nproc}
+if echo "$CMD" | grep -Eq -- '--parallel[[:space:]]*[`$]'; then
+  deny "$REASON_BASE Detectado: cmake --parallel com expansão dinâmica."
+fi
+
 # -j N (com número explícito)
 JOBS=$(echo "$CMD" | grep -oE -- '-j[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1)
 if [ -n "$JOBS" ] && [ "$JOBS" -gt "$MAX_JOBS" ]; then
   deny "$REASON_BASE Detectado: -j${JOBS} (máximo permitido: -j${MAX_JOBS})."
 fi
 
+# cmake --parallel N (with explicit number)
+PJOBS=$(echo "$CMD" | grep -oE -- '--parallel[[:space:]]+[0-9]+' | grep -oE '[0-9]+' | sort -n | tail -1)
+if [ -n "$PJOBS" ] && [ "$PJOBS" -gt "$MAX_JOBS" ]; then
+  deny "$REASON_BASE Detectado: cmake --parallel ${PJOBS} (máximo: ${MAX_JOBS})."
+fi
+
 # -j sozinho (make interpreta como ilimitado)
 # Match -j seguido por espaço+não-número, fim de linha, ou separador de comando
 if echo "$CMD" | grep -Eq -- '-j([[:space:]]+[^0-9]|[[:space:]]*$|[[:space:]]*[;&|])'; then
   deny "$REASON_BASE Detectado: -j sem número (make interpreta como ilimitado)."
+fi
+
+# cmake --build ... --parallel sem número (interpreta como nproc)
+if echo "$CMD" | grep -Eq -- '--parallel([[:space:]]+[^0-9]|[[:space:]]*$|[[:space:]]*[;&|])'; then
+  deny "$REASON_BASE Detectado: cmake --parallel sem número (default é nproc)."
 fi
 
 # ninja sem -j explícito também é ilimitado por default

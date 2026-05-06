@@ -1,0 +1,147 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (must already exist)'
+        required: true
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-22.04
+            archive_ext: tar.gz
+          - target: macos-arm64
+            os: macos-14
+            archive_ext: tar.gz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential ninja-build
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja
+
+      - name: Build
+        run: cmake --build build --target axon -j 2
+
+      - name: Resolve version
+        id: ver
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          if [ "${tag}" = "${GITHUB_REF}" ]; then tag="${{ github.event.inputs.tag }}"; fi
+          version="${tag#v}"
+          echo "tag=${tag}"     >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage release tree
+        # Bundle the runtime libduckdb alongside the binary and ship a
+        # bin/axon launcher with embedded RPATH-equivalent — matches what
+        # scripts/install.sh sets up on a developer machine.
+        run: |
+          stage="axon-${{ steps.ver.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "${stage}/bin" "${stage}/lib"
+          cp build/axon "${stage}/bin/axon"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            cp third_party/duckdb/lib/libduckdb.so "${stage}/lib/"
+          else
+            cp third_party/duckdb/lib/libduckdb.dylib "${stage}/lib/"
+          fi
+          cp README.md LICENSE CHANGELOG.md "${stage}/"
+          cp scripts/install.sh "${stage}/install.sh"
+          echo "${stage}" > .stage-name
+
+      - name: Archive + checksum
+        run: |
+          stage="$(cat .stage-name)"
+          tar czf "${stage}.tar.gz" "${stage}"
+          shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            axon-*-${{ matrix.target }}.tar.gz
+            axon-*-${{ matrix.target }}.tar.gz.sha256
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Resolve version
+        id: ver
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          if [ "${tag}" = "${GITHUB_REF}" ]; then tag="${{ github.event.inputs.tag }}"; fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract CHANGELOG slice
+        # Pull out the section for the released version (between this version's
+        # heading and the next one). Failing fall-through emits a stub so the
+        # release still lands.
+        id: notes
+        run: |
+          version="${{ steps.ver.outputs.tag }}"
+          version="${version#v}"
+          awk -v v="${version}" '
+            $0 ~ "^## \\["v"\\]" { capture=1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Release ${{ steps.ver.outputs.tag }}." > release-notes.md
+          fi
+          {
+            echo "## Checksums"
+            echo
+            echo '```'
+            (cd dist && find . -name '*.sha256' -exec cat {} \;)
+            echo '```'
+          } >> release-notes.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: axon ${{ steps.ver.outputs.tag }}
+          body_path: release-notes.md
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.tar.gz.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: false
