@@ -383,15 +383,49 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "struct_item") {
-            sym.kind = "class";
+            sym.kind = "class";  // kept "class" for back-compat with existing edge queries
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_item" || kind == "union_item") {
+            sym.kind = (kind == "enum_item") ? "enum" : "union";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "trait_item") {
+            sym.kind = "trait";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "impl_item") {
-            sym.kind = "class";
-            TSNode type_node = ts_node_child_by_field_name(node, "type", 4);
-            if (!ts_node_is_null(type_node)) sym.name = "impl " + node_text(type_node, ctx.src);
+            // Distinguish `impl Trait for Type` (trait impl) from `impl Type` (inherent impl).
+            // Without this, both collapsed onto kind="class" name="impl Type", losing the
+            // trait↔implementor relationship in the symbol graph.
+            TSNode trait_node = ts_node_child_by_field_name(node, "trait", 5);
+            TSNode type_node  = ts_node_child_by_field_name(node, "type", 4);
+            std::string type_name = ts_node_is_null(type_node) ? "" : node_text(type_node, ctx.src);
+            sym.kind = "impl";
+            if (!ts_node_is_null(trait_node)) {
+                sym.name = node_text(trait_node, ctx.src) + " for " + type_name;
+            } else {
+                sym.name = "impl " + type_name;
+            }
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "mod_item") {
+            sym.kind = "module";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "macro_definition") {
+            // `macro_rules! name { ... }` — the macro itself is a defined symbol.
+            sym.kind = "macro";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "use_declaration") {
