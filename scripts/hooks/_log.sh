@@ -42,9 +42,12 @@ axon_log() {
     local size
     size=$(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file" 2>/dev/null || echo 0)
     if [ "${size:-0}" -gt "$AXON_LOG_MAX_BYTES" ]; then
-      local rotated="${log_dir}/${hook}.$(date +%s).jsonl"
+      local rotated
+      rotated="${log_dir}/${hook}.$(date +%s).jsonl"
       mv -f "$log_file" "$rotated" 2>/dev/null || true
-      command -v gzip &>/dev/null && gzip -f "$rotated" 2>/dev/null || true
+      if command -v gzip &>/dev/null; then
+        gzip -f "$rotated" 2>/dev/null || true
+      fi
     fi
   fi
 
