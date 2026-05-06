@@ -733,6 +733,31 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
+        } else if (kind == "declaration_command") {
+            // `export FOO=bar`, `readonly X=1`, `declare -r BASE=...` — emit the
+            // assigned name as a symbol so capsule queries about config knobs
+            // can locate the export site without re-grepping. Heredocs and
+            // bare-variable assignments without `export`/`readonly`/`declare`
+            // are intentionally skipped (high noise, low semantic value).
+            uint32_t cc = ts_node_child_count(node);
+            std::string keyword;
+            if (cc > 0) keyword = node_text(ts_node_child(node, 0), ctx.src);
+            if (keyword == "export" || keyword == "readonly" ||
+                keyword == "declare" || keyword == "typeset") {
+                for (uint32_t i = 1; i < cc; i++) {
+                    TSNode c = ts_node_child(node, i);
+                    if (std::string(ts_node_type(c)) == "variable_assignment") {
+                        TSNode nm = ts_node_child_by_field_name(c, "name", 4);
+                        if (!ts_node_is_null(nm)) {
+                            sym.kind = "variable";
+                            sym.name = node_text(nm, ctx.src);
+                            sym.signature = first_line(node, ctx.src);
+                            is_symbol = true;
+                            break;
+                        }
+                    }
+                }
+            }
         } else if (kind == "command") {
             uint32_t cc = ts_node_child_count(node);
             if (cc >= 2) {
