@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # GitHub Actions used by build/release/lint workflows. Weekly cadence keeps
+  # noise low while still catching action-level CVE bumps within a sprint.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: ci
+
+  # Tree-sitter grammars + duckdb + llama.cpp + blake3 are vendored as
+  # submodules under third_party/. Dependabot doesn't currently track
+  # individual submodule SHAs the way it tracks Cargo/npm — track them as
+  # `gitsubmodule` ecosystem on monthly cadence to avoid unbounded churn
+  # while still surfacing security-relevant grammar updates.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - submodules
+    commit-message:
+      prefix: chore
