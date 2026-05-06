@@ -169,7 +169,7 @@ axon serve --http --port=7070
 axon serve --http --port=7070 --all
 
 # Specific group from registry
-axon serve --http --port=7070 --group=hideakisolutions
+axon serve --http --port=7070 --group=backend
 ```
 
 **REST endpoints:**
@@ -204,10 +204,10 @@ Registry format (`~/.axon/registry.json`):
 ```json
 {
   "repos": [
-    { "name": "axon", "root": "/opt/hideakisolutions/axon", "db_path": "..." }
+    { "name": "axon", "root": "/home/alice/projects/axon", "db_path": "..." }
   ],
   "groups": {
-    "hideakisolutions": ["axon", "mcp-factory", "poynt-hub"]
+    "backend": ["axon", "api-service", "worker-pool"]
   }
 }
 ```
