@@ -1,9 +1,26 @@
 cmake_minimum_required(VERSION 3.20)
-project(axon VERSION 0.5.0 LANGUAGES C CXX ASM)
+project(axon VERSION 0.5.1 LANGUAGES C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
+
+# ── Version + git SHA ────────────────────────────────────────────────────────
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE AXON_GIT_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT AXON_GIT_SHA)
+    set(AXON_GIT_SHA "unknown")
+endif()
+configure_file(
+    ${CMAKE_SOURCE_DIR}/src/version.hpp.in
+    ${CMAKE_BINARY_DIR}/generated/version.hpp
+    @ONLY
+)
 
 # ── DuckDB (pre-built shared lib from GitHub releases) ───────────────────────
 add_library(duckdb_lib SHARED IMPORTED)
@@ -140,6 +157,7 @@ add_executable(axon ${AXON_SOURCES})
 
 target_include_directories(axon PRIVATE
     src/
+    ${CMAKE_BINARY_DIR}/generated
     third_party/tree-sitter/lib/include
     third_party/duckdb
     third_party/llama.cpp/include

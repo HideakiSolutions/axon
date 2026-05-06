@@ -1,0 +1,8 @@
+#pragma once
+
+namespace axon {
+
+inline constexpr const char* VERSION = "@PROJECT_VERSION@";
+inline constexpr const char* GIT_SHA = "@AXON_GIT_SHA@";
+
+} // namespace axon
