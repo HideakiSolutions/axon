@@ -189,3 +189,13 @@ target_link_libraries(axon PRIVATE
 add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
 
 target_compile_options(axon PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+
+# ── tests ────────────────────────────────────────────────────────────────────
+# Default ON only when this is the top-level project, so downstream embedders
+# that vendor axon don't accidentally pull in GoogleTest. Toggle with
+# `cmake -S . -B build -DAXON_BUILD_TESTS=OFF`.
+option(AXON_BUILD_TESTS "Build axon unit tests" ${PROJECT_IS_TOP_LEVEL})
+if(AXON_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
