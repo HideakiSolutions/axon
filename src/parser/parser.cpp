@@ -981,6 +981,21 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // C++
     if (ctx.lang == Language::Cpp) {
+        // template_declaration wraps a function_definition / class_specifier /
+        // struct_specifier child. We let the inner declaration emit its symbol
+        // normally (visit_node recurses) but capture the template parameters
+        // line in docstring so capsule rendering keeps `template<typename T>`
+        // visible alongside the templated entity. The lambda is only invoked
+        // for inner nodes whose parent is a template_declaration.
+        auto template_params_for = [&](TSNode inner) -> std::optional<std::string> {
+            TSNode parent = ts_node_parent(inner);
+            if (ts_node_is_null(parent)) return std::nullopt;
+            if (std::string(ts_node_type(parent)) != "template_declaration") return std::nullopt;
+            TSNode params = ts_node_child_by_field_name(parent, "parameters", 10);
+            if (ts_node_is_null(params)) return std::nullopt;
+            return node_text(params, ctx.src);
+        };
+
         if (kind == "function_definition") {
             sym.kind = "function";
             TSNode decl = ts_node_child_by_field_name(node, "declarator", 10);
@@ -995,9 +1010,23 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                 decl = inner;
             }
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = template_params_for(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_specifier" || kind == "struct_specifier") {
             sym.kind = (kind == "class_specifier") ? "class" : "struct";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            sym.docstring = template_params_for(node);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "union_specifier") {
+            sym.kind = "union";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_specifier") {
+            sym.kind = "enum";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -1006,6 +1035,13 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "friend_declaration") {
+            // friend declarations cross encapsulation boundaries — capsule
+            // queries about access control should surface them.
+            sym.kind = "friend";
+            sym.name = first_line(node, ctx.src).substr(0, 60);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "preproc_include") {
