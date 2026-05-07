@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] — 2026-05-07
+
+MCP server cache parity. Extends the v0.5.3 capsule cache from the CLI to the MCP `get_context_capsule` tool — the path Claude Code actually takes when invoking axon as an MCP server.
+
+### Added
+
+- **`get_context_capsule` MCP cache** integration. The handler now consults `capsule_cache_lookup` before assembling, returning the cached payload with `"cache": "hit"` on reuse and `"cache": "miss"` after a fresh assemble. Same key shape as the CLI: `BLAKE3(query + token_budget + project_epoch)`. Cache is bypassed when (a) the new `no_cache` tool argument is `true` or (b) the caller supplies explicit `pivot_files` (explicit pivots steer assembly differently and shouldn't share entries with the implicit semantic-ranking path).
+- **Lazy embedding-model check** on the MCP handler. The model-readiness gate moved past the cache lookup, so a server still warming up its embedding model can serve cached queries immediately. Misses still require the model and surface a clear error if it isn't loaded yet.
+- **`no_cache` schema field** advertised in the tool's `inputSchema` so MCP clients (Claude Code, axon-web, anything speaking MCP) can opt out per-call.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.4 → 0.5.5
+
 ## [0.5.4] — 2026-05-07
 
 End-to-end smoke harness + a real `.axonignore` glob fix surfaced by it.
