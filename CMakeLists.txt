@@ -23,12 +23,21 @@ configure_file(
 )
 
 # ── DuckDB (pre-built shared lib from GitHub releases) ───────────────────────
+# Linux ships libduckdb.so; macOS ships libduckdb.dylib. The release-tarball
+# layouts (and the CI download steps in build.yml / release.yml) keep both
+# under the same third_party/duckdb/lib/ path so the only thing that varies
+# is the file extension.
+if(APPLE)
+    set(AXON_DUCKDB_LIB ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.dylib)
+else()
+    set(AXON_DUCKDB_LIB ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.so)
+endif()
 add_library(duckdb_lib SHARED IMPORTED)
 set_target_properties(duckdb_lib PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.so
+    IMPORTED_LOCATION ${AXON_DUCKDB_LIB}
     INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib
 )
-# Ensure the .so is found at runtime
+# Ensure the shared lib is found at runtime (DT_RUNPATH on Linux, LC_RPATH on macOS).
 set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
 
 # ── tree-sitter core ─────────────────────────────────────────────────────────
@@ -207,8 +216,13 @@ target_link_libraries(axon PRIVATE
     blake3_lib
 )
 
-# DuckDB pre-built lib uses old GCC ABI (std::string without __cxx11 inline namespace)
-add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
+# Linux DuckDB pre-built lib uses old GCC ABI (std::string without __cxx11
+# inline namespace). On Apple platforms the macOS prebuilt links against
+# libc++ which doesn't honor this define, and forcing it would break
+# inline-namespace mangling — so gate to non-Apple.
+if(NOT APPLE)
+    add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
+endif()
 
 target_compile_options(axon PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
 

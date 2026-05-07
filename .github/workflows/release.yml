@@ -24,15 +24,11 @@ jobs:
           - target: linux-x64
             os: ubuntu-22.04
             archive_ext: tar.gz
-          # macos-arm64 release target is gated on staging libduckdb.dylib
-          # alongside the vendored libduckdb.so under third_party/duckdb/lib/.
-          # Same blocker as the build.yml matrix; tracked in the audit handoff
-          # as a v0.6.x packaging task. Until then, releases ship linux-x64
-          # only — install.sh + Dockerfile remain available for macOS users
-          # who want to build from source.
-          # - target: macos-arm64
-          #   os: macos-14
-          #   archive_ext: tar.gz
+          - target: macos-arm64
+            os: macos-14
+            archive_ext: tar.gz
+    env:
+      AXON_DUCKDB_VERSION: 1.1.3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,6 +44,15 @@ jobs:
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install cmake ninja
+
+      - name: Stage libduckdb.dylib (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -fL -o /tmp/duckdb.zip \
+            "https://github.com/duckdb/duckdb/releases/download/v${AXON_DUCKDB_VERSION}/libduckdb-osx-universal.zip"
+          mkdir -p third_party/duckdb/lib
+          unzip -o /tmp/duckdb.zip -d third_party/duckdb/lib/
+          test -f third_party/duckdb/lib/libduckdb.dylib
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja
@@ -75,7 +80,15 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp third_party/duckdb/lib/libduckdb.so "${stage}/lib/"
           else
+            # macOS dylib carries an absolute install_name that points back
+            # to the build dir; rewrite to a relative @loader_path/ so the
+            # tarball is relocatable.
             cp third_party/duckdb/lib/libduckdb.dylib "${stage}/lib/"
+            install_name_tool -id @rpath/libduckdb.dylib "${stage}/lib/libduckdb.dylib" || true
+            install_name_tool -change \
+              "$(pwd)/third_party/duckdb/lib/libduckdb.dylib" \
+              "@rpath/libduckdb.dylib" \
+              "${stage}/bin/axon" || true
           fi
           cp README.md LICENSE CHANGELOG.md "${stage}/"
           cp scripts/install.sh "${stage}/install.sh"
