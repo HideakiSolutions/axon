@@ -47,12 +47,26 @@ static fs::path g_project_root;
 // based on the rule's `anchored` flag.
 static std::regex glob_to_regex(const std::string& pat) {
     std::string re;
-    re.reserve(pat.size() * 2 + 4);
-    re += "^";
-    for (size_t i = 0; i < pat.size(); i++) {
+    re.reserve(pat.size() * 2 + 8);
+
+    // Gitignore semantics for a leading `**/`: matches zero or more leading
+    // directory segments. Without this special case `**/foo` would require
+    // *something* before /foo and miss top-level `foo`. Translate the prefix
+    // to `(?:.*/)?` (optional path prefix) and skip the literal slash that
+    // follows so we don't accidentally require a leading separator.
+    size_t start = 0;
+    if (pat.size() >= 3 && pat.compare(0, 3, "**/") == 0) {
+        re += "^(?:.*/)?";
+        start = 3;
+    } else {
+        re += "^";
+    }
+
+    for (size_t i = start; i < pat.size(); i++) {
         char c = pat[i];
         if (c == '*') {
             if (i + 1 < pat.size() && pat[i+1] == '*') {
+                // Mid-pattern `**` — match anything across slashes.
                 re += ".*";
                 i++;  // consume the second *
             } else {

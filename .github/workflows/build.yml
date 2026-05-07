@@ -89,6 +89,13 @@ jobs:
           ./build/axon --version
           ./build/axon help
 
+      - name: End-to-end smoke
+        # Drives examples/ + .axonignore globbing + cache hit/miss against
+        # the freshly-built binary. Capsule-cache section auto-skips when
+        # no embedding model is staged (the model is ~150 MiB and not worth
+        # downloading on every PR — caught by AXON_REQUIRE_MODEL=0 default).
+        run: bash tests/e2e/smoke.sh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
