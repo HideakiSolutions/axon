@@ -24,9 +24,15 @@ jobs:
           - target: linux-x64
             os: ubuntu-22.04
             archive_ext: tar.gz
-          - target: macos-arm64
-            os: macos-14
-            archive_ext: tar.gz
+          # macos-arm64 release target is gated on staging libduckdb.dylib
+          # alongside the vendored libduckdb.so under third_party/duckdb/lib/.
+          # Same blocker as the build.yml matrix; tracked in the audit handoff
+          # as a v0.6.x packaging task. Until then, releases ship linux-x64
+          # only — install.sh + Dockerfile remain available for macOS users
+          # who want to build from source.
+          # - target: macos-arm64
+          #   os: macos-14
+          #   archive_ext: tar.gz
     steps:
       - uses: actions/checkout@v4
         with:
