@@ -11,7 +11,7 @@ on:
         required: true
 
 permissions:
-  contents: write   # required to create the GitHub Release
+  contents: read    # source repo stays private — releases go to axon-releases via PAT
 
 jobs:
   build:
@@ -156,6 +156,8 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          repository: HideakiSolutions/axon-releases
+          token: ${{ secrets.RELEASES_PAT }}
           tag_name: ${{ steps.ver.outputs.tag }}
           name: axon ${{ steps.ver.outputs.tag }}
           body_path: release-notes.md
