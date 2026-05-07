@@ -29,6 +29,10 @@ configure_file(
 # is the file extension.
 if(APPLE)
     set(AXON_DUCKDB_LIB ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.dylib)
+elseif(WIN32)
+    # Windows: link against import lib (.lib) at build time; .dll at runtime.
+    set(AXON_DUCKDB_LIB  ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/duckdb.dll)
+    set(AXON_DUCKDB_IMPL ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/duckdb.lib)
 else()
     set(AXON_DUCKDB_LIB ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.so)
 endif()
@@ -37,8 +41,14 @@ set_target_properties(duckdb_lib PROPERTIES
     IMPORTED_LOCATION ${AXON_DUCKDB_LIB}
     INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib
 )
-# Ensure the shared lib is found at runtime (DT_RUNPATH on Linux, LC_RPATH on macOS).
-set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
+if(WIN32)
+    set_target_properties(duckdb_lib PROPERTIES IMPORTED_IMPLIB ${AXON_DUCKDB_IMPL})
+endif()
+# DT_RUNPATH (Linux) / LC_RPATH (macOS) — ignored on Windows where DLL must
+# be placed next to the executable.
+if(NOT WIN32)
+    set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
+endif()
 
 # ── tree-sitter core ─────────────────────────────────────────────────────────
 add_library(tree_sitter_lib STATIC
@@ -158,7 +168,9 @@ set(BLAKE3_SOURCES
     third_party/blake3/c/blake3_dispatch.c
     third_party/blake3/c/blake3_portable.c
 )
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)" AND NOT WIN32)
+    # Unix x86-64: hand-written AT&T-syntax assembly for peak SIMD throughput.
+    # Not usable on Windows — MSVC's assembler (ml64.exe) requires Intel syntax.
     list(APPEND BLAKE3_SOURCES
         third_party/blake3/c/blake3_sse2_x86-64_unix.S
         third_party/blake3/c/blake3_sse41_x86-64_unix.S
@@ -166,16 +178,15 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
         third_party/blake3/c/blake3_avx512_x86-64_unix.S
     )
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64)")
-    # Optional: arm64 NEON acceleration via the portable-headers neon source.
     if(EXISTS ${CMAKE_SOURCE_DIR}/third_party/blake3/c/blake3_neon.c)
         list(APPEND BLAKE3_SOURCES third_party/blake3/c/blake3_neon.c)
     endif()
 endif()
 add_library(blake3_lib STATIC ${BLAKE3_SOURCES})
 target_include_directories(blake3_lib PUBLIC third_party/blake3/c)
-# On arm64 we lose the runtime SIMD dispatch tables; tell BLAKE3 to omit
-# the SSE/AVX entry points so the dispatcher links against the C fallback.
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
+# Disable SIMD asm entry points on: (a) non-x86-64, (b) Windows/MSVC where
+# the .S files are not assembled. The dispatcher falls back to portable C.
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)" OR WIN32)
     target_compile_definitions(blake3_lib PRIVATE
         BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512
     )
@@ -220,11 +231,17 @@ target_link_libraries(axon PRIVATE
 # inline namespace). On Apple platforms the macOS prebuilt links against
 # libc++ which doesn't honor this define, and forcing it would break
 # inline-namespace mangling — so gate to non-Apple.
-if(NOT APPLE)
+# GCC/libstdc++ ABI compat for the pre-built DuckDB Linux .so.
+# Not applicable on Apple (libc++) or Windows (MSVC CRT).
+if(NOT APPLE AND NOT WIN32)
     add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
 endif()
 
-target_compile_options(axon PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+if(MSVC)
+    target_compile_options(axon PRIVATE /O2 /W3 /wd4100 /wd4244 /wd4267)
+else()
+    target_compile_options(axon PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+endif()
 
 # ── tests ────────────────────────────────────────────────────────────────────
 # Default ON only when this is the top-level project, so downstream embedders
