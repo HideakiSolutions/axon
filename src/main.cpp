@@ -27,7 +27,7 @@ Usage:
                                         (--prune alone = only sweep deleted files)
   axon serve  [--http] [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
                                         Start MCP server (stdio default; --http for REST API)
-  axon capsule <query>                  Print context capsule for a query
+  axon capsule <query> [--no-cache]     Print context capsule for a query
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
   axon help                             Show this help
@@ -212,11 +212,17 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── axon capsule <query> ───────────────────────────────────────────────
+    // ── axon capsule <query> [--no-cache] ──────────────────────────────────
     if (cmd == "capsule") {
-        if (argc < 3) { std::cerr << "Usage: axon capsule <query>\n"; return 1; }
+        if (argc < 3) { std::cerr << "Usage: axon capsule <query> [--no-cache]\n"; return 1; }
         std::string query;
-        for (int i = 2; i < argc; i++) { if (i > 2) query += " "; query += argv[i]; }
+        bool no_cache = false;
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--no-cache") { no_cache = true; continue; }
+            if (!query.empty()) query += " ";
+            query += a;
+        }
 
         auto cfg = load_config();
         if (!fs::exists(cfg.db_path)) { std::cerr << "No index found. Run `axon index` first.\n"; return 1; }
@@ -224,11 +230,37 @@ int main(int argc, char* argv[]) {
         axon::Database db(cfg.db_path);
         auto graph = axon::load_graph(db);
 
+        // Cache check (W2.T01) — skipped under --no-cache so devs can force
+        // a fresh assemble after parser/grammar changes that would otherwise
+        // be served from a stale entry.
+        const std::string epoch = axon::current_project_epoch(db);
+        const std::string cache_key = axon::compute_capsule_cache_key(
+            query, cfg.project_cfg.token_budget, epoch);
+        if (!no_cache) {
+            if (auto hit = axon::capsule_cache_lookup(db, cache_key, epoch)) {
+                std::cout << "{\n";
+                std::cout << "  \"query\": \"" << hit->query << "\",\n";
+                std::cout << "  \"token_estimate\": " << hit->token_estimate << ",\n";
+                std::cout << "  \"pivot_files\": " << hit->pivot_files.size() << ",\n";
+                std::cout << "  \"support_files\": " << hit->support_files.size() << ",\n";
+                std::cout << "  \"cache\": \"hit\"\n";
+                std::cout << "}\n";
+                for (const auto& f : hit->pivot_files)
+                    std::cerr << "  [pivot]   " << f.path << " (" << f.token_estimate << " tok)\n";
+                for (const auto& f : hit->support_files)
+                    std::cerr << "  [support] " << f.path << " (" << f.token_estimate << " tok)\n";
+                return 0;
+            }
+        }
+
         auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
         axon::EmbeddingModel model(model_path);
 
         auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root,
                                               cfg.project_cfg.token_budget);
+        if (!no_cache) {
+            axon::capsule_cache_insert(db, cache_key, epoch, capsule);
+        }
 
         std::cout << "{\n";
         std::cout << "  \"query\": \"" << query << "\",\n";
