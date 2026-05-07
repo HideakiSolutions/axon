@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] — 2026-05-07
+
+End-to-end smoke harness + a real `.axonignore` glob fix surfaced by it.
+
+### Added
+
+- **`tests/e2e/smoke.sh`** (W3.T17) — drives the user-facing surface that unit tests can't reach: `axon --version`, `axon help`, `axon init/index/status` against `examples/ts-mini`, capsule cache miss → hit → `--no-cache` round-trip, `.axonignore` `*.log` + `**/generated/**` exclusion, `axon skeleton` on `examples/python-mini`. Wired into `build.yml` as the step after `ctest`, so every PR exercises it on Linux + macOS. The capsule-cache section auto-skips with a log when no embedding model is staged on the runner; `AXON_REQUIRE_MODEL=1` flips that into a hard fail for release runs.
+
+### Fixed
+
+- **`.axonignore` `**/generated/**` did not match top-level `generated/x`** — `glob_to_regex` translated the leading `**/` to `.*/`, requiring at least one directory segment before `generated/`. The smoke caught this on first run. Leading `**/` is now translated to `(?:.*/)?` (zero-or-more directories), which matches gitignore semantics. Bare `**` mid-pattern still translates to `.*` as before.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.3 → 0.5.4
+
 ## [0.5.3] — 2026-05-07
 
 Capsule cache + parser test expansion. Closes the last open quick-win from the audit's W2 wave and brings the parser smoke suite to 11 cases.
