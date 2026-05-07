@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-05-07
+
+Capsule cache + parser test expansion. Closes the last open quick-win from the audit's W2 wave and brings the parser smoke suite to 11 cases.
+
+### Added
+
+- **Capsule cache** by query hash (W2.T01). New `capsule_cache(query_hash, epoch, payload, created_at)` table; key = `BLAKE3(query + token_budget + epoch)` where `epoch = MAX(files.indexed_at)`. Hits skip embedding + ranking + skeletonization. Smoke on a 1-file Python project: 370ms (miss) → 41ms (hit) — **9× speedup**, matching the audit projection. New `--no-cache` flag on `axon capsule` for forced re-assemble. CLI hits emit `"cache": "hit"` for visibility. Best-effort: malformed rows / insert failures log and continue, never throw.
+- **Parser smoke tests** for Go, C#, PHP, Dart, C++ (W3.T04/T05/T06/T07/T10). Total parser coverage in CI rises from 6 to 11 tests. The expansion surfaced a real grammar gap — the vendored `tree-sitter-dart` does not emit `mixin_declaration` for top-level `mixin X {}`, even though the W1.T07 handler is wired correctly. Tracked as a v0.6.x grammar-bump task in the handoff.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.2 → 0.5.3
+
 ## [0.5.2] — 2026-05-07
 
 Platform expansion. Adds macOS-arm64 to the build matrix and the release tarball lineup, closing the packaging blocker tracked in `docs/audit-2026-05-handoff.md` post-v0.5.1.
