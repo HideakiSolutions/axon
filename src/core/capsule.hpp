@@ -37,4 +37,30 @@ ContextCapsule assemble_capsule(
     const std::filesystem::path& project_root,
     int token_budget = 8000);
 
+// ── Cache primitives (W2.T01) ───────────────────────────────────────────────
+// Cache key = BLAKE3(query + "|" + token_budget + "|" + project_epoch),
+// where project_epoch = string-formatted max(files.indexed_at). Hits avoid
+// the embedding + ranking + skeletonization roundtrip (~10x faster on
+// repeat queries against an unchanged index).
+
+// Snapshot the current index epoch. Returns "0" when no files indexed yet.
+std::string current_project_epoch(Database& db);
+
+// BLAKE3-hash the cache key inputs. Pure function, no DB access.
+std::string compute_capsule_cache_key(const std::string& query,
+                                      int token_budget,
+                                      const std::string& epoch);
+
+// Look up a cached capsule. Returns nullopt on miss or epoch mismatch.
+std::optional<ContextCapsule> capsule_cache_lookup(Database& db,
+                                                   const std::string& key,
+                                                   const std::string& epoch);
+
+// Persist a capsule under the given key+epoch. Best-effort: a failed write
+// is logged to stderr but does not throw.
+void capsule_cache_insert(Database& db,
+                          const std::string& key,
+                          const std::string& epoch,
+                          const ContextCapsule& capsule);
+
 } // namespace axon

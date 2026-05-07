@@ -78,6 +78,18 @@ void Database::run_migrations() {
          "  framework    VARCHAR NOT NULL DEFAULT 'unknown',"
          "  file_id      BIGINT"
          ")");
+
+    // Capsule cache (W2.T01). Keyed by BLAKE3(query + project_epoch) where
+    // project_epoch = max(files.indexed_at). When the index changes, the
+    // epoch shifts and old entries become unreachable — they sit dead in the
+    // table until the periodic prune below reaps them. Cache hits avoid the
+    // expensive embedding + ranking + skeletonization roundtrip.
+    exec("CREATE TABLE IF NOT EXISTS capsule_cache ("
+         "  query_hash  VARCHAR PRIMARY KEY,"
+         "  epoch       VARCHAR NOT NULL,"
+         "  payload     VARCHAR NOT NULL,"
+         "  created_at  TIMESTAMP NOT NULL DEFAULT now()"
+         ")");
 }
 
 } // namespace axon
