@@ -249,14 +249,52 @@ Registry format (`~/.axon/registry.json`):
 
 ## Installation
 
-### 1. Clone with submodules
+### macOS & Linux — Homebrew (recommended)
+
+```bash
+brew tap HideakiSolutions/axon
+brew install axon
+```
+
+After installation, wire axon into a Claude Code project (installs hooks + injects the workflow guide):
+
+```bash
+axon-setup /path/to/your-project
+```
+
+### Direct download (no Homebrew)
+
+Download the pre-built binary for your platform from the [releases page](https://github.com/HideakiSolutions/axon/releases/latest):
+
+| Platform | File |
+|----------|------|
+| Linux x86-64 | `axon-X.Y.Z-linux-x64.tar.gz` |
+| macOS Apple Silicon | `axon-X.Y.Z-macos-arm64.tar.gz` |
+
+```bash
+# Example for Linux x86-64 (replace X.Y.Z with the latest version)
+VERSION=0.5.5
+curl -L -o axon.tar.gz \
+  "https://github.com/HideakiSolutions/axon/releases/download/v${VERSION}/axon-${VERSION}-linux-x64.tar.gz"
+tar xzf axon.tar.gz
+cd "axon-${VERSION}-linux-x64"
+./install.sh /path/to/your-project
+```
+
+### Build from source
+
+> The steps below are for contributors or platforms without a pre-built binary. For a faster start, use [Homebrew](#macos--linux--homebrew-recommended) or [direct download](#direct-download-no-homebrew) above.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full build instructions (requires CMake, Ninja, and a C++20 compiler). Quick summary:
+
+#### 1. Clone with submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/HideakiSolutions/axon.git
 cd axon
 ```
 
-### 2. Build
+#### 2. Build
 
 ```bash
 mkdir build && cd build
@@ -266,14 +304,14 @@ make -j2
 
 > Use `-j2` maximum. Higher parallelism during the llama.cpp + 13 grammar compilation can lock up shared hosts. First build ~10–12 min; subsequent builds with `ccache` ~70% faster.
 
-### 3. Set library path
+#### 3. Set library path
 
 ```bash
 export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
 # Add to ~/.bashrc or ~/.zshrc for persistence
 ```
 
-### 4. Embedding model (optional — enables semantic search)
+#### 4. Embedding model (optional — enables semantic search)
 
 ```bash
 pip install huggingface_hub
@@ -284,7 +322,7 @@ huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF \
 
 Without the model, all tools work normally except `search_memory` and the semantic-query mode of `get_context_capsule`.
 
-### 5. Configure Claude Code
+#### 5. Configure Claude Code
 
 Add to `~/.claude.json` under `mcpServers`:
 
