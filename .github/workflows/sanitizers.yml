@@ -1,0 +1,74 @@
+name: sanitizers
+
+# AddressSanitizer + UndefinedBehaviorSanitizer nightly run on develop.
+# Why nightly and not per-PR: build with ASAN slows compile ~2x and runs
+# ~3x, which would hurt PR latency without proportional value — sanitizers
+# catch low-rate memory + UB regressions, not high-rate logic bugs (those
+# are the unit tests' job). Nightly + on-demand keeps the signal high.
+on:
+  schedule:
+    - cron: '0 5 * * *'   # 05:00 UTC daily
+  workflow_dispatch:        # manual trigger from the Actions UI
+  push:
+    branches: [develop]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/sanitizers.yml'
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sanitize:
+    name: ${{ matrix.sanitizer }} (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, undefined]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential ninja-build
+
+      - name: Configure with -fsanitize=${{ matrix.sanitizer }}
+        # -fno-omit-frame-pointer makes ASAN traces actually readable.
+        # ABI flag mirrors CMakeLists's _GLIBCXX_USE_CXX11_ABI=0, which has
+        # to flow through CXXFLAGS so dependencies (gtest, llama.cpp) compile
+        # against the same ABI as the vendored libduckdb.so.
+        run: |
+          cmake -S . -B build -GNinja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DAXON_BUILD_TESTS=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer -O1 -g" \
+            -DCMAKE_C_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer -O1 -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=${{ matrix.sanitizer }}"
+
+      - name: Build tests
+        run: cmake --build build --target test_parser_smoke -j 2
+
+      - name: Run tests under ${{ matrix.sanitizer }}
+        # ASAN_OPTIONS keep the runtime strict (abort_on_error=1) so a single
+        # leak kills the run instead of being buried in stdout. UBSAN gets
+        # print_stacktrace so reporting includes a usable backtrace.
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload sanitizer logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizers-${{ matrix.sanitizer }}-logs
+          path: |
+            build/Testing/Temporary/LastTest.log
+          retention-days: 7
