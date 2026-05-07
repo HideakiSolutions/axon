@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-05-07
+
+Platform expansion. Adds macOS-arm64 to the build matrix and the release tarball lineup, closing the packaging blocker tracked in `docs/audit-2026-05-handoff.md` post-v0.5.1.
+
+### Added
+
+- **macOS-arm64 build + release**. `.github/workflows/build.yml` and `release.yml` now include `macos-14` / `macos-arm64` targets and download `libduckdb-osx-universal.zip` (DuckDB v1.1.3) into `third_party/duckdb/lib/` before configure. Universal `.dylib` covers both Apple Silicon and Intel Macs.
+- **Nightly sanitizers**. New `.github/workflows/sanitizers.yml` runs the test suite under `-fsanitize=address` and `-fsanitize=undefined` matrix on a daily cron + push-to-develop on src/tests/CMake paths. First run on develop landed clean.
+
+### Fixed
+
+- `CMakeLists.txt` `_GLIBCXX_USE_CXX11_ABI=0` is now gated to non-Apple builds. The flag is GCC-libstdc++-specific; forcing it on Apple's libc++ would corrupt inline-namespace mangling.
+- `release.yml` rewrites the macOS dylib's install_name to `@rpath/libduckdb.dylib` and patches the axon binary via `install_name_tool` so the published tarball is relocatable.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.1 → 0.5.2
+
 ## [0.5.1] — 2026-05-06
 
 Audit-driven hardening cycle. Output of a deep coverage audit (13 languages × parser blocks × hooks × engine quick-wins × packaging readiness). Closes the highest-impact parser gaps, adds operator-facing knobs, and prepares the project for public distribution.
