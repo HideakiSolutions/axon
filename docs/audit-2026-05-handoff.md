@@ -33,10 +33,16 @@ All 13 language blocks in `src/parser/parser.cpp` refreshed against the audit:
 - W2.T05 ✅ `axon --version` / `-V` / `version` with git SHA via CMake `configure_file`
 - W2.T01 ⏳ deferred — capsule cache needs DB schema + JSON serialization + invalidation epoch (separate task)
 
-### Wave 3 — test foundation (1/17 ✅; the rest is mechanical fixture work)
+### Wave 3 — test foundation (6/17 ✅; the rest is mechanical fixture work)
 
 - W3.T01 ✅ GoogleTest+CTest via FetchContent, `AXON_BUILD_TESTS` CMake option, `axon_parser_objs` OBJECT lib, `add_axon_test()` helper, `tests/unit/test_parser_smoke.cpp` covering Rust/Python/Java/Bash/Kotlin/TS. Caught a TS export-decorator gap during bootstrap (fixed in same wave).
-- W3.T02–T13 ⏳ per-language deeper fixtures (Go, C#, PHP, Dart, C++, Vue) — pattern is set; copy the smoke template.
+- W3.T04 ✅ Go test (`type_declaration` interface/struct classification + method on receiver)
+- W3.T05 ✅ C# test (`property_declaration`, `record_declaration`, `enum`, `namespace`, `partial_class`/`async_method` modifiers, `[ApiController]` in docstring)
+- W3.T06 ✅ PHP test (`namespace_definition`, `trait_declaration`, `interface`; `#[Route(...)]` opportunistic)
+- W3.T07 ✅ Dart test (`extension_declaration`, `enum_declaration`, factory/constructor — see grammar gap below)
+- W3.T10 ✅ C++ test (`enum_specifier`, `union_specifier`, `friend_declaration`, `namespace`, template params folded into docstring)
+- **Discovered**: tree-sitter-dart's vendored version does NOT emit `mixin_declaration` for top-level `mixin X { ... }` — Logger drops silently. W1.T07 handler is correct; needs grammar bump (or alternate node-kind handler) in v0.6.x. Test asserts extension+enum+factory; mixin assertion explicitly skipped with handoff cross-reference.
+- W3.T02 (TS deeper edge cases), T03 (Python edge cases), T08 (Java edge cases), T09 (Bash heredoc behavior), T11 (Kotlin extension function detection across grammar shapes), T12 (Vue lang warning side-effect — needs stderr capture), T13 (resolve_calls), T14-T17 (golden snapshots, .axonignore glob suite, e2e/smoke.sh) ⏳ open.
 - W3.T14 ⏳ `resolve_calls` ambiguity golden test
 - W3.T15 ⏳ capsule golden snapshots
 - W3.T16 ⏳ `.axonignore` glob test suite
