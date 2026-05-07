@@ -76,6 +76,7 @@ jobs:
 
       - name: Resolve version
         id: ver
+        shell: bash   # explicit bash — runner default is pwsh on windows-2022
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           if [ "${tag}" = "${GITHUB_REF}" ]; then tag="${{ github.event.inputs.tag }}"; fi
