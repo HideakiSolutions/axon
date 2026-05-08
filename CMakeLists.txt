@@ -227,6 +227,10 @@ target_link_libraries(axon PRIVATE
     blake3_lib
 )
 
+if(WIN32)
+    target_link_libraries(axon PRIVATE ws2_32)
+endif()
+
 # Linux DuckDB pre-built lib uses old GCC ABI (std::string without __cxx11
 # inline namespace). On Apple platforms the macOS prebuilt links against
 # libc++ which doesn't honor this define, and forcing it would break
