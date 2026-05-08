@@ -3,11 +3,18 @@
 #include "../core/registry.hpp"
 #include "../core/capsule.hpp"
 #include <nlohmann/json.hpp>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <signal.h>
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  define close(s) closesocket(s)
+   typedef int ssize_t;
+#else
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <arpa/inet.h>
+#  include <unistd.h>
+#  include <signal.h>
+#endif
 #include <sstream>
 #include <iostream>
 
@@ -510,8 +517,14 @@ static std::string handle_request(const std::string& method, const std::string& 
 }
 
 void run_http(ServerContext& ctx, const HttpConfig& cfg) {
-    signal(SIGINT,  [](int) { g_running = false; });
+#ifdef _WIN32
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
+    signal(SIGINT, [](int) { g_running = false; });
+#ifndef _WIN32
     signal(SIGTERM, [](int) { g_running = false; });
+#endif
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) { std::cerr << "socket() failed\n"; return; }
@@ -563,6 +576,9 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
     }
 
     close(server_fd);
+#ifdef _WIN32
+    WSACleanup();
+#endif
     std::cout << "\nHTTP server stopped.\n";
 }
 
