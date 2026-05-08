@@ -7,7 +7,6 @@
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
 #  define close(s) closesocket(s)
-   typedef int ssize_t;
 #else
 #  include <sys/socket.h>
 #  include <netinet/in.h>
@@ -530,7 +529,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
     if (server_fd < 0) { std::cerr << "socket() failed\n"; return; }
 
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
