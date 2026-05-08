@@ -576,7 +576,7 @@ IndexStats index_files(const Config& cfg, Database& db,
 
         // Must be inside project_root
         auto rel = fs::relative(abs, cfg.project_root, ec);
-        if (ec || rel.empty() || rel.native().rfind("..", 0) == 0) continue;
+        if (ec || rel.empty() || rel.generic_string().rfind("..", 0) == 0) continue;
 
         auto ext = abs.extension().string();
         if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);

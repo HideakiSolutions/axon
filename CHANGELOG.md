@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] — 2026-05-08
+
+Windows x64 native binary + binary distribution pipeline.
+
+### Added
+
+- **Windows x64 native binary** (`axon-0.5.6-windows-x64.zip`) — DuckDB linked via import lib (`duckdb.lib` + `duckdb.dll`), BLAKE3 portable C fallback (MSVC cannot assemble AT&T-syntax `.S` files)
+- **`install.ps1`** — PowerShell installer for Windows: registers Claude Code hooks as `.ps1` files, sets `LD_LIBRARY_PATH` equivalent, configures MCP server in `~/.claude.json`
+- **Cross-repo binary publish** — `release.yml` agora publica em `HideakiSolutions/axon-releases` via `RELEASES_PAT` (fine-grained PAT com `contents:write` no repo público); fonte permanece privado
+
+### Fixed
+
+- `release.yml` step "Resolve version" usa `shell: bash` explícito — evita falha no runner `windows-2022` cujo shell padrão é PowerShell (bash parameter expansion `${VAR#prefix}` não existe em pwsh)
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.5 → 0.5.6
+
 ## [0.5.5] — 2026-05-07
 
 MCP server cache parity. Extends the v0.5.3 capsule cache from the CLI to the MCP `get_context_capsule` tool — the path Claude Code actually takes when invoking axon as an MCP server.
