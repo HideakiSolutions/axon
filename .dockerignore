@@ -1,0 +1,16 @@
+# Keep the build context lean — everything below either re-builds inside
+# the container, contains host-specific state, or is sensitive.
+build/
+.axon/
+.dev-squad/
+.worktrees/
+.git/
+.github/
+*.gguf
+models/
+node_modules/
+target/
+__pycache__/
+.DS_Store
+*.swp
+*.swo

@@ -15,10 +15,36 @@
 AXON_DIR="$PWD/.axon"
 QUEUE="$AXON_DIR/pending-writes.txt"
 SYNC_MARKER="$AXON_DIR/sync-requested"
+# Cap queue at 1MiB. Above this, rotate the file out of the way and request a
+# full sync — the MCP server's BLAKE3-skip walk reconciles equivalent state
+# while keeping the live queue bounded even if the server has been idle.
+QUEUE_MAX_BYTES=1048576
+
+# shellcheck disable=SC1091
+[ -f "$(dirname "${BASH_SOURCE[0]}")/_log.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/_log.sh"
+log() { command -v axon_log &>/dev/null && axon_log "axon-post-edit" "$@"; }
 
 # Pass-through se o projeto não for indexado pelo axon
 [ ! -d "$AXON_DIR" ] && exit 0
 command -v jq &>/dev/null || exit 0
+
+# Append a path to the queue under flock, rotating if it has grown unbounded.
+# Triggered by Write/Edit/MultiEdit/NotebookEdit handlers below.
+append_to_queue() {
+  local file="$1"
+  (
+    flock -x 9
+    if [ -f "$QUEUE" ]; then
+      local size
+      size=$(stat -c%s "$QUEUE" 2>/dev/null || stat -f%z "$QUEUE" 2>/dev/null || echo 0)
+      if [ "${size:-0}" -gt "$QUEUE_MAX_BYTES" ]; then
+        mv -f "$QUEUE" "$AXON_DIR/pending-writes.$(date +%s).bak" 2>/dev/null || true
+        touch "$SYNC_MARKER" 2>/dev/null || true
+      fi
+    fi
+    printf '%s\n' "$file" >> "$QUEUE"
+  ) 9> "$QUEUE.lock" 2>/dev/null || true
+}
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
@@ -27,20 +53,15 @@ case "$TOOL" in
   Write|Edit|MultiEdit)
     FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
     [ -z "$FILE" ] && exit 0
-    # Append atômico — flock evita corrida entre hooks concorrentes
-    (
-      flock -x 9
-      echo "$FILE" >> "$QUEUE"
-    ) 9> "$QUEUE.lock" 2>/dev/null || true
+    append_to_queue "$FILE"
+    log "queued" "$(jq -n --arg t "$TOOL" --arg f "$FILE" '{tool:$t,file:$f}')"
     ;;
 
   NotebookEdit)
     FILE=$(echo "$INPUT" | jq -r '.tool_input.notebook_path // empty')
     [ -z "$FILE" ] && exit 0
-    (
-      flock -x 9
-      echo "$FILE" >> "$QUEUE"
-    ) 9> "$QUEUE.lock" 2>/dev/null || true
+    append_to_queue "$FILE"
+    log "queued" "$(jq -n --arg f "$FILE" '{tool:"NotebookEdit",file:$f}')"
     ;;
 
   Bash)
@@ -49,6 +70,7 @@ case "$TOOL" in
     # BLAKE3 skip + prune no próximo tool call. Custo amortizado via
     # BLAKE3 para arquivos não-mudados.
     touch "$SYNC_MARKER" 2>/dev/null || true
+    log "sync-requested" '{"tool":"Bash"}'
     ;;
 
   *)

@@ -1,5 +1,6 @@
 #include "parser.hpp"
 #include <tree_sitter/api.h>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
@@ -311,9 +312,39 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // TypeScript / JavaScript
     if (ctx.lang == Language::TypeScript || ctx.lang == Language::JavaScript) {
+        // TS decorators have two emission shapes depending on grammar version:
+        //   1. Direct children of the declaration (plain `@Foo class X {}`)
+        //   2. Siblings under `export_statement` for `@Foo export class X {}`
+        // We walk both so capsule queries surface @Component/@Injectable/@Get
+        // regardless of whether the class is exported.
+        auto collect_decorators_ts = [&](TSNode def_node) -> std::optional<std::string> {
+            std::string out;
+            auto scan = [&](TSNode container) {
+                uint32_t cc = ts_node_child_count(container);
+                for (uint32_t i = 0; i < cc; i++) {
+                    TSNode c = ts_node_child(container, i);
+                    if (std::string(ts_node_type(c)) == "decorator") {
+                        if (!out.empty()) out += '\n';
+                        out += node_text(c, ctx.src);
+                    }
+                }
+            };
+            scan(def_node);
+            TSNode parent = ts_node_parent(def_node);
+            if (!ts_node_is_null(parent) &&
+                std::string(ts_node_type(parent)) == "export_statement") {
+                scan(parent);
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "function_declaration" || kind == "generator_function_declaration") {
+            // Detect `async function` via first unnamed child.
             sym.kind = "function";
-            // name = first named child "identifier"
+            if (ts_node_child_count(node) > 0) {
+                std::string fc = ts_node_type(ts_node_child(node, 0));
+                if (fc == "async") sym.kind = "async_function";
+            }
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -323,12 +354,14 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators_ts(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "method_definition") {
             sym.kind = "method";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators_ts(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "interface_declaration") {
             sym.kind = "interface";
@@ -338,6 +371,20 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             is_symbol = !sym.name.empty();
         } else if (kind == "type_alias_declaration") {
             sym.kind = "type";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "internal_module" || kind == "module") {
+            // tree-sitter-typescript: `namespace Foo {}` -> internal_module;
+            // `module "foo" {}` (ambient) -> module.
+            sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -357,17 +404,43 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Python
     if (ctx.lang == Language::Python) {
+        // When the parent is a `decorated_definition`, gather the @decorator lines
+        // and stash them in docstring so capsule consumers see framework usage
+        // (e.g. @router.get, @app.task, @dataclass) without re-parsing source.
+        auto collect_decorators = [&](TSNode def_node) -> std::optional<std::string> {
+            TSNode parent = ts_node_parent(def_node);
+            if (ts_node_is_null(parent)) return std::nullopt;
+            if (std::string(ts_node_type(parent)) != "decorated_definition") return std::nullopt;
+            std::string out;
+            uint32_t pcc = ts_node_child_count(parent);
+            for (uint32_t i = 0; i < pcc; i++) {
+                TSNode pc = ts_node_child(parent, i);
+                if (std::string(ts_node_type(pc)) == "decorator") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(pc, ctx.src);
+                }
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "function_definition") {
+            // Detect `async def`: first unnamed child is the "async" keyword.
             sym.kind = "function";
+            if (ts_node_child_count(node) > 0) {
+                std::string fc = ts_node_type(ts_node_child(node, 0));
+                if (fc == "async") sym.kind = "async_function";
+            }
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_definition") {
             sym.kind = "class";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = collect_decorators(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "import_statement" || kind == "import_from_statement") {
             push_import_edge(node, ctx.src, ctx.imports);
@@ -383,15 +456,49 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "struct_item") {
-            sym.kind = "class";
+            sym.kind = "class";  // kept "class" for back-compat with existing edge queries
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_item" || kind == "union_item") {
+            sym.kind = (kind == "enum_item") ? "enum" : "union";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "trait_item") {
+            sym.kind = "trait";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "impl_item") {
-            sym.kind = "class";
-            TSNode type_node = ts_node_child_by_field_name(node, "type", 4);
-            if (!ts_node_is_null(type_node)) sym.name = "impl " + node_text(type_node, ctx.src);
+            // Distinguish `impl Trait for Type` (trait impl) from `impl Type` (inherent impl).
+            // Without this, both collapsed onto kind="class" name="impl Type", losing the
+            // trait↔implementor relationship in the symbol graph.
+            TSNode trait_node = ts_node_child_by_field_name(node, "trait", 5);
+            TSNode type_node  = ts_node_child_by_field_name(node, "type", 4);
+            std::string type_name = ts_node_is_null(type_node) ? "" : node_text(type_node, ctx.src);
+            sym.kind = "impl";
+            if (!ts_node_is_null(trait_node)) {
+                sym.name = node_text(trait_node, ctx.src) + " for " + type_name;
+            } else {
+                sym.name = "impl " + type_name;
+            }
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "mod_item") {
+            sym.kind = "module";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "macro_definition") {
+            // `macro_rules! name { ... }` — the macro itself is a defined symbol.
+            sym.kind = "macro";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "use_declaration") {
@@ -401,26 +508,85 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // C#
     if (ctx.lang == Language::CSharp) {
+        // C# attributes ([Serializable], [HttpGet("/users")]) are emitted as
+        // `attribute_list` siblings of the declaration. They land in docstring
+        // alongside detected modifier flags so capsule queries surface the
+        // ASP.NET / Serializer wiring without re-grepping.
+        auto collect_attrs_cs = [&](TSNode def_node, bool& out_async, bool& out_partial) {
+            out_async = false;
+            out_partial = false;
+            std::string out;
+            uint32_t cc = ts_node_child_count(def_node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(def_node, i);
+                std::string ck = ts_node_type(c);
+                if (ck == "attribute_list") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(c, ctx.src);
+                } else if (ck == "modifier") {
+                    std::string mt = node_text(c, ctx.src);
+                    if (mt == "async") out_async = true;
+                    else if (mt == "partial") out_partial = true;
+                }
+            }
+            return out.empty() ? std::optional<std::string>{} : std::optional<std::string>(out);
+        };
+
         if (kind == "method_declaration") {
-            sym.kind = "method";
+            bool is_async = false, is_partial = false;
+            sym.docstring = collect_attrs_cs(node, is_async, is_partial);
+            sym.kind = is_async ? "async_method" : "method";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "property_declaration") {
+            sym.kind = "property";
+            bool dummy_a = false, dummy_p = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, dummy_p);
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_declaration") {
-            sym.kind = "class";
+            bool dummy_a = false, is_partial = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, is_partial);
+            sym.kind = is_partial ? "partial_class" : "class";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "interface_declaration") {
             sym.kind = "interface";
+            bool dummy_a = false, dummy_p = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, dummy_p);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "record_declaration") {
+            // C# 9+ records — first-class for DTOs / immutable values.
+            sym.kind = "record";
+            bool dummy_a = false, dummy_p = false;
+            sym.docstring = collect_attrs_cs(node, dummy_a, dummy_p);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "constructor_declaration") {
             sym.kind = "method";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "namespace_declaration") {
+            sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -432,20 +598,62 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // PHP
     if (ctx.lang == Language::PHP) {
+        // PHP 8 introduced #[Attribute] syntax; tree-sitter-php emits these as
+        // attribute_list children of declarations. Same shape as C# attributes.
+        auto collect_attrs_php = [&](TSNode def_node) -> std::optional<std::string> {
+            std::string out;
+            uint32_t cc = ts_node_child_count(def_node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(def_node, i);
+                if (std::string(ts_node_type(c)) == "attribute_list") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(c, ctx.src);
+                }
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "function_definition") {
             sym.kind = "function";
+            sym.docstring = collect_attrs_php(node);
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "method_declaration") {
             sym.kind = "method";
+            sym.docstring = collect_attrs_php(node);
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_declaration") {
             sym.kind = "class";
+            sym.docstring = collect_attrs_php(node);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "trait_declaration") {
+            sym.kind = "trait";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "interface_declaration") {
+            sym.kind = "interface";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "namespace_definition") {
+            sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -459,8 +667,22 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Dart
     if (ctx.lang == Language::Dart) {
+        // Detect `async` / `async*` body modifier on functions/methods. In
+        // tree-sitter-dart the modifier token appears before the function_body
+        // child, so we scan for an "async" or "async*" leaf in node's subtree
+        // shallow-enough to be cheap (first 6 children).
+        auto is_async_dart = [&](TSNode def_node) {
+            uint32_t cc = ts_node_child_count(def_node);
+            uint32_t scan = cc < 6 ? cc : 6;
+            for (uint32_t i = 0; i < scan; i++) {
+                std::string ck = ts_node_type(ts_node_child(def_node, i));
+                if (ck == "async" || ck == "async_marker" || ck == "async*") return true;
+            }
+            return false;
+        };
+
         if (kind == "function_signature" || kind == "function_declaration") {
-            sym.kind = "function";
+            sym.kind = is_async_dart(node) ? "async_function" : "function";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -471,8 +693,36 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
+        } else if (kind == "mixin_declaration") {
+            sym.kind = "mixin";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "extension_declaration") {
+            // `extension X on Type { ... }` — Dart's open-class mechanism.
+            sym.kind = "extension";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "factory_constructor_signature" ||
+                   kind == "constructor_signature") {
+            // factory + named/redirecting constructors — both important for
+            // capsule rendering of DI/factory patterns common in Flutter.
+            sym.kind = (kind == "factory_constructor_signature") ? "factory" : "constructor";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
         } else if (kind == "method_signature" || kind == "function_body") {
-            sym.kind = "method";
+            sym.kind = is_async_dart(node) ? "async_method" : "method";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -484,20 +734,80 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Java
     if (ctx.lang == Language::Java) {
+        // Walk a `modifiers` child of a declaration and pull out @-annotations
+        // and the `sealed`/`non-sealed` keywords (Java 15+) for capsule rendering.
+        auto collect_modifiers = [&](TSNode decl_node, bool& out_is_sealed) -> std::optional<std::string> {
+            out_is_sealed = false;
+            TSNode mods = ts_node_child_by_field_name(decl_node, "modifiers", 9);
+            // Fallback: tree-sitter-java sometimes emits modifiers as the first
+            // unnamed child of kind "modifiers" rather than via a field.
+            if (ts_node_is_null(mods)) {
+                uint32_t cc = ts_node_child_count(decl_node);
+                for (uint32_t i = 0; i < cc; i++) {
+                    TSNode c = ts_node_child(decl_node, i);
+                    if (std::string(ts_node_type(c)) == "modifiers") { mods = c; break; }
+                }
+            }
+            if (ts_node_is_null(mods)) return std::nullopt;
+            std::string out;
+            uint32_t cc = ts_node_child_count(mods);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(mods, i);
+                std::string ck = ts_node_type(c);
+                if (ck == "marker_annotation" || ck == "annotation" ||
+                    ck == "single_element_annotation") {
+                    if (!out.empty()) out += '\n';
+                    out += node_text(c, ctx.src);
+                } else if (ck == "sealed" || ck == "non-sealed") {
+                    out_is_sealed = true;
+                }
+            }
+            return out.empty() ? std::nullopt : std::optional<std::string>(out);
+        };
+
         if (kind == "method_declaration") {
             sym.kind = "method";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_declaration") {
-            sym.kind = "class";
+            bool sealed = false;
+            sym.docstring = collect_modifiers(node, sealed);
+            sym.kind = sealed ? "sealed_class" : "class";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "interface_declaration") {
-            sym.kind = "interface";
+            bool sealed = false;
+            sym.docstring = collect_modifiers(node, sealed);
+            sym.kind = sealed ? "sealed_interface" : "interface";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "record_declaration") {
+            // Java 14+ `record Point(int x, int y) { }` — first-class data carrier.
+            sym.kind = "record";
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_declaration") {
+            sym.kind = "enum";
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "annotation_type_declaration") {
+            sym.kind = "annotation_type";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -507,6 +817,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
+            bool dummy = false;
+            sym.docstring = collect_modifiers(node, dummy);
             is_symbol = !sym.name.empty();
         } else if (kind == "import_declaration") {
             push_import_edge(node, ctx.src, ctx.imports);
@@ -517,6 +829,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
     if (ctx.lang == Language::Vue) {
         if (kind == "script_element") {
             bool is_typescript = false;
+            bool saw_lang_attr = false;
             uint32_t raw_start = 0, raw_end = 0;
             uint32_t script_start_row = 0;
             bool found_raw = false;
@@ -530,6 +843,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                         TSNode a = ts_node_child(c, j);
                         if (std::string(ts_node_type(a)) == "attribute") {
                             std::string atxt = node_text(a, ctx.src);
+                            if (atxt.find("lang=") != std::string::npos) saw_lang_attr = true;
                             if (atxt.find("lang=\"ts\"") != std::string::npos ||
                                 atxt.find("lang='ts'") != std::string::npos ||
                                 atxt.find("lang=\"typescript\"") != std::string::npos) {
@@ -545,6 +859,20 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                 }
             }
             if (!found_raw || raw_end <= raw_start) return;
+            // Vue 3 SFCs that omit `lang` default to JavaScript per the
+            // single-file-component spec. We honor the spec but emit a
+            // one-line stderr warning so users grepping for missing types
+            // notice — the same TS code parsed as JS will silently lose
+            // generic / decorator coverage.
+            if (!saw_lang_attr) {
+                static thread_local bool warned_once = false;
+                if (!warned_once) {
+                    std::fprintf(stderr,
+                        "[warn] Vue SFC <script> without `lang` attribute — "
+                        "parsing as JavaScript. Add `lang=\"ts\"` for TypeScript.\n");
+                    warned_once = true;
+                }
+            }
 
             std::string sub_src = ctx.src.substr(raw_start, raw_end - raw_start);
             TSParser* sub_parser = ts_parser_new();
@@ -592,10 +920,35 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "type_declaration") {
+            // Inspect the inner type_spec / type_alias to classify the kind.
+            // v0.5.0 collapsed everything under kind="type" with a name derived
+            // from first_line — interfaces and structs were indistinguishable.
             sym.kind = "type";
-            sym.name = first_line(node, ctx.src).substr(0, 40);
-            sym.signature = first_line(node, ctx.src);
-            is_symbol = true;
+            uint32_t cc = ts_node_child_count(node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode spec = ts_node_child(node, i);
+                std::string sk = ts_node_type(spec);
+                if (sk != "type_spec" && sk != "type_alias") continue;
+                TSNode name_n = ts_node_child_by_field_name(spec, "name", 4);
+                if (ts_node_is_null(name_n)) continue;
+                sym.name = node_text(name_n, ctx.src);
+                TSNode type_n = ts_node_child_by_field_name(spec, "type", 4);
+                std::string tk = ts_node_is_null(type_n) ? "" : ts_node_type(type_n);
+                if (tk == "interface_type") sym.kind = "interface";
+                else if (tk == "struct_type") sym.kind = "struct";
+                else if (sk == "type_alias") sym.kind = "type_alias";
+                sym.signature = first_line(node, ctx.src);
+                is_symbol = true;
+                // Multi-spec blocks (`type ( A int; B string )`) only emit the
+                // first spec — matches v0.5.0 behavior; precise multi-emit lands
+                // when the visit_node emitter supports it.
+                break;
+            }
+            if (!is_symbol) {
+                sym.name = first_line(node, ctx.src).substr(0, 40);
+                sym.signature = first_line(node, ctx.src);
+                is_symbol = true;
+            }
         } else if (kind == "import_spec") {
             // Capture per-spec; the surrounding import_declaration is walked
             // and enters each spec as a child — so only the leaf is needed.
@@ -611,6 +964,31 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
+        } else if (kind == "declaration_command") {
+            // `export FOO=bar`, `readonly X=1`, `declare -r BASE=...` — emit the
+            // assigned name as a symbol so capsule queries about config knobs
+            // can locate the export site without re-grepping. Heredocs and
+            // bare-variable assignments without `export`/`readonly`/`declare`
+            // are intentionally skipped (high noise, low semantic value).
+            uint32_t cc = ts_node_child_count(node);
+            std::string keyword;
+            if (cc > 0) keyword = node_text(ts_node_child(node, 0), ctx.src);
+            if (keyword == "export" || keyword == "readonly" ||
+                keyword == "declare" || keyword == "typeset") {
+                for (uint32_t i = 1; i < cc; i++) {
+                    TSNode c = ts_node_child(node, i);
+                    if (std::string(ts_node_type(c)) == "variable_assignment") {
+                        TSNode nm = ts_node_child_by_field_name(c, "name", 4);
+                        if (!ts_node_is_null(nm)) {
+                            sym.kind = "variable";
+                            sym.name = node_text(nm, ctx.src);
+                            sym.signature = first_line(node, ctx.src);
+                            is_symbol = true;
+                            break;
+                        }
+                    }
+                }
+            }
         } else if (kind == "command") {
             uint32_t cc = ts_node_child_count(node);
             if (cc >= 2) {
@@ -629,6 +1007,21 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // C++
     if (ctx.lang == Language::Cpp) {
+        // template_declaration wraps a function_definition / class_specifier /
+        // struct_specifier child. We let the inner declaration emit its symbol
+        // normally (visit_node recurses) but capture the template parameters
+        // line in docstring so capsule rendering keeps `template<typename T>`
+        // visible alongside the templated entity. The lambda is only invoked
+        // for inner nodes whose parent is a template_declaration.
+        auto template_params_for = [&](TSNode inner) -> std::optional<std::string> {
+            TSNode parent = ts_node_parent(inner);
+            if (ts_node_is_null(parent)) return std::nullopt;
+            if (std::string(ts_node_type(parent)) != "template_declaration") return std::nullopt;
+            TSNode params = ts_node_child_by_field_name(parent, "parameters", 10);
+            if (ts_node_is_null(params)) return std::nullopt;
+            return node_text(params, ctx.src);
+        };
+
         if (kind == "function_definition") {
             sym.kind = "function";
             TSNode decl = ts_node_child_by_field_name(node, "declarator", 10);
@@ -643,9 +1036,23 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                 decl = inner;
             }
             sym.signature = first_line(node, ctx.src);
+            sym.docstring = template_params_for(node);
             is_symbol = !sym.name.empty();
         } else if (kind == "class_specifier" || kind == "struct_specifier") {
             sym.kind = (kind == "class_specifier") ? "class" : "struct";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            sym.docstring = template_params_for(node);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "union_specifier") {
+            sym.kind = "union";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_specifier") {
+            sym.kind = "enum";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -654,6 +1061,13 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             sym.kind = "namespace";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "friend_declaration") {
+            // friend declarations cross encapsulation boundaries — capsule
+            // queries about access control should surface them.
+            sym.kind = "friend";
+            sym.name = first_line(node, ctx.src).substr(0, 60);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "preproc_include") {
@@ -673,9 +1087,55 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     // Kotlin
     if (ctx.lang == Language::Kotlin) {
+        // Walk the modifiers child list (when present) for sealed/suspend/data
+        // markers. tree-sitter-kotlin emits these as either modifier_list /
+        // modifiers children or as scattered keyword tokens — we cover both.
+        auto kotlin_flags = [&](TSNode def_node, bool& sealed, bool& data,
+                                bool& suspend, bool& enum_class) {
+            sealed = data = suspend = enum_class = false;
+            uint32_t cc = ts_node_child_count(def_node);
+            uint32_t scan = cc < 8 ? cc : 8;
+            for (uint32_t i = 0; i < scan; i++) {
+                TSNode c = ts_node_child(def_node, i);
+                std::string ck = ts_node_type(c);
+                if (ck == "modifier_list" || ck == "modifiers") {
+                    uint32_t mc = ts_node_child_count(c);
+                    for (uint32_t j = 0; j < mc; j++) {
+                        std::string mk = node_text(ts_node_child(c, j), ctx.src);
+                        if (mk == "sealed") sealed = true;
+                        else if (mk == "data") data = true;
+                        else if (mk == "suspend") suspend = true;
+                        else if (mk == "enum") enum_class = true;
+                    }
+                } else {
+                    std::string txt = node_text(c, ctx.src);
+                    if (txt == "sealed") sealed = true;
+                    else if (txt == "data") data = true;
+                    else if (txt == "suspend") suspend = true;
+                    else if (txt == "enum") enum_class = true;
+                }
+            }
+        };
+
         if (kind == "function_declaration") {
-            sym.kind = "function";
+            bool sealed = false, data = false, suspend = false, ec = false;
+            kotlin_flags(node, sealed, data, suspend, ec);
+            // Detect extension functions: a `receiver_type` (or
+            // `user_type`/`type_reference`) appears before the function name.
+            bool is_extension = false;
             uint32_t cc = ts_node_child_count(node);
+            int seen_ident = -1;
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(node, i);
+                std::string ct = ts_node_type(c);
+                if (ct == "simple_identifier") { seen_ident = (int)i; break; }
+                if (ct == "user_type" || ct == "receiver_type" || ct == "type_reference") {
+                    is_extension = true;
+                }
+            }
+            sym.kind = is_extension ? "extension_function"
+                       : suspend     ? "suspend_function"
+                                     : "function";
             for (uint32_t i = 0; i < cc; i++) {
                 TSNode c = ts_node_child(node, i);
                 if (std::string(ts_node_type(c)) == "simple_identifier") {
@@ -685,13 +1145,59 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             }
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
-        } else if (kind == "class_declaration" || kind == "object_declaration") {
-            sym.kind = "class";
+            (void)seen_ident;
+        } else if (kind == "class_declaration") {
+            bool sealed = false, data = false, suspend = false, enum_class = false;
+            kotlin_flags(node, sealed, data, suspend, enum_class);
+            if      (sealed)     sym.kind = "sealed_class";
+            else if (data)       sym.kind = "data_class";
+            else if (enum_class) sym.kind = "enum_class";
+            else                 sym.kind = "class";
             uint32_t cc = ts_node_child_count(node);
             for (uint32_t i = 0; i < cc; i++) {
                 TSNode c = ts_node_child(node, i);
                 std::string ct = ts_node_type(c);
                 if (ct == "simple_identifier" || ct == "type_identifier") {
+                    sym.name = node_text(c, ctx.src);
+                    break;
+                }
+            }
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "object_declaration") {
+            // Plain object vs companion object: companion objects appear
+            // wrapped in a companion_object node OR carry a "companion"
+            // modifier; both surface as kind="companion_object".
+            bool is_companion = false;
+            uint32_t cc = ts_node_child_count(node);
+            for (uint32_t i = 0; i < cc; i++) {
+                std::string txt = node_text(ts_node_child(node, i), ctx.src);
+                if (txt == "companion") { is_companion = true; break; }
+            }
+            sym.kind = is_companion ? "companion_object" : "object";
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(node, i);
+                std::string ct = ts_node_type(c);
+                if (ct == "simple_identifier" || ct == "type_identifier") {
+                    sym.name = node_text(c, ctx.src);
+                    break;
+                }
+            }
+            if (sym.name.empty() && is_companion) sym.name = "Companion";
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "companion_object") {
+            sym.kind = "companion_object";
+            sym.name = "Companion";
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = true;
+        } else if (kind == "type_alias") {
+            sym.kind = "type_alias";
+            uint32_t cc = ts_node_child_count(node);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode c = ts_node_child(node, i);
+                std::string ct = ts_node_type(c);
+                if (ct == "type_identifier" || ct == "simple_identifier") {
                     sym.name = node_text(c, ctx.src);
                     break;
                 }

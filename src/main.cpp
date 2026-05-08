@@ -8,6 +8,7 @@
 #include "core/embeddings.hpp"
 #include "mcp/server.hpp"
 #include "mcp/http_server.hpp"
+#include "version.hpp"
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -26,10 +27,11 @@ Usage:
                                         (--prune alone = only sweep deleted files)
   axon serve  [--http] [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
                                         Start MCP server (stdio default; --http for REST API)
-  axon capsule <query>                  Print context capsule for a query
+  axon capsule <query> [--no-cache]     Print context capsule for a query
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
   axon help                             Show this help
+  axon --version | -V                   Print version and git SHA
 
 )";
 }
@@ -44,6 +46,22 @@ static axon::Config load_config(const std::string& path_arg = "") {
 int main(int argc, char* argv[]) {
     if (argc < 2) { print_usage(); return 1; }
     std::string cmd = argv[1];
+
+    // ── axon --version | -V | version ─────────────────────────────────────
+    if (cmd == "--version" || cmd == "-V" || cmd == "version") {
+        std::cout << "axon " << axon::VERSION
+                  << " (build " << axon::GIT_SHA << ")\n";
+        return 0;
+    }
+
+    // ── axon help | --help | -h ───────────────────────────────────────────
+    // print_usage() writes to stderr (consistent with the error fall-through
+    // at the end of main); the difference for help is the exit code — 0 here,
+    // 1 for unknown command at the bottom.
+    if (cmd == "help" || cmd == "--help" || cmd == "-h") {
+        print_usage();
+        return 0;
+    }
 
     // ── axon init [path] ──────────────────────────────────────────────────
     if (cmd == "init") {
@@ -194,11 +212,17 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── axon capsule <query> ───────────────────────────────────────────────
+    // ── axon capsule <query> [--no-cache] ──────────────────────────────────
     if (cmd == "capsule") {
-        if (argc < 3) { std::cerr << "Usage: axon capsule <query>\n"; return 1; }
+        if (argc < 3) { std::cerr << "Usage: axon capsule <query> [--no-cache]\n"; return 1; }
         std::string query;
-        for (int i = 2; i < argc; i++) { if (i > 2) query += " "; query += argv[i]; }
+        bool no_cache = false;
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--no-cache") { no_cache = true; continue; }
+            if (!query.empty()) query += " ";
+            query += a;
+        }
 
         auto cfg = load_config();
         if (!fs::exists(cfg.db_path)) { std::cerr << "No index found. Run `axon index` first.\n"; return 1; }
@@ -206,10 +230,37 @@ int main(int argc, char* argv[]) {
         axon::Database db(cfg.db_path);
         auto graph = axon::load_graph(db);
 
+        // Cache check (W2.T01) — skipped under --no-cache so devs can force
+        // a fresh assemble after parser/grammar changes that would otherwise
+        // be served from a stale entry.
+        const std::string epoch = axon::current_project_epoch(db);
+        const std::string cache_key = axon::compute_capsule_cache_key(
+            query, cfg.project_cfg.token_budget, epoch);
+        if (!no_cache) {
+            if (auto hit = axon::capsule_cache_lookup(db, cache_key, epoch)) {
+                std::cout << "{\n";
+                std::cout << "  \"query\": \"" << hit->query << "\",\n";
+                std::cout << "  \"token_estimate\": " << hit->token_estimate << ",\n";
+                std::cout << "  \"pivot_files\": " << hit->pivot_files.size() << ",\n";
+                std::cout << "  \"support_files\": " << hit->support_files.size() << ",\n";
+                std::cout << "  \"cache\": \"hit\"\n";
+                std::cout << "}\n";
+                for (const auto& f : hit->pivot_files)
+                    std::cerr << "  [pivot]   " << f.path << " (" << f.token_estimate << " tok)\n";
+                for (const auto& f : hit->support_files)
+                    std::cerr << "  [support] " << f.path << " (" << f.token_estimate << " tok)\n";
+                return 0;
+            }
+        }
+
         auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
         axon::EmbeddingModel model(model_path);
 
-        auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root);
+        auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root,
+                                              cfg.project_cfg.token_budget);
+        if (!no_cache) {
+            axon::capsule_cache_insert(db, cache_key, epoch, capsule);
+        }
 
         std::cout << "{\n";
         std::cout << "  \"query\": \"" << query << "\",\n";

@@ -1,4 +1,6 @@
 #include "config.hpp"
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -63,10 +65,26 @@ ProjectConfig load_project_config(const fs::path& axon_dir) {
             pcfg.index_routes = (val == "true");
         } else if (key == "fts_enabled") {
             pcfg.fts_enabled = (val == "true");
+        } else if (key == "token_budget") {
+            try { pcfg.token_budget = std::stoi(val); } catch (...) {}
+        } else if (key == "telemetry") {
+            pcfg.telemetry = (val == "true");
         }
         // Unrecognized keys: ignored silently
     }
     return pcfg;
+}
+
+// Apply environment variable overrides on top of TOML config.
+// Env vars always win over TOML (allows per-shell override without editing files).
+static void apply_env_overrides(ProjectConfig& pcfg) {
+    if (const char* m = std::getenv("AXON_TOKEN_BUDGET")) {
+        try { pcfg.token_budget = std::stoi(m); } catch (...) {}
+    }
+    if (const char* t = std::getenv("AXON_TELEMETRY")) {
+        std::string v = t;
+        pcfg.telemetry = (v == "1" || v == "true" || v == "yes" || v == "on");
+    }
 }
 
 Config make_config(const fs::path& root) {
@@ -76,11 +94,19 @@ Config make_config(const fs::path& root) {
     cfg.db_path  = cfg.axon_dir / "index.duckdb";
     fs::create_directories(cfg.axon_dir);
     cfg.project_cfg = load_project_config(cfg.axon_dir);
+    apply_env_overrides(cfg.project_cfg);
     return cfg;
 }
 
 fs::path find_model(const fs::path& binary_dir) {
-    // Search order: next to binary, then project models/, then ~/.axon/models/
+    // 1. Honor AXON_EMBEDDING_MODEL (absolute or relative path to .gguf)
+    if (const char* env_model = std::getenv("AXON_EMBEDDING_MODEL")) {
+        fs::path p(env_model);
+        if (fs::exists(p)) return fs::canonical(p);
+        throw std::runtime_error(
+            std::string("AXON_EMBEDDING_MODEL points to a non-existent file: ") + env_model);
+    }
+    // 2. Default search order: next to binary, then project models/, then ~/.axon/models/
     std::vector<fs::path> candidates = {
         binary_dir / "../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
         binary_dir / "../../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
@@ -89,7 +115,8 @@ fs::path find_model(const fs::path& binary_dir) {
     for (const auto& p : candidates) {
         if (fs::exists(p)) return fs::canonical(p);
     }
-    throw std::runtime_error("Embedding model not found. Download it with:\n"
+    throw std::runtime_error("Embedding model not found. Override with AXON_EMBEDDING_MODEL=<path>, "
+        "or download:\n"
         "  pip install huggingface_hub\n"
         "  huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF "
         "nomic-embed-text-v1.5.Q4_K_M.gguf --local-dir ./models/");

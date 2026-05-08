@@ -9,13 +9,15 @@ struct ProjectConfig {
     std::string granularity  = "file";  // "file" | "symbol"
     bool        index_routes = false;
     bool        fts_enabled  = true;
+    int         token_budget = 8000;    // default capsule token budget
+    bool        telemetry    = false;   // opt-in anonymous telemetry (W5.T06)
 };
 
 struct Config {
     std::filesystem::path project_root;
     std::filesystem::path axon_dir;   // project_root/.axon/
     std::filesystem::path db_path;    // project_root/.axon/index.duckdb
-    std::filesystem::path model_path; // path to .gguf embedding model
+    std::filesystem::path model_path; // path to .gguf embedding model (env override-aware)
     ProjectConfig project_cfg;
 };
 

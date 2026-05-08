@@ -38,11 +38,12 @@ static json tools_list() {
              {"paths",{{"type","array"},{"items",{{"type","string"}}}}},
              {"prune",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_context_capsule"},
-         {"description","Return token-efficient context: pivot files in full + support files skeletonized."},
+         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass."},
          {"inputSchema",{{"type","object"},{"properties",{
              {"query",{{"type","string"}}},
              {"pivot_files",{{"type","array"},{"items",{{"type","string"}}}}},
-             {"token_budget",{{"type","integer"},{"default",8000}}}}}}}},
+             {"token_budget",{{"type","integer"},{"default",8000}}},
+             {"no_cache",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_impact_graph"},
          {"description","Return files that depend on (or are depended on by) the given files."},
          {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
@@ -256,17 +257,56 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     }
 
     if (name == "get_context_capsule") {
-        if (!ctx.db_ready() || !ctx.model_ready())
+        if (!ctx.db_ready())
             return make_tool_result({{"error","Run run_pipeline first"}}, true);
 
         std::string query = args.value("query", "");
         int budget = args.value("token_budget", 8000);
+        bool no_cache = args.value("no_cache", false);
         std::vector<std::string> pivots;
         if (args.contains("pivot_files"))
             for (const auto& p : args["pivot_files"]) pivots.push_back(p.get<std::string>());
 
+        // Cache lookup is keyed by (query, budget, project_epoch). Pivots are
+        // intentionally NOT in the key — different pivot sets steer the
+        // assembly but the same query/budget against the same epoch can
+        // legitimately reuse the cached payload when the caller doesn't
+        // override pivots. When pivots are explicit, skip cache to avoid
+        // returning a cache entry generated for the implicit-pivot path.
+        const std::string epoch = current_project_epoch(*ctx.db);
+        const bool eligible_for_cache = !no_cache && pivots.empty();
+        std::string cache_key;
+        if (eligible_for_cache) {
+            cache_key = compute_capsule_cache_key(query, budget, epoch);
+            if (auto hit = capsule_cache_lookup(*ctx.db, cache_key, epoch)) {
+                json pf = json::array();
+                for (const auto& f : hit->pivot_files)
+                    pf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+                json sf = json::array();
+                for (const auto& f : hit->support_files)
+                    sf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+                return make_tool_result({
+                    {"query", hit->query},
+                    {"pivot_files", pf},
+                    {"support_files", sf},
+                    {"token_estimate", hit->token_estimate},
+                    {"total_files_indexed", hit->total_files},
+                    {"cache", "hit"}
+                });
+            }
+        }
+
+        // Miss path needs the embedding model; defer the readiness check until
+        // here so cache hits don't require it.
+        if (!ctx.model_ready())
+            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+
         auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model,
                                         ctx.graph, ctx.cfg.project_root, budget);
+
+        if (eligible_for_cache) {
+            capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
+        }
 
         json pf = json::array();
         for (const auto& f : capsule.pivot_files)
@@ -280,7 +320,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"pivot_files", pf},
             {"support_files", sf},
             {"token_estimate", capsule.token_estimate},
-            {"total_files_indexed", capsule.total_files}
+            {"total_files_indexed", capsule.total_files},
+            {"cache", "miss"}
         });
     }
 

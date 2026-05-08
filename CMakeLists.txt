@@ -1,18 +1,54 @@
 cmake_minimum_required(VERSION 3.20)
-project(axon VERSION 0.5.0 LANGUAGES C CXX ASM)
+project(axon VERSION 0.5.5 LANGUAGES C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
 
+# ── Version + git SHA ────────────────────────────────────────────────────────
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE AXON_GIT_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT AXON_GIT_SHA)
+    set(AXON_GIT_SHA "unknown")
+endif()
+configure_file(
+    ${CMAKE_SOURCE_DIR}/src/version.hpp.in
+    ${CMAKE_BINARY_DIR}/generated/version.hpp
+    @ONLY
+)
+
 # ── DuckDB (pre-built shared lib from GitHub releases) ───────────────────────
+# Linux ships libduckdb.so; macOS ships libduckdb.dylib. The release-tarball
+# layouts (and the CI download steps in build.yml / release.yml) keep both
+# under the same third_party/duckdb/lib/ path so the only thing that varies
+# is the file extension.
+if(APPLE)
+    set(AXON_DUCKDB_LIB ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.dylib)
+elseif(WIN32)
+    # Windows: link against import lib (.lib) at build time; .dll at runtime.
+    set(AXON_DUCKDB_LIB  ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/duckdb.dll)
+    set(AXON_DUCKDB_IMPL ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/duckdb.lib)
+else()
+    set(AXON_DUCKDB_LIB ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.so)
+endif()
 add_library(duckdb_lib SHARED IMPORTED)
 set_target_properties(duckdb_lib PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib/libduckdb.so
+    IMPORTED_LOCATION ${AXON_DUCKDB_LIB}
     INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib
 )
-# Ensure the .so is found at runtime
-set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
+if(WIN32)
+    set_target_properties(duckdb_lib PROPERTIES IMPORTED_IMPLIB ${AXON_DUCKDB_IMPL})
+endif()
+# DT_RUNPATH (Linux) / LC_RPATH (macOS) — ignored on Windows where DLL must
+# be placed next to the executable.
+if(NOT WIN32)
+    set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
+endif()
 
 # ── tree-sitter core ─────────────────────────────────────────────────────────
 add_library(tree_sitter_lib STATIC
@@ -122,16 +158,39 @@ set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/llama.cpp)
 
 # ── blake3 ───────────────────────────────────────────────────────────────────
-add_library(blake3_lib STATIC
+# The hand-written assembly variants are x86-64-only; on arm64 (macOS Apple
+# Silicon, Linux aarch64) they fail to assemble. The portable C path and the
+# dispatcher already cover those platforms — the dispatcher's runtime CPU
+# detection never reaches the SIMD code path on arm64, so dropping the .S
+# files there is safe and matches BLAKE3's upstream build.
+set(BLAKE3_SOURCES
     third_party/blake3/c/blake3.c
     third_party/blake3/c/blake3_dispatch.c
     third_party/blake3/c/blake3_portable.c
-    third_party/blake3/c/blake3_sse2_x86-64_unix.S
-    third_party/blake3/c/blake3_sse41_x86-64_unix.S
-    third_party/blake3/c/blake3_avx2_x86-64_unix.S
-    third_party/blake3/c/blake3_avx512_x86-64_unix.S
 )
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)" AND NOT WIN32)
+    # Unix x86-64: hand-written AT&T-syntax assembly for peak SIMD throughput.
+    # Not usable on Windows — MSVC's assembler (ml64.exe) requires Intel syntax.
+    list(APPEND BLAKE3_SOURCES
+        third_party/blake3/c/blake3_sse2_x86-64_unix.S
+        third_party/blake3/c/blake3_sse41_x86-64_unix.S
+        third_party/blake3/c/blake3_avx2_x86-64_unix.S
+        third_party/blake3/c/blake3_avx512_x86-64_unix.S
+    )
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64|arm64)")
+    if(EXISTS ${CMAKE_SOURCE_DIR}/third_party/blake3/c/blake3_neon.c)
+        list(APPEND BLAKE3_SOURCES third_party/blake3/c/blake3_neon.c)
+    endif()
+endif()
+add_library(blake3_lib STATIC ${BLAKE3_SOURCES})
 target_include_directories(blake3_lib PUBLIC third_party/blake3/c)
+# Disable SIMD asm entry points on: (a) non-x86-64, (b) Windows/MSVC where
+# the .S files are not assembled. The dispatcher falls back to portable C.
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)" OR WIN32)
+    target_compile_definitions(blake3_lib PRIVATE
+        BLAKE3_NO_SSE2 BLAKE3_NO_SSE41 BLAKE3_NO_AVX2 BLAKE3_NO_AVX512
+    )
+endif()
 
 # ── axon executable ──────────────────────────────────────────────────────────
 file(GLOB_RECURSE AXON_SOURCES src/*.cpp)
@@ -140,6 +199,7 @@ add_executable(axon ${AXON_SOURCES})
 
 target_include_directories(axon PRIVATE
     src/
+    ${CMAKE_BINARY_DIR}/generated
     third_party/tree-sitter/lib/include
     third_party/duckdb
     third_party/llama.cpp/include
@@ -167,7 +227,28 @@ target_link_libraries(axon PRIVATE
     blake3_lib
 )
 
-# DuckDB pre-built lib uses old GCC ABI (std::string without __cxx11 inline namespace)
-add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
+# Linux DuckDB pre-built lib uses old GCC ABI (std::string without __cxx11
+# inline namespace). On Apple platforms the macOS prebuilt links against
+# libc++ which doesn't honor this define, and forcing it would break
+# inline-namespace mangling — so gate to non-Apple.
+# GCC/libstdc++ ABI compat for the pre-built DuckDB Linux .so.
+# Not applicable on Apple (libc++) or Windows (MSVC CRT).
+if(NOT APPLE AND NOT WIN32)
+    add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
+endif()
 
-target_compile_options(axon PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+if(MSVC)
+    target_compile_options(axon PRIVATE /O2 /W3 /wd4100 /wd4244 /wd4267)
+else()
+    target_compile_options(axon PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+endif()
+
+# ── tests ────────────────────────────────────────────────────────────────────
+# Default ON only when this is the top-level project, so downstream embedders
+# that vendor axon don't accidentally pull in GoogleTest. Toggle with
+# `cmake -S . -B build -DAXON_BUILD_TESTS=OFF`.
+option(AXON_BUILD_TESTS "Build axon unit tests" ${PROJECT_IS_TOP_LEVEL})
+if(AXON_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

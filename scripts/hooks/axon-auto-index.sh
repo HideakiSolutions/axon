@@ -12,14 +12,19 @@
 #
 # Instalar via: axon/scripts/install.sh
 
+# shellcheck disable=SC1091
+[ -f "$(dirname "${BASH_SOURCE[0]}")/_log.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/_log.sh"
+log() { command -v axon_log &>/dev/null && axon_log "axon-auto-index" "$@"; }
+
 # Guard: executar no máximo uma vez por hora por projeto
 SESSION_FLAG="/tmp/axon-indexed-$(date +%Y%m%d%H)-${PWD##*/}"
 [ -f "$SESSION_FLAG" ] && exit 0
 touch "$SESSION_FLAG"
 
-[ ! -d "$PWD/.axon" ] && exit 0
+[ ! -d "$PWD/.axon" ] && { log "skip" '{"reason":"not-axon-project"}'; exit 0; }
 
 # Marca sync como pendente; MCP server processa no próximo drain
 touch "$PWD/.axon/sync-requested" 2>/dev/null || true
+log "sync-requested" '{}'
 
 exit 0

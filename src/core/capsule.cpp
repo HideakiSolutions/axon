@@ -1,5 +1,7 @@
 #include "capsule.hpp"
 #include "skeleton.hpp"
+#include <blake3.h>
+#include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -423,6 +425,126 @@ ContextCapsule assemble_capsule(
 
     capsule.token_estimate = tokens_used;
     return capsule;
+}
+
+// ── Cache primitives (W2.T01) ───────────────────────────────────────────────
+
+namespace {
+
+// Escape single quotes for inline SQL strings (parallel to indexer.cpp's sq).
+std::string sql_quote(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (char c : s) { if (c == '\'') out += '\''; out += c; }
+    return out;
+}
+
+std::string blake3_hex(const std::string& in) {
+    blake3_hasher h;
+    blake3_hasher_init(&h);
+    blake3_hasher_update(&h, in.data(), in.size());
+    uint8_t out[BLAKE3_OUT_LEN];
+    blake3_hasher_finalize(&h, out, BLAKE3_OUT_LEN);
+    char hex[BLAKE3_OUT_LEN * 2 + 1];
+    for (size_t i = 0; i < BLAKE3_OUT_LEN; i++)
+        snprintf(hex + i * 2, 3, "%02x", out[i]);
+    return std::string(hex, BLAKE3_OUT_LEN * 2);
+}
+
+nlohmann::json capsule_file_to_json(const CapsuleFile& cf) {
+    return nlohmann::json{
+        {"path",           cf.path},
+        {"content",        cf.content},
+        {"is_skeleton",    cf.is_skeleton},
+        {"token_estimate", cf.token_estimate},
+    };
+}
+
+CapsuleFile capsule_file_from_json(const nlohmann::json& j) {
+    CapsuleFile cf;
+    cf.path           = j.value("path", "");
+    cf.content        = j.value("content", "");
+    cf.is_skeleton    = j.value("is_skeleton", true);
+    cf.token_estimate = j.value("token_estimate", 0);
+    return cf;
+}
+
+}  // anonymous namespace
+
+std::string current_project_epoch(Database& db) {
+    // CAST to VARCHAR so the string carries microsecond precision regardless
+    // of DuckDB's internal TIMESTAMP representation.
+    auto res = db.conn().Query(
+        "SELECT COALESCE(CAST(MAX(indexed_at) AS VARCHAR), '0') FROM files");
+    if (res->HasError() || res->RowCount() == 0) return "0";
+    return res->GetValue(0, 0).ToString();
+}
+
+std::string compute_capsule_cache_key(const std::string& query,
+                                      int token_budget,
+                                      const std::string& epoch) {
+    // Token budget is part of the key because a 4k-budget capsule and an
+    // 8k-budget capsule for the same query render differently.
+    std::string composite = query + "|" + std::to_string(token_budget) + "|" + epoch;
+    return blake3_hex(composite);
+}
+
+std::optional<ContextCapsule> capsule_cache_lookup(Database& db,
+                                                   const std::string& key,
+                                                   const std::string& epoch) {
+    auto res = db.conn().Query(
+        "SELECT payload FROM capsule_cache "
+        "WHERE query_hash = '" + sql_quote(key) + "' "
+        "AND epoch = '" + sql_quote(epoch) + "' LIMIT 1");
+    if (res->HasError() || res->RowCount() == 0) return std::nullopt;
+
+    try {
+        std::string payload = res->GetValue(0, 0).ToString();
+        auto j = nlohmann::json::parse(payload);
+        ContextCapsule cap;
+        cap.query          = j.value("query", "");
+        cap.token_estimate = j.value("token_estimate", 0);
+        cap.total_files    = j.value("total_files", 0);
+        for (const auto& pf : j.value("pivot_files", nlohmann::json::array())) {
+            cap.pivot_files.push_back(capsule_file_from_json(pf));
+        }
+        for (const auto& sf : j.value("support_files", nlohmann::json::array())) {
+            cap.support_files.push_back(capsule_file_from_json(sf));
+        }
+        return cap;
+    } catch (const std::exception& e) {
+        // Malformed cache row — log and treat as miss so the caller falls
+        // through to a fresh assemble_capsule().
+        std::cerr << "[capsule_cache] payload parse failed: " << e.what() << "\n";
+        return std::nullopt;
+    }
+}
+
+void capsule_cache_insert(Database& db,
+                          const std::string& key,
+                          const std::string& epoch,
+                          const ContextCapsule& capsule) {
+    try {
+        nlohmann::json j;
+        j["query"]          = capsule.query;
+        j["token_estimate"] = capsule.token_estimate;
+        j["total_files"]    = capsule.total_files;
+        j["pivot_files"]    = nlohmann::json::array();
+        j["support_files"]  = nlohmann::json::array();
+        for (const auto& f : capsule.pivot_files)   j["pivot_files"].push_back(capsule_file_to_json(f));
+        for (const auto& f : capsule.support_files) j["support_files"].push_back(capsule_file_to_json(f));
+        std::string payload = j.dump();
+
+        // Upsert via DELETE+INSERT — DuckDB supports ON CONFLICT but the
+        // explicit two-step is portable across the older versions some users
+        // may have vendored.
+        db.conn().Query("DELETE FROM capsule_cache WHERE query_hash = '" + sql_quote(key) + "'");
+        db.conn().Query(
+            "INSERT INTO capsule_cache (query_hash, epoch, payload, created_at) VALUES ('" +
+            sql_quote(key) + "', '" + sql_quote(epoch) + "', '" + sql_quote(payload) + "', now())");
+    } catch (const std::exception& e) {
+        std::cerr << "[capsule_cache] insert failed (non-fatal): " << e.what() << "\n";
+    }
 }
 
 } // namespace axon

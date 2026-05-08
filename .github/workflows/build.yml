@@ -1,0 +1,106 @@
+name: build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same ref to avoid stacking compile minutes.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }} (${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            compiler: gcc
+          - os: macos-14
+            compiler: clang
+    env:
+      AXON_DUCKDB_VERSION: 1.1.3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential ninja-build ccache jq
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja ccache jq
+
+      - name: Stage libduckdb.dylib (macOS)
+        # The vendored third_party/duckdb/lib/libduckdb.so is Linux ELF; for
+        # macOS we drop the matching universal .dylib (DuckDB ships x64+arm64
+        # in one binary) into the same directory so CMakeLists's APPLE branch
+        # finds it. Pinned to AXON_DUCKDB_VERSION to keep the Linux .so and
+        # macOS .dylib on the same DuckDB release.
+        if: runner.os == 'macOS'
+        run: |
+          curl -fL -o /tmp/duckdb.zip \
+            "https://github.com/duckdb/duckdb/releases/download/v${AXON_DUCKDB_VERSION}/libduckdb-osx-universal.zip"
+          mkdir -p third_party/duckdb/lib
+          unzip -o /tmp/duckdb.zip -d third_party/duckdb/lib/
+          test -f third_party/duckdb/lib/libduckdb.dylib
+
+      - name: Cache third_party
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/duckdb/lib
+            third_party/llama.cpp/build
+          key: ${{ matrix.os }}-third-party-${{ hashFiles('CMakeLists.txt', '.gitmodules') }}
+          restore-keys: |
+            ${{ matrix.os }}-third-party-
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAXON_BUILD_TESTS=ON -GNinja
+
+      - name: Build axon
+        # Project policy enforces -j2 (host runs MCP server + embeddings + multiple
+        # Claude sessions concurrently) but CI hosts are dedicated, so two parallel
+        # jobs is the right cap regardless.
+        run: cmake --build build --target axon -j 2
+
+      - name: Build tests
+        run: cmake --build build --target test_parser_smoke -j 2
+
+      - name: Run unit tests
+        # CTest aggregates every test registered via add_axon_test().
+        # --output-on-failure so a regression surfaces in the workflow log
+        # without re-running.
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke binary
+        run: |
+          ./build/axon --version
+          ./build/axon help
+
+      - name: End-to-end smoke
+        # Drives examples/ + .axonignore globbing + cache hit/miss against
+        # the freshly-built binary. Capsule-cache section auto-skips when
+        # no embedding model is staged (the model is ~150 MiB and not worth
+        # downloading on every PR — caught by AXON_REQUIRE_MODEL=0 default).
+        run: bash tests/e2e/smoke.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: axon-${{ matrix.os }}
+          path: |
+            build/axon
+            third_party/duckdb/lib/libduckdb.*
+          retention-days: 7

@@ -7,6 +7,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] — 2026-05-07
+
+MCP server cache parity. Extends the v0.5.3 capsule cache from the CLI to the MCP `get_context_capsule` tool — the path Claude Code actually takes when invoking axon as an MCP server.
+
+### Added
+
+- **`get_context_capsule` MCP cache** integration. The handler now consults `capsule_cache_lookup` before assembling, returning the cached payload with `"cache": "hit"` on reuse and `"cache": "miss"` after a fresh assemble. Same key shape as the CLI: `BLAKE3(query + token_budget + project_epoch)`. Cache is bypassed when (a) the new `no_cache` tool argument is `true` or (b) the caller supplies explicit `pivot_files` (explicit pivots steer assembly differently and shouldn't share entries with the implicit semantic-ranking path).
+- **Lazy embedding-model check** on the MCP handler. The model-readiness gate moved past the cache lookup, so a server still warming up its embedding model can serve cached queries immediately. Misses still require the model and surface a clear error if it isn't loaded yet.
+- **`no_cache` schema field** advertised in the tool's `inputSchema` so MCP clients (Claude Code, axon-web, anything speaking MCP) can opt out per-call.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.4 → 0.5.5
+
+## [0.5.4] — 2026-05-07
+
+End-to-end smoke harness + a real `.axonignore` glob fix surfaced by it.
+
+### Added
+
+- **`tests/e2e/smoke.sh`** (W3.T17) — drives the user-facing surface that unit tests can't reach: `axon --version`, `axon help`, `axon init/index/status` against `examples/ts-mini`, capsule cache miss → hit → `--no-cache` round-trip, `.axonignore` `*.log` + `**/generated/**` exclusion, `axon skeleton` on `examples/python-mini`. Wired into `build.yml` as the step after `ctest`, so every PR exercises it on Linux + macOS. The capsule-cache section auto-skips with a log when no embedding model is staged on the runner; `AXON_REQUIRE_MODEL=1` flips that into a hard fail for release runs.
+
+### Fixed
+
+- **`.axonignore` `**/generated/**` did not match top-level `generated/x`** — `glob_to_regex` translated the leading `**/` to `.*/`, requiring at least one directory segment before `generated/`. The smoke caught this on first run. Leading `**/` is now translated to `(?:.*/)?` (zero-or-more directories), which matches gitignore semantics. Bare `**` mid-pattern still translates to `.*` as before.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.3 → 0.5.4
+
+## [0.5.3] — 2026-05-07
+
+Capsule cache + parser test expansion. Closes the last open quick-win from the audit's W2 wave and brings the parser smoke suite to 11 cases.
+
+### Added
+
+- **Capsule cache** by query hash (W2.T01). New `capsule_cache(query_hash, epoch, payload, created_at)` table; key = `BLAKE3(query + token_budget + epoch)` where `epoch = MAX(files.indexed_at)`. Hits skip embedding + ranking + skeletonization. Smoke on a 1-file Python project: 370ms (miss) → 41ms (hit) — **9× speedup**, matching the audit projection. New `--no-cache` flag on `axon capsule` for forced re-assemble. CLI hits emit `"cache": "hit"` for visibility. Best-effort: malformed rows / insert failures log and continue, never throw.
+- **Parser smoke tests** for Go, C#, PHP, Dart, C++ (W3.T04/T05/T06/T07/T10). Total parser coverage in CI rises from 6 to 11 tests. The expansion surfaced a real grammar gap — the vendored `tree-sitter-dart` does not emit `mixin_declaration` for top-level `mixin X {}`, even though the W1.T07 handler is wired correctly. Tracked as a v0.6.x grammar-bump task in the handoff.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.2 → 0.5.3
+
+## [0.5.2] — 2026-05-07
+
+Platform expansion. Adds macOS-arm64 to the build matrix and the release tarball lineup, closing the packaging blocker tracked in `docs/audit-2026-05-handoff.md` post-v0.5.1.
+
+### Added
+
+- **macOS-arm64 build + release**. `.github/workflows/build.yml` and `release.yml` now include `macos-14` / `macos-arm64` targets and download `libduckdb-osx-universal.zip` (DuckDB v1.1.3) into `third_party/duckdb/lib/` before configure. Universal `.dylib` covers both Apple Silicon and Intel Macs.
+- **Nightly sanitizers**. New `.github/workflows/sanitizers.yml` runs the test suite under `-fsanitize=address` and `-fsanitize=undefined` matrix on a daily cron + push-to-develop on src/tests/CMake paths. First run on develop landed clean.
+
+### Fixed
+
+- `CMakeLists.txt` `_GLIBCXX_USE_CXX11_ABI=0` is now gated to non-Apple builds. The flag is GCC-libstdc++-specific; forcing it on Apple's libc++ would corrupt inline-namespace mangling.
+- `release.yml` rewrites the macOS dylib's install_name to `@rpath/libduckdb.dylib` and patches the axon binary via `install_name_tool` so the published tarball is relocatable.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.1 → 0.5.2
+
+## [0.5.1] — 2026-05-06
+
+Audit-driven hardening cycle. Output of a deep coverage audit (13 languages × parser blocks × hooks × engine quick-wins × packaging readiness). Closes the highest-impact parser gaps, adds operator-facing knobs, and prepares the project for public distribution.
+
+### Added
+
+**Parser coverage — all 13 languages refreshed (W1)**
+- **TypeScript / JavaScript**: decorators on classes/methods captured into docstring; `enum_declaration` → `"enum"`; `internal_module` / `module` → `"namespace"`; `function_declaration` with leading `async` → `"async_function"`.
+- **Python**: `decorated_definition` parents walked to capture `@router.get`, `@dataclass`, `@property` etc. into docstring; `async def` → `"async_function"`.
+- **Rust**: `trait_item` → `"trait"`, `enum_item` → `"enum"`, `union_item` → `"union"`, `mod_item` → `"module"`, `macro_definition` → `"macro"`. `impl_item` disambiguates `impl Trait for Type` (name = `"Trait for Type"`) vs inherent `impl Type`.
+- **Go**: `type_declaration` now classifies via inner spec — `interface_type` → `"interface"`, `struct_type` → `"struct"`, `type_alias` → `"type_alias"`.
+- **C#**: `property_declaration` → `"property"`, `record_declaration` → `"record"` (C# 9+), `enum_declaration` → `"enum"`, `namespace_declaration` → `"namespace"`. `partial`/`async` modifiers shift kind to `"partial_class"` / `"async_method"`. `[Attribute]` lists folded into docstring.
+- **PHP**: `namespace_definition` → `"namespace"`, `trait_declaration` → `"trait"`, `interface_declaration` → `"interface"`, `enum_declaration` → `"enum"` (PHP 8.1+). `#[Attribute]` lists folded into docstring.
+- **Dart**: `mixin_declaration` → `"mixin"`, `extension_declaration` → `"extension"`, `enum_declaration` → `"enum"`, `factory_constructor_signature` → `"factory"`. Async marker on functions/methods promotes kind to async-prefixed.
+- **Java**: `record_declaration` → `"record"` (Java 14+), `enum_declaration` → `"enum"`, `annotation_type_declaration` → `"annotation_type"`, `sealed`/`non-sealed` modifier promotes class/interface kind. `@Annotation` lists folded into docstring.
+- **Bash**: `declaration_command` with `export`/`readonly`/`declare`/`typeset` emits `kind="variable"`.
+- **C++**: `enum_specifier` → `"enum"`, `union_specifier` → `"union"`, `friend_declaration` → `"friend"`. Surrounding `template<…>` parameter list folded into docstring.
+- **Kotlin**: extension functions → `"extension_function"`, `suspend` → `"suspend_function"`, `sealed`/`data`/`enum class` modifiers promote kind, `companion_object` → `"companion_object"`, `type_alias` → `"type_alias"`.
+- **Vue**: `<script>` without `lang` attribute now emits a one-shot stderr warning (parsing still falls back to JS per spec).
+
+**Engine quick-wins (W2)**
+- `axon --version` / `-V` / `version` print version + short git SHA. Wired via CMake `configure_file` populating `src/version.hpp` from `version.hpp.in` at build time.
+- Environment variable overrides on top of `.axon/config.toml`, applied in `make_config()`:
+  - `AXON_EMBEDDING_MODEL` — absolute or relative path to `.gguf`
+  - `AXON_TOKEN_BUDGET` — default capsule token budget
+  - `AXON_TELEMETRY` — opt-in flag (1/true/yes/on); off by default
+- New TOML keys: `token_budget` (int, default 8000) and `telemetry` (bool, default false).
+- `.axonignore` now supports gitignore-style globbing: `*`, `**`, `?`, leading `/` (anchored), trailing `/` (dir-only), `!negation`. Last-rule-wins semantics. Plain-string patterns retain the fast equality path for back-compat.
+
+**Test foundation (W3)**
+- GoogleTest+CTest via FetchContent. New `AXON_BUILD_TESTS` CMake option (default ON when top-level). Tests live under `tests/unit/` with the `add_axon_test(name, sources...)` helper from `tests/CMakeLists.txt`. The parser is exposed to tests as an `axon_parser_objs` OBJECT library so unit tests don't drag in DuckDB/llama.cpp.
+- `tests/unit/test_parser_smoke.cpp` — first cross-language parser smoke: 6 cases asserting that the W1 audit closures actually emit the new kinds (Rust traits/macros/impl, Python decorators+async, Java records/sealed/annotations, Bash variables, Kotlin sealed/data, TypeScript decorators+namespaces+async). Caught and fixed a TS gap on exported decorated declarations during bootstrap.
+
+**CI / lint (W4)**
+- `.github/workflows/build.yml`: ubuntu-22.04 + macos-14 build matrix with third_party caching, ctest run, and post-build `axon --version` / `axon help` smoke.
+- `.github/workflows/release.yml`: tag-driven (`v*.*.*`) multi-target binary release. Stages `axon-<version>-<target>.tar.gz` containing `bin/axon`, `lib/libduckdb.{so,dylib}`, README, LICENSE, CHANGELOG, install.sh; generates SHA-256 sidecar; auto-extracts the matching `[X.Y.Z]` slice of CHANGELOG as release notes; creates the GitHub Release via softprops/action-gh-release.
+- `.github/workflows/lint.yml`: shellcheck + clang-format-15 (advisory pass via `continue-on-error: true`). New `.clang-format` (LLVM base, 4-space indent, 100-col, c++20).
+- README badges refreshed to point at build.yml + lint.yml; CONTRIBUTING.md grew "Running the test suite" + "CI / lint workflows" sections plus a fixture step for new-parser PRs.
+
+**Hook hardening (W4)**
+- `axon-build-guard.sh` now covers `cmake --build … --parallel N` alongside the existing `-j` rules (deny on dynamic expansion, on N>cap, on `--parallel` with no number).
+- New `scripts/hooks/_log.sh` shared helper. The four hooks (`axon-guard`, `axon-build-guard`, `axon-auto-index`, `axon-post-edit`) source it (silent fallback if absent) and emit one JSON line per invocation to `.axon/logs/<hook>.jsonl` (project-local) or `~/.axon/logs/<hook>.jsonl` (fallback). Live log rotates to `<hook>.<epoch>.jsonl.gz` above `AXON_LOG_MAX_BYTES` (default 5 MiB). Best-effort throughout — every IO branch is `|| true` so a full disk never breaks a hook.
+
+**Packaging for public release (W5)**
+- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1).
+- `.github/dependabot.yml` tracking github-actions weekly + git submodules monthly.
+- `examples/{ts-mini,python-mini,rust-mini}` — runnable mini-projects exercising the parser surface, each with a README listing expected symbol kinds.
+- `Dockerfile` (multi-stage builder + debian:12-slim runtime) plus `.dockerignore` matching the release tarball layout.
+- `scripts/install.sh` rewritten for distribution: layout-aware path resolution (accepts both source-tree and release-tarball), `require_cmd` dependency detection with OS-specific install hints (apt/brew), optional embedding model download with interactive prompt and `AXON_DOWNLOAD_MODEL` / `AXON_EMBEDDING_MODEL_URL` / `AXON_EMBEDDING_MODEL_SHA256` environment overrides for unattended installs.
+
+### Fixed
+
+- **`pending-writes.txt`** capped at 1 MiB. The hook (`axon-post-edit.sh`) checks size under the existing flock before each append; above the cap it rotates the live file to `pending-writes.<epoch>.bak` and touches `sync-requested` so the next MCP server tool call does a full BLAKE3-skip walk. Prevents unbounded growth when the server is offline.
+
+### Changed
+
+- README example snippets genericized — `--group=hideakisolutions` and `/opt/hideakisolutions/axon` replaced with `--group=backend` and `/home/alice/projects/axon` placeholders. Email contacts retain the legitimate `hideakiservicos@gmail.com` public maintainer address.
+
+### Out of scope (deferred)
+
+- W2.T01 (capsule cache by query hash) — needs DB schema design + JSON serialization protocol + invalidation epoch logic; sized for a focused follow-up rather than a quick-win commit.
+- W3.T02–T17 — per-language test files beyond the shared smoke + golden capsule snapshots + `tests/e2e/smoke.sh`. The W3.T01 foundation is in place; remaining tasks are mechanical fixture writing.
+- W4.T03 (sanitizers.yml — ASAN/UBSAN nightly), T08 (MCP health probe in auto-index), T09 (post-edit cleanup EXIT trap — the existing flock-based design already handles partial failures, marking won't-fix-without-evidence).
+- W5.T06 — telemetry HTTP client implementation. The opt-in env var (`AXON_TELEMETRY`) is plumbed end-to-end into `ProjectConfig.telemetry`; what remains is the actual sender (`src/core/telemetry.{cpp,hpp}`) plus consent UX docs.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.0 → 0.5.1
+
 ## [0.5.0] — 2026-04-25
 
 Consolidated minor release covering the v0.4.x cycle. No new code beyond v0.4.3 — promotes the cycle's accumulated improvements into a stable minor.
