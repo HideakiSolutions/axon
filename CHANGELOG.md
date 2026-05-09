@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.10] — 2026-05-09
+
+### Fixed
+
+- `axon capsule` com modelo presente crashava com `SIGILL` em máquinas sem AVX-512 — `libggml-cpu.so` era compilado no runner GitHub Actions (Xeon Platinum 8370C, AVX-512) com instruções ausentes na maioria das máquinas de usuário (AVX2-only). `GGML_AVX512*` agora forçado a `OFF` no CMakeLists.txt
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.9 → 0.5.10
+
 ## [0.5.9] — 2026-05-09
 
 ### Fixed

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(axon VERSION 0.5.9 LANGUAGES C CXX ASM)
+project(axon VERSION 0.5.10 LANGUAGES C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -155,6 +155,14 @@ target_include_directories(ts_vue PUBLIC ${TS_INCLUDE}
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
+# Limit SIMD to AVX2 so the distributed binary runs on any x86-64 machine.
+# GitHub Actions ubuntu-22.04 runners have Xeon Platinum 8370C (AVX-512);
+# without this gate the released libggml-cpu.so crashes with SIGILL on the
+# majority of user machines that have AVX2 but not AVX-512.
+set(GGML_AVX512      OFF CACHE BOOL "" FORCE)
+set(GGML_AVX512_VBMI OFF CACHE BOOL "" FORCE)
+set(GGML_AVX512_VNNI OFF CACHE BOOL "" FORCE)
+set(GGML_AVX512_BF16 OFF CACHE BOOL "" FORCE)
 # MSVC C++20 treats u8"..." literals as const char8_t* (not const char*).
 # llama.cpp uses u8 literals expecting char — disable char8_t to restore C++17 behaviour.
 if(MSVC)
