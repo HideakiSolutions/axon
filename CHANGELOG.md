@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] — 2026-05-08
+
+### Fixed
+
+- Distributed tarballs (Linux x64, macOS arm64) agora incluem as shared libraries do llama.cpp (`libllama.so.0`, `libggml*.so.0`) — o `install.sh` funcionava mas o binário falhava ao iniciar por `SONAME` ausente no diretório `lib/`
+- `release.yml` staging step: `find build/bin` agora copia todas as `lib*.so*` e `lib*.dylib` junto com `libduckdb`
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.6 → 0.5.7
+
 ## [0.5.6] — 2026-05-08
 
 Windows x64 native binary + binary distribution pipeline.
