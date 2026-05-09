@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.11] — 2026-05-09
+
+### Fixed
+
+- `axon capsule` crashava com `SIGILL` durante `load_tensors` em máquinas sem AVX-512 — o `CPU_REPACK` compila kernels de repack por variante de CPU mas despacha usando a variante mais alta detectada; no CI (Xeon Platinum 8370C, AVX-512) o kernel AVX-512 era selecionado mesmo em máquinas AVX2-only. `GGML_CPU_REPACK=OFF` remove a otimização de repack mas garante execução em qualquer x86-64
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.10 → 0.5.11
+
 ## [0.5.10] — 2026-05-09
 
 ### Fixed
