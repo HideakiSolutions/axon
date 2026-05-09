@@ -7,13 +7,16 @@
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
 #  define close(s) closesocket(s)
+#  ifdef _MSC_VER
+     typedef int ssize_t;   // MinGW defines ssize_t; MSVC does not
+#  endif
 #else
 #  include <sys/socket.h>
 #  include <netinet/in.h>
 #  include <arpa/inet.h>
 #  include <unistd.h>
-#  include <signal.h>
 #endif
+#include <csignal>    // SIGINT, signal() — available on all platforms
 #include <sstream>
 #include <iostream>
 
