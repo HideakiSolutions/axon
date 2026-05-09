@@ -68,6 +68,10 @@ jobs:
           Expand-Archive -Path "$env:TEMP\duckdb.zip" -DestinationPath third_party\duckdb\lib -Force
           if (-not (Test-Path "third_party\duckdb\lib\duckdb.dll")) { exit 1 }
 
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja
 
