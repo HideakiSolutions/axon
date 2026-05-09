@@ -2,6 +2,10 @@
 #include <cstdio>
 #include <sstream>
 #include <regex>
+#ifdef _WIN32
+#  define popen  _popen
+#  define pclose _pclose
+#endif
 #include <filesystem>
 
 namespace axon {
