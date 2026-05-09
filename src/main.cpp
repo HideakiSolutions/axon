@@ -253,8 +253,15 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
-        axon::EmbeddingModel model(model_path);
+        std::optional<axon::EmbeddingModel> model_opt;
+        try {
+            auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
+            model_opt.emplace(model_path);
+        } catch (const std::exception& e) {
+            std::cerr << "[axon] " << e.what() << "\n";
+            return 1;
+        }
+        axon::EmbeddingModel& model = *model_opt;
 
         auto capsule = axon::assemble_capsule(query, {}, db, model, graph, cfg.project_root,
                                               cfg.project_cfg.token_budget);

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9] — 2026-05-09
+
+### Fixed
+
+- `axon capsule` não crashava mais quando o modelo de embedding está ausente — `std::runtime_error` de `find_model` não era capturado no handler do subcomando, causando `terminate()` + core dump. Agora imprime `[axon] Embedding model not found...` e sai com código 1
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.8 → 0.5.9
+
 ## [0.5.8] — 2026-05-09
 
 ### Fixed
