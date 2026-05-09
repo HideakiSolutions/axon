@@ -155,6 +155,11 @@ target_include_directories(ts_vue PUBLIC ${TS_INCLUDE}
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
+# MSVC C++20 treats u8"..." literals as const char8_t* (not const char*).
+# llama.cpp uses u8 literals expecting char — disable char8_t to restore C++17 behaviour.
+if(MSVC)
+    add_compile_options(/Zc:char8_t-)
+endif()
 add_subdirectory(third_party/llama.cpp)
 
 # ── blake3 ───────────────────────────────────────────────────────────────────
