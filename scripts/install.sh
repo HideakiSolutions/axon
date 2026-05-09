@@ -16,6 +16,14 @@ set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AXON_ROOT="$(dirname "$SCRIPTS_DIR")"
+
+# Release-tarball layout: install.sh is at the tarball root (alongside bin/ and lib/).
+# Detect this by checking for bin/ and lib/ as siblings of the script itself.
+# Source-tree layout: install.sh lives in scripts/, so AXON_ROOT is the project root.
+if [ -d "$SCRIPTS_DIR/bin" ] && [ -d "$SCRIPTS_DIR/lib" ]; then
+  AXON_ROOT="$SCRIPTS_DIR"
+fi
+
 AXON_BIN="$AXON_ROOT/build/axon"
 # Both the source-tree (third_party/duckdb/lib) and the release-tarball
 # layout (lib/) are accepted so the same script ships in both contexts.

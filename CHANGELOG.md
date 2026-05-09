@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8] — 2026-05-09
+
+### Fixed
+
+- `install.sh` detecta corretamente o layout do tarball (script na raiz ao lado de `bin/` e `lib/`) — `AXON_ROOT` apontava para o diretório pai `/tmp` em vez da raiz do pacote
+- Staging do `release.yml` agora inclui `hooks/` e `templates/` no tarball — `install.sh` falhava ao tentar copiar `axon-guard.sh` e demais hooks que não estavam empacotados
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.7 → 0.5.8
+
 ## [0.5.7] — 2026-05-08
 
 ### Fixed
