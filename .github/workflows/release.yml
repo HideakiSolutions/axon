@@ -94,6 +94,8 @@ jobs:
           stage="axon-${{ steps.ver.outputs.version }}-${{ matrix.target }}"
           mkdir -p "${stage}/bin" "${stage}/lib"
           cp build/axon "${stage}/bin/axon"
+          # Bundle llama.cpp shared libs (libllama, libggml*) from build output
+          find build/bin -name "lib*.so*" -o -name "lib*.dylib" 2>/dev/null | xargs -I{} cp {} "${stage}/lib/" || true
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp third_party/duckdb/lib/libduckdb.so "${stage}/lib/"
           else
