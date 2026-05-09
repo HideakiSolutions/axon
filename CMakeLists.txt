@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(axon VERSION 0.5.10 LANGUAGES C CXX ASM)
+project(axon VERSION 0.5.11 LANGUAGES C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -163,6 +163,11 @@ set(GGML_AVX512      OFF CACHE BOOL "" FORCE)
 set(GGML_AVX512_VBMI OFF CACHE BOOL "" FORCE)
 set(GGML_AVX512_VNNI OFF CACHE BOOL "" FORCE)
 set(GGML_AVX512_BF16 OFF CACHE BOOL "" FORCE)
+# CPU_REPACK compiles weight-repacking kernels per variant but dispatches using
+# the highest supported variant at runtime — on CI (Xeon Platinum with AVX-512)
+# these kernels include AVX-512 paths that crash with SIGILL on AVX2-only hosts.
+# Disabling REPACK removes the optimization but makes the binary run everywhere.
+set(GGML_CPU_REPACK  OFF CACHE BOOL "" FORCE)
 # MSVC C++20 treats u8"..." literals as const char8_t* (not const char*).
 # llama.cpp uses u8 literals expecting char — disable char8_t to restore C++17 behaviour.
 if(MSVC)
