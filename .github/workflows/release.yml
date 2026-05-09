@@ -108,6 +108,8 @@ jobs:
           fi
           cp README.md LICENSE CHANGELOG.md "${stage}/"
           cp scripts/install.sh "${stage}/install.sh"
+          cp -r scripts/hooks "${stage}/hooks"
+          cp -r scripts/templates "${stage}/templates"
           echo "${stage}" > .stage-name
 
       - name: Stage release tree (Windows)
