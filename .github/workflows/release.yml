@@ -197,7 +197,7 @@ jobs:
           } >> release-notes.md
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: HideakiSolutions/axon-releases
           token: ${{ secrets.RELEASES_PAT }}
