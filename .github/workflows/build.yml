@@ -27,7 +27,7 @@ jobs:
     env:
       AXON_DUCKDB_VERSION: 1.1.3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -57,7 +57,7 @@ jobs:
           test -f third_party/duckdb/lib/libduckdb.dylib
 
       - name: Cache third_party
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             third_party/duckdb/lib
@@ -97,7 +97,7 @@ jobs:
         run: bash tests/e2e/smoke.sh
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: axon-${{ matrix.os }}
           path: |
