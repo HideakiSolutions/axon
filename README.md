@@ -27,7 +27,7 @@
 - [MCP Tools (15)](#mcp-tools-15)
 - [HTTP Mode & Axon Web](#http-mode--axon-web)
 - [Multi-repo Registry](#multi-repo-registry)
-- [Supported languages](#supported-languages-13)
+- [Supported languages](#supported-languages-14)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -215,7 +215,7 @@ Registry format (`~/.axon/registry.json`):
 
 ---
 
-## Supported languages (13)
+## Supported languages (14)
 
 | Language | Extensions |
 |----------|-----------|
@@ -232,6 +232,7 @@ Registry format (`~/.axon/registry.json`):
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.h` |
 | Kotlin | `.kt`, `.kts` |
 | Vue | `.vue` (SFC with TS/JS sub-parse) |
+| Nix | `.nix` (bindings, inherit, `import` edges) |
 
 ---
 
@@ -404,7 +405,7 @@ src/
 │   ├── git.hpp/cpp       # Git diff parsing for detect_changes
 │   └── routes.hpp/cpp    # HTTP route detection for route_map / api_impact
 ├── parser/
-│   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (13 langs)
+│   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (14 langs)
 └── mcp/
     ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 15 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
@@ -413,7 +414,7 @@ third_party/
 ├── duckdb/               # Pre-built shared library v1.1.3
 ├── llama.cpp/            # Submodule — inference engine for embeddings
 ├── tree-sitter/          # Core C API
-├── tree-sitter-{lang}/   # 13 language grammar submodules
+├── tree-sitter-{lang}/   # 14 language grammar submodules
 ├── blake3/               # Fast file hashing (incremental reindex)
 └── nlohmann-json/        # Header-only JSON
 ```
@@ -430,7 +431,7 @@ graph TD
     CLI[main.cpp CLI] --> IDX[Indexer]
     CLI --> MCP[MCP Server\nstdio JSON-RPC]
     CLI --> HTTP[HTTP Server\nREST API]
-    IDX --> PARSER[Parser\n13 languages via tree-sitter]
+    IDX --> PARSER[Parser\n14 languages via tree-sitter]
     IDX --> DB[(DuckDB\nfiles/symbols/edges/observations)]
     IDX --> EMB[Embeddings\nllama.cpp + nomic-embed]
     MCP --> CAPS[Capsule\nBFS + skeletonize]
@@ -473,7 +474,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | MCP protocol | ✅ | ❌ | ❌ | ❌ |
 | Multi-repo registry | ✅ | ❌ | ❌ | ❌ |
 | Graph visualization | ✅ (axon-web) | ❌ | ❌ | ❌ |
-| 13 languages | ✅ | ✅ | ✅ | ✅ |
+| 14 languages | ✅ | ✅ | ✅ | ✅ |
 | Zero cloud dependency | ✅ | ❌ | ❌ | ❌ |
 
 ---

@@ -18,6 +18,7 @@ extern "C" {
     TSLanguage* tree_sitter_cpp();
     TSLanguage* tree_sitter_kotlin();
     TSLanguage* tree_sitter_vue();
+    TSLanguage* tree_sitter_nix();
 }
 
 namespace axon {
@@ -37,6 +38,7 @@ static TSLanguage* get_ts_language(Language lang) {
         case Language::Cpp:         return tree_sitter_cpp();
         case Language::Kotlin:      return tree_sitter_kotlin();
         case Language::Vue:         return tree_sitter_vue();
+        case Language::Nix:         return tree_sitter_nix();
     }
     return nullptr;
 }
@@ -109,6 +111,32 @@ static void build_skeleton(TSNode node, const std::string& src,
         for (uint32_t i = 0; i < cnt; i++)
             build_skeleton(ts_node_child(node, i), src, lang, depth + 1, out, strip_comments);
         return;
+    }
+
+    // Nix: emit each binding's first line; recurse into containers (attrset,
+    // let, rec attrset) so nested bindings surface. function_expression bodies
+    // are skipped — only the binding header is rendered.
+    if (lang == Language::Nix) {
+        if (kind == "binding") {
+            out << first_line(node, src) << "\n";
+            TSNode expr_node = ts_node_child_by_field_name(node, "expression", 10);
+            if (!ts_node_is_null(expr_node)) {
+                std::string ek = ts_node_type(expr_node);
+                if (ek == "attrset_expression" || ek == "rec_attrset_expression" ||
+                    ek == "let_expression"     || ek == "let_attrset_expression") {
+                    uint32_t cnt2 = ts_node_child_count(expr_node);
+                    for (uint32_t i = 0; i < cnt2; i++)
+                        build_skeleton(ts_node_child(expr_node, i), src, lang,
+                                       depth + 1, out, strip_comments);
+                }
+            }
+            return;
+        }
+        if (kind == "function_expression") {
+            // `param: body` — skip body, header is rendered by parent binding's
+            // first_line. Suppress recursion to avoid leaking inner expressions.
+            return;
+        }
     }
 
     // C++: namespace_definition and class/struct specifiers — recurse into body
