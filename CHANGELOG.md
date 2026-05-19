@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.12] — 2026-05-19
+
+### Changed
+
+- Remove legacy local runtimes em `.hseos/` — agentes/skills/workflows do projeto agora delegam ao runtime global `enterprise-hseos`. Sem impacto em comportamento do binário; release cut para alinhar tag com working tree e disparar pipeline multi-OS (linux-x64, macos-arm64, windows-x64).
+
 ## [0.5.11] — 2026-05-09
 
 ### Fixed
