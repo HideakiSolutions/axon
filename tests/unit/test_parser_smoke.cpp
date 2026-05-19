@@ -412,3 +412,48 @@ class Array {
     EXPECT_NE(arr->docstring->find("typename"), std::string::npos)
         << "expected typename T in folded template params, got: " << *arr->docstring;
 }
+
+// ── Nix ────────────────────────────────────────────────────────────────────
+TEST(ParserNix, BindingsImportsInherit) {
+    auto p = write_temp("nix", R"NIX(
+{ pkgs, lib, ... }:
+let
+  helper = x: x + 1;
+  pinned = import ./pinned.nix;
+  channel = import <nixpkgs> {};
+in
+{
+  services.nginx = {
+    enable = true;
+    virtualHosts = {};
+  };
+  environment.systemPackages = with pkgs; [ git vim ];
+  inherit (pkgs) bash coreutils;
+}
+)NIX");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "function"))
+        << "function_expression RHS did not produce function kind";
+    EXPECT_TRUE(has_kind(pf->symbols, "attrset"))
+        << "attrset_expression RHS did not produce attrset kind";
+    EXPECT_TRUE(has_kind(pf->symbols, "variable"))
+        << "inherit clause did not emit per-attr variable symbols";
+
+    auto* helper = find_named(pf->symbols, "helper");
+    ASSERT_NE(helper, nullptr);
+    EXPECT_EQ(helper->kind, "function");
+
+    auto* nginx = find_named(pf->symbols, "services.nginx");
+    ASSERT_NE(nginx, nullptr) << "dotted attrpath name not captured verbatim";
+
+    bool saw_pinned = false, saw_channel = false;
+    for (const auto& e : pf->imports) {
+        if (e.to_specifier == "./pinned.nix") saw_pinned = true;
+        if (e.to_specifier == "nixpkgs")      saw_channel = true;
+    }
+    EXPECT_TRUE(saw_pinned)  << "`import ./pinned.nix` did not produce import edge";
+    EXPECT_TRUE(saw_channel) << "`import <nixpkgs>` did not strip angle brackets";
+}

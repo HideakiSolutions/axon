@@ -23,6 +23,7 @@ extern "C" {
     TSLanguage* tree_sitter_kotlin();
     TSLanguage* tree_sitter_vue();
     TSLanguage* tree_sitter_lua();
+    TSLanguage* tree_sitter_nix();
 }
 
 namespace axon {
@@ -42,6 +43,7 @@ std::optional<Language> language_from_extension(const std::string& ext) {
     if (ext == "kt" || ext == "kts") return Language::Kotlin;
     if (ext == "vue") return Language::Vue;
     if (ext == "lua") return Language::Lua;
+    if (ext == "nix") return Language::Nix;
     return std::nullopt;
 }
 
@@ -61,6 +63,7 @@ std::string language_name(Language lang) {
         case Language::Kotlin:      return "kotlin";
         case Language::Vue:         return "vue";
         case Language::Lua:         return "lua";
+        case Language::Nix:         return "nix";
     }
     return "unknown";
 }
@@ -93,6 +96,7 @@ static TSLanguage* get_ts_language(Language lang) {
         case Language::Kotlin:      return tree_sitter_kotlin();
         case Language::Vue:         return tree_sitter_vue();
         case Language::Lua:         return tree_sitter_lua();
+        case Language::Nix:         return tree_sitter_nix();
     }
     return nullptr;
 }
@@ -178,6 +182,7 @@ static bool is_call_kind(const std::string& kind) {
         "scoped_call_expression",   // PHP
         "macro_invocation",         // Rust
         "function_call",            // Lua
+        "apply_expression",         // Nix
     };
     return kinds.count(kind) > 0;
 }
@@ -827,6 +832,90 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             is_symbol = !sym.name.empty();
         } else if (kind == "import_declaration") {
             push_import_edge(node, ctx.src, ctx.imports);
+        }
+    }
+
+    // Nix
+    if (ctx.lang == Language::Nix) {
+        // `foo.bar = expr;` and `foo = expr;` — emit attrpath as symbol. Kind
+        // depends on RHS: `function_expression` → "function", `attrset_expression`
+        // → "attrset", anything else → "binding". Lets capsule queries surface
+        // option definitions, NixOS modules, and helper lambdas without dragging
+        // in entire `let` blocks.
+        if (kind == "binding") {
+            TSNode attrpath_node = ts_node_child_by_field_name(node, "attrpath", 8);
+            TSNode expr_node     = ts_node_child_by_field_name(node, "expression", 10);
+            if (!ts_node_is_null(attrpath_node)) {
+                sym.name = node_text(attrpath_node, ctx.src);
+                sym.kind = "binding";
+                if (!ts_node_is_null(expr_node)) {
+                    std::string ek = ts_node_type(expr_node);
+                    if (ek == "function_expression")          sym.kind = "function";
+                    else if (ek == "attrset_expression" ||
+                             ek == "rec_attrset_expression")  sym.kind = "attrset";
+                }
+                sym.signature = first_line(node, ctx.src);
+                is_symbol = !sym.name.empty();
+            }
+        } else if (kind == "inherit" || kind == "inherit_from") {
+            // `inherit a b c;` — re-binds each attr from the enclosing scope.
+            // `inherit (src) a b;` — re-binds from `src`; also emits import edge.
+            TSNode attrs = ts_node_child_by_field_name(node, "attrs", 5);
+            if (!ts_node_is_null(attrs)) {
+                uint32_t cc = ts_node_named_child_count(attrs);
+                for (uint32_t i = 0; i < cc; i++) {
+                    TSNode a = ts_node_named_child(attrs, i);
+                    if (std::string(ts_node_type(a)) != "identifier") continue;
+                    Symbol s;
+                    s.kind = "variable";
+                    s.name = node_text(a, ctx.src);
+                    s.signature = first_line(node, ctx.src);
+                    s.start_line = (int)ts_node_start_point(a).row + 1;
+                    s.end_line   = (int)ts_node_end_point(a).row + 1;
+                    s.start_byte = (int)ts_node_start_byte(a);
+                    s.end_byte   = (int)ts_node_end_byte(a);
+                    ctx.symbols.push_back(std::move(s));
+                }
+            }
+            if (kind == "inherit_from") {
+                TSNode src_expr = ts_node_child_by_field_name(node, "expression", 10);
+                if (!ts_node_is_null(src_expr)) {
+                    auto spec = node_text(src_expr, ctx.src);
+                    if (!spec.empty()) ctx.imports.push_back({"", spec, "imports"});
+                }
+            }
+        } else if (kind == "apply_expression") {
+            // Detect `import <path>` / `import ./foo.nix` and record as import.
+            // Anything else falls through to the generic call-site collector.
+            TSNode fn = ts_node_child_by_field_name(node, "function", 8);
+            if (!ts_node_is_null(fn)) {
+                std::string fn_kind = ts_node_type(fn);
+                std::string fn_text;
+                if (fn_kind == "variable_expression" &&
+                    ts_node_named_child_count(fn) > 0) {
+                    fn_text = node_text(ts_node_named_child(fn, 0), ctx.src);
+                }
+                if (fn_text == "import") {
+                    TSNode arg = ts_node_child_by_field_name(node, "argument", 8);
+                    if (!ts_node_is_null(arg)) {
+                        std::string ak = ts_node_type(arg);
+                        if (ak == "path_expression" || ak == "spath_expression" ||
+                            ak == "hpath_expression" || ak == "string_expression") {
+                            auto spec = node_text(arg, ctx.src);
+                            // Strip surrounding `<…>` or quotes
+                            if (spec.size() >= 2) {
+                                if (spec.front() == '<' && spec.back() == '>')
+                                    spec = spec.substr(1, spec.size() - 2);
+                                else if ((spec.front() == '"' || spec.front() == '\'') &&
+                                         spec.front() == spec.back())
+                                    spec = spec.substr(1, spec.size() - 2);
+                            }
+                            if (!spec.empty())
+                                ctx.imports.push_back({"", spec, "imports"});
+                        }
+                    }
+                }
+            }
         }
     }
 
