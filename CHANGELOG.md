@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Lua grammar via `tree-sitter-grammars/tree-sitter-lua` submodule — parses `.lua` files, surfaces `function`/`method` symbols (including `function tbl.foo`, `function tbl:foo`, `local function`) and `require("mod")` calls as import edges. Count of supported languages: 13 → 14
+- `capsule.cpp::lang_from_string()` and `mcp/server.cpp` skeleton dispatch now recognize `bash`, `cpp`, `kotlin`, `vue`, `lua` — previously these wired-up grammars fell through to the TypeScript default in skeleton lookups
+
 ## [0.5.11] — 2026-05-09
 
 ### Fixed

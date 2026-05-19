@@ -151,6 +151,13 @@ add_library(ts_vue STATIC
 target_include_directories(ts_vue PUBLIC ${TS_INCLUDE}
     third_party/tree-sitter-vue/src)
 
+add_library(ts_lua STATIC
+    third_party/tree-sitter-lua/src/parser.c
+    third_party/tree-sitter-lua/src/scanner.c
+)
+target_include_directories(ts_lua PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-lua/src)
+
 # ── llama.cpp ────────────────────────────────────────────────────────────────
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -240,6 +247,7 @@ target_link_libraries(axon PRIVATE
     ts_cpp
     ts_kotlin
     ts_vue
+    ts_lua
     llama
     ggml
     blake3_lib

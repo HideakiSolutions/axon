@@ -405,6 +405,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 else if (ls == "php")        lang = Language::PHP;
                 else if (ls == "dart")       lang = Language::Dart;
                 else if (ls == "java")       lang = Language::Java;
+                else if (ls == "bash")       lang = Language::Bash;
+                else if (ls == "cpp")        lang = Language::Cpp;
+                else if (ls == "kotlin")     lang = Language::Kotlin;
+                else if (ls == "vue")        lang = Language::Vue;
+                else if (ls == "lua")        lang = Language::Lua;
 
                 result.push_back({{"path", path}, {"skeleton", skeletonize(content, lang)}});
             }

@@ -22,6 +22,7 @@ extern "C" {
     TSLanguage* tree_sitter_cpp();
     TSLanguage* tree_sitter_kotlin();
     TSLanguage* tree_sitter_vue();
+    TSLanguage* tree_sitter_lua();
 }
 
 namespace axon {
@@ -40,6 +41,7 @@ std::optional<Language> language_from_extension(const std::string& ext) {
     if (ext == "cpp" || ext == "cxx" || ext == "cc" || ext == "hpp" || ext == "hxx" || ext == "h") return Language::Cpp;
     if (ext == "kt" || ext == "kts") return Language::Kotlin;
     if (ext == "vue") return Language::Vue;
+    if (ext == "lua") return Language::Lua;
     return std::nullopt;
 }
 
@@ -58,6 +60,7 @@ std::string language_name(Language lang) {
         case Language::Cpp:         return "cpp";
         case Language::Kotlin:      return "kotlin";
         case Language::Vue:         return "vue";
+        case Language::Lua:         return "lua";
     }
     return "unknown";
 }
@@ -89,6 +92,7 @@ static TSLanguage* get_ts_language(Language lang) {
         case Language::Cpp:         return tree_sitter_cpp();
         case Language::Kotlin:      return tree_sitter_kotlin();
         case Language::Vue:         return tree_sitter_vue();
+        case Language::Lua:         return tree_sitter_lua();
     }
     return nullptr;
 }
@@ -173,6 +177,7 @@ static bool is_call_kind(const std::string& kind) {
         "member_call_expression",   // PHP
         "scoped_call_expression",   // PHP
         "macro_invocation",         // Rust
+        "function_call",            // Lua
     };
     return kinds.count(kind) > 0;
 }
@@ -1206,6 +1211,54 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             is_symbol = !sym.name.empty();
         } else if (kind == "import_header") {
             push_import_edge(node, ctx.src, ctx.imports);
+        }
+    }
+
+    // Lua
+    if (ctx.lang == Language::Lua) {
+        // function_declaration covers: `function foo()`, `function tbl.foo()`,
+        // `function tbl:foo()`, `local function foo()`. The `name` field is
+        // identifier | dot_index_expression | method_index_expression.
+        if (kind == "function_declaration") {
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) {
+                std::string nk = ts_node_type(name_node);
+                sym.kind = (nk == "method_index_expression") ? "method" : "function";
+                sym.name = node_text(name_node, ctx.src);
+            }
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "function_call") {
+            // `require("mod")` — Lua's module import convention. We surface
+            // every require() call regardless of context (local M = require…,
+            // bare statement, table value) — the import edge points to the
+            // module path, which is what capsule queries care about. The
+            // recursive visit_node walk visits the inner function_call inside
+            // expression_list/expression wrappers, so we don't need to drill
+            // through variable_declaration manually.
+            TSNode callee = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(callee) && node_text(callee, ctx.src) == "require") {
+                TSNode args = ts_node_child_by_field_name(node, "arguments", 9);
+                if (!ts_node_is_null(args)) {
+                    uint32_t agc = ts_node_named_child_count(args);
+                    for (uint32_t k = 0; k < agc; k++) {
+                        TSNode a = ts_node_named_child(args, k);
+                        // Drill expression→string wrappers to reach literal text.
+                        while (!ts_node_is_null(a) && ts_node_named_child_count(a) == 1) {
+                            std::string ak = ts_node_type(a);
+                            if (ak == "string") break;
+                            a = ts_node_named_child(a, 0);
+                        }
+                        auto spec = node_text(a, ctx.src);
+                        if (spec.size() >= 2 &&
+                            (spec.front() == '"' || spec.front() == '\'') &&
+                            spec.front() == spec.back()) {
+                            spec = spec.substr(1, spec.size() - 2);
+                        }
+                        if (!spec.empty()) ctx.imports.push_back({"", spec, "imports"});
+                    }
+                }
+            }
         }
     }
 

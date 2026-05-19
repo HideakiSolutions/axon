@@ -29,6 +29,11 @@ static std::optional<Language> lang_from_string(const std::string& s) {
     if (s == "php")        return Language::PHP;
     if (s == "dart")       return Language::Dart;
     if (s == "java")       return Language::Java;
+    if (s == "bash")       return Language::Bash;
+    if (s == "cpp")        return Language::Cpp;
+    if (s == "kotlin")     return Language::Kotlin;
+    if (s == "vue")        return Language::Vue;
+    if (s == "lua")        return Language::Lua;
     return std::nullopt;
 }
 
