@@ -27,7 +27,7 @@ jobs:
     env:
       AXON_DUCKDB_VERSION: 1.1.3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
