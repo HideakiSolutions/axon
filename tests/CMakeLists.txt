@@ -26,7 +26,7 @@ target_include_directories(axon_parser_objs PUBLIC
 target_link_libraries(axon_parser_objs PUBLIC
     tree_sitter_lib
     ts_typescript ts_javascript ts_python ts_rust ts_go
-    ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
+    ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue ts_nix
     blake3_lib
 )
 

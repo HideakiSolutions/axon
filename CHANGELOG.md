@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Nix language support — 14th tree-sitter grammar. `.nix` files now produce symbols for top-level `binding` (kind `function` / `attrset` / `binding` based on RHS), per-attr `variable` symbols from `inherit` / `inherit_from` clauses, import edges from `import <path>` / `import ./foo.nix` / `inherit (src) …`, and call sites via `apply_expression`
+
 ## [0.5.11] — 2026-05-09
 
 ### Fixed
