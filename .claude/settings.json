@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/annonymous/.claude/hooks/axon-guard.sh"
+            "command": "bash ${CLAUDE_PROJECT_DIR}/scripts/hooks/axon-guard.sh"
           }
         ]
       },
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/annonymous/.claude/hooks/axon-guard.sh"
+            "command": "bash ${CLAUDE_PROJECT_DIR}/scripts/hooks/axon-guard.sh"
           }
         ]
       },
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/annonymous/.claude/hooks/axon-build-guard.sh",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/scripts/hooks/axon-build-guard.sh",
             "timeout": 5
           }
         ]
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/annonymous/.claude/hooks/axon-auto-index.sh",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/scripts/hooks/axon-auto-index.sh",
             "timeout": 5
           }
         ]
@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/annonymous/.claude/hooks/axon-post-edit.sh",
+            "command": "bash ${CLAUDE_PROJECT_DIR}/scripts/hooks/axon-post-edit.sh",
             "timeout": 10
           }
         ]
