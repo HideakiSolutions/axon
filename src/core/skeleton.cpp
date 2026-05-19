@@ -18,6 +18,7 @@ extern "C" {
     TSLanguage* tree_sitter_cpp();
     TSLanguage* tree_sitter_kotlin();
     TSLanguage* tree_sitter_vue();
+    TSLanguage* tree_sitter_lua();
     TSLanguage* tree_sitter_nix();
 }
 
@@ -38,6 +39,7 @@ static TSLanguage* get_ts_language(Language lang) {
         case Language::Cpp:         return tree_sitter_cpp();
         case Language::Kotlin:      return tree_sitter_kotlin();
         case Language::Vue:         return tree_sitter_vue();
+        case Language::Lua:         return tree_sitter_lua();
         case Language::Nix:         return tree_sitter_nix();
     }
     return nullptr;

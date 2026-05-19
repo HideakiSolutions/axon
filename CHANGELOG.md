@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Nix language support — 14th tree-sitter grammar. `.nix` files now produce symbols for top-level `binding` (kind `function` / `attrset` / `binding` based on RHS), per-attr `variable` symbols from `inherit` / `inherit_from` clauses, import edges from `import <path>` / `import ./foo.nix` / `inherit (src) …`, and call sites via `apply_expression`
+- Lua grammar via `tree-sitter-grammars/tree-sitter-lua` submodule — parses `.lua` files, surfaces `function`/`method` symbols (including `function tbl.foo`, `function tbl:foo`, `local function`) and `require("mod")` calls as import edges.
+- Nix language support — 15th tree-sitter grammar. `.nix` files now produce symbols for top-level `binding` (kind `function` / `attrset` / `binding` based on RHS), per-attr `variable` symbols from `inherit` / `inherit_from` clauses, import edges from `import <path>` / `import ./foo.nix` / `inherit (src) …`, and call sites via `apply_expression`.
+- `capsule.cpp::lang_from_string()` and `mcp/server.cpp` skeleton dispatch now recognize `bash`, `cpp`, `kotlin`, `vue`, `lua`, `nix` — previously these wired-up grammars fell through to the TypeScript default in skeleton lookups. Count of supported languages: 13 → 15.
 
 ## [0.5.11] — 2026-05-09
 

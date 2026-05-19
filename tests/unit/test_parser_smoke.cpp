@@ -144,6 +144,40 @@ foo() { echo hi; }
     EXPECT_NE(find_named(pf->symbols, "foo"),      nullptr) << "function missed";
 }
 
+// ── Lua ────────────────────────────────────────────────────────────────────
+TEST(ParserLua, FunctionsRequireMethods) {
+    auto p = write_temp("lua", R"LUA(
+local M = require("util.strings")
+local json = require("cjson")
+
+function M.greet(name)
+    return "hi " .. name
+end
+
+function M:fly()
+    return self
+end
+
+local function helper(x)
+    return x * 2
+end
+)LUA");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "function")) << "function_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "method"))   << "method_index_expression missed";
+
+    bool saw_strings = false, saw_cjson = false;
+    for (const auto& imp : pf->imports) {
+        if (imp.to_specifier == "util.strings") saw_strings = true;
+        if (imp.to_specifier == "cjson")        saw_cjson = true;
+    }
+    EXPECT_TRUE(saw_strings) << "require() import missed";
+    EXPECT_TRUE(saw_cjson)   << "require() import missed";
+}
+
 // ── Kotlin (W1.T11) ────────────────────────────────────────────────────────
 TEST(ParserKotlin, ExtensionsSealedDataCompanion) {
     auto p = write_temp("kt", R"KT(

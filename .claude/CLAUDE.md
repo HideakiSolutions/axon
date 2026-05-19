@@ -2,9 +2,9 @@
 
 Este projeto está indexado pelo axon. Toda exploração de código roteia por MCP tools do axon — Grep/Glob estão bloqueados por hook. Garantia: 76-98% menos tokens sem perda de qualidade.
 
-## Linguagens suportadas (14)
+## Linguagens suportadas (15)
 
-TypeScript, JavaScript, Python, Rust, Go, C#, PHP, Dart, Java, **Bash**, **C++**, **Kotlin**, **Vue** (SFC com sub-parse TS/JS), **Nix** (bindings, inherit, `import` edges).
+TypeScript, JavaScript, Python, Rust, Go, C#, PHP, Dart, Java, **Bash**, **C++**, **Kotlin**, **Vue** (SFC com sub-parse TS/JS), **Lua**, **Nix** (bindings, inherit, `import` edges).
 
 ## Tools MCP — catálogo e quando usar
 
