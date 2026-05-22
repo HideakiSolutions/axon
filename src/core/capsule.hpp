@@ -16,12 +16,22 @@ struct CapsuleFile {
     int         token_estimate = 0;
 };
 
+struct DialogueTurn {
+    std::string role;
+    std::string content;
+    std::string session_label;
+    std::string thread_name;
+    std::string ts;
+    int         token_estimate = 0;
+};
+
 struct ContextCapsule {
-    std::string             query;
+    std::string              query;
     std::vector<CapsuleFile> pivot_files;
     std::vector<CapsuleFile> support_files;
-    int                     token_estimate = 0;
-    int                     total_files    = 0;
+    std::vector<DialogueTurn> related_turns;   // populated when dialogue_budget > 0
+    int                      token_estimate = 0;
+    int                      total_files    = 0;
 };
 
 inline int estimate_tokens(const std::string& s) {
@@ -35,7 +45,8 @@ ContextCapsule assemble_capsule(
     EmbeddingModel&              model,
     const DependencyGraph&       graph,
     const std::filesystem::path& project_root,
-    int token_budget = 8000);
+    int token_budget    = 8000,
+    int dialogue_budget = 0);   // 0 = disabled; >0 = pull anchored turns into capsule
 
 // ── Cache primitives (W2.T01) ───────────────────────────────────────────────
 // Cache key = BLAKE3(query + "|" + token_budget + "|" + project_epoch),

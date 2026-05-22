@@ -2,6 +2,7 @@
 #include "../core/git.hpp"
 #include "../core/registry.hpp"
 #include "../core/capsule.hpp"
+#include "../core/dialogue.hpp"
 #include <nlohmann/json.hpp>
 #ifdef _WIN32
 #  include <winsock2.h>
@@ -513,6 +514,64 @@ static std::string handle_request(const std::string& method, const std::string& 
                                  {"support_files",  support_files},
                                  {"token_estimate", capsule.token_estimate},
                                  {"total_files",    capsule.total_files}}}}.dump();
+    }
+
+    // ── Dialogue Layer HTTP endpoints ─────────────────────────────────────────
+
+    // GET /api/threads
+    if (method == "GET" && path == "/api/threads") {
+        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        auto threads = axon::thread_list(*ctx.db);
+        json result = json::array();
+        for (const auto& t : threads)
+            result.push_back({{"id",t.id},{"name",t.name},{"kind",t.kind},{"created_at",t.created_at}});
+        return json{{"threads", result}, {"count", (int)result.size()}}.dump();
+    }
+
+    // GET /api/threads/:id/sessions
+    if (method == "GET" && path.rfind("/api/threads/", 0) == 0 &&
+        path.find("/sessions") != std::string::npos) {
+        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        auto slash = path.rfind('/', path.size() - 9);
+        int64_t thread_id = std::stoll(path.substr(13, slash - 13));
+        auto sessions = axon::thread_get_sessions(*ctx.db, thread_id);
+        json result = json::array();
+        for (const auto& s : sessions)
+            result.push_back({{"id",s.id},{"label",s.label},
+                              {"started_at",s.started_at},{"ended_at",s.ended_at},
+                              {"digest",s.digest}});
+        return json{{"sessions", result}}.dump();
+    }
+
+    // GET /api/sessions/:id/turns
+    if (method == "GET" && path.rfind("/api/sessions/", 0) == 0 &&
+        path.find("/turns") != std::string::npos) {
+        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        int64_t session_id = std::stoll(path.substr(14, path.find("/turns") - 14));
+        auto turns = axon::session_get(*ctx.db, session_id);
+        json result = json::array();
+        for (const auto& t : turns)
+            result.push_back({{"id",t.id},{"role",t.role},{"content",t.content},{"ts",t.ts}});
+        return json{{"turns", result}, {"session_id", session_id}}.dump();
+    }
+
+    // GET /api/dialogue/search?q=<query>&limit=N&thread_id=N
+    if (method == "GET" && path == "/api/dialogue/search") {
+        if (!ctx.db_ready() || !ctx.model_ready())
+            return json{{"error","DB or model not ready"}}.dump();
+        std::string q     = url_decode(get_query_param(query, "q"));
+        std::string lim   = get_query_param(query, "limit");
+        std::string tid_s = get_query_param(query, "thread_id");
+        int limit         = lim.empty()   ? 5  : std::stoi(lim);
+        int64_t thread_id = tid_s.empty() ? -1 : std::stoll(tid_s);
+        auto hits = axon::turn_search(*ctx.db, *ctx.model, q, limit, thread_id);
+        json result = json::array();
+        for (const auto& h : hits)
+            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
+                              {"content",h.turn.content},{"ts",h.turn.ts},
+                              {"session",h.session_label},{"thread",h.thread_name},
+                              {"score",h.score}});
+        return json{{"results", result}, {"count", (int)result.size()}}.dump();
     }
 
     return json{{"error","Not found"}}.dump();

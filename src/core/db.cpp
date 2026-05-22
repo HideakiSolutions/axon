@@ -90,6 +90,49 @@ void Database::run_migrations() {
          "  payload     VARCHAR NOT NULL,"
          "  created_at  TIMESTAMP NOT NULL DEFAULT now()"
          ")");
+
+    // ── Dialogue Layer ────────────────────────────────────────────────────────
+    // Structured conversation memory: Thread → Session → Turn, with automatic
+    // code anchoring via the project's file/symbol graph.
+
+    exec("CREATE TABLE IF NOT EXISTS threads ("
+         "  id         BIGINT PRIMARY KEY,"
+         "  name       VARCHAR NOT NULL UNIQUE,"
+         "  kind       VARCHAR NOT NULL DEFAULT 'project',"
+         "  created_at TIMESTAMP NOT NULL DEFAULT now()"
+         ")");
+
+    exec("CREATE TABLE IF NOT EXISTS sessions ("
+         "  id               BIGINT PRIMARY KEY,"
+         "  thread_id        BIGINT NOT NULL,"
+         "  label            VARCHAR,"
+         "  started_at       TIMESTAMP NOT NULL DEFAULT now(),"
+         "  ended_at         TIMESTAMP,"
+         "  digest           VARCHAR,"
+         "  digest_embedding FLOAT[768]"
+         ")");
+    try { exec("CREATE INDEX IF NOT EXISTS idx_sessions_thread ON sessions(thread_id)"); } catch (...) {}
+
+    exec("CREATE TABLE IF NOT EXISTS turns ("
+         "  id         BIGINT PRIMARY KEY,"
+         "  session_id BIGINT NOT NULL,"
+         "  role       VARCHAR NOT NULL DEFAULT 'user',"
+         "  content    VARCHAR NOT NULL,"
+         "  ts         TIMESTAMP NOT NULL DEFAULT now(),"
+         "  embedding  FLOAT[768]"
+         ")");
+    try { exec("CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id, ts)"); } catch (...) {}
+
+    exec("CREATE TABLE IF NOT EXISTS turn_anchors ("
+         "  id        BIGINT PRIMARY KEY,"
+         "  turn_id   BIGINT NOT NULL,"
+         "  file_id   BIGINT,"
+         "  symbol_id BIGINT,"
+         "  kind      VARCHAR NOT NULL DEFAULT 'mentions'"
+         ")");
+    try { exec("CREATE INDEX IF NOT EXISTS idx_anchors_turn   ON turn_anchors(turn_id)");   } catch (...) {}
+    try { exec("CREATE INDEX IF NOT EXISTS idx_anchors_file   ON turn_anchors(file_id)");   } catch (...) {}
+    try { exec("CREATE INDEX IF NOT EXISTS idx_anchors_symbol ON turn_anchors(symbol_id)"); } catch (...) {}
 }
 
 } // namespace axon

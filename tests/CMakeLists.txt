@@ -44,3 +44,23 @@ function(add_axon_test name)
 endfunction()
 
 add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp)
+
+# Dialogue Layer tests require DuckDB (cannot use the parser-only axon_parser_objs target).
+add_executable(test_dialogue unit/test_dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+)
+target_include_directories(test_dialogue PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
+)
+target_link_libraries(test_dialogue PRIVATE
+    duckdb_lib
+    llama
+    ggml
+    GTest::gtest_main
+)
+add_test(NAME test_dialogue COMMAND test_dialogue)

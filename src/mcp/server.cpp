@@ -8,6 +8,7 @@
 #include "../core/rename.hpp"
 #include "../core/git.hpp"
 #include "../core/routes.hpp"
+#include "../core/dialogue.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -39,11 +40,12 @@ static json tools_list() {
              {"paths",{{"type","array"},{"items",{{"type","string"}}}}},
              {"prune",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_context_capsule"},
-         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass."},
+         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass. Set dialogue_budget>0 to include relevant conversation turns anchored to the pivot files."},
          {"inputSchema",{{"type","object"},{"properties",{
              {"query",{{"type","string"}}},
              {"pivot_files",{{"type","array"},{"items",{{"type","string"}}}}},
              {"token_budget",{{"type","integer"},{"default",8000}}},
+             {"dialogue_budget",{{"type","integer"},{"default",0}}},
              {"no_cache",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_impact_graph"},
          {"description","Return files that depend on (or are depended on by) the given files."},
@@ -104,6 +106,60 @@ static json tools_list() {
          {"inputSchema",{{"type","object"},{"required",{"file"}},{"properties",{
              {"file",{{"type","string"},{"description","Relative or absolute path to the file to analyze"}}},
              {"group",{{"type","string"},{"description","Optional: limit to repos in this group"}}}}}}}},
+        // ── Dialogue Layer ─────────────────────────────────────────────────────
+        {{"name","thread_create"},
+         {"description","Create a named conversation thread. kind: project|person|topic."},
+         {"inputSchema",{{"type","object"},{"required",{"name"}},{"properties",{
+             {"name",{{"type","string"}}},
+             {"kind",{{"type","string"},{"default","project"}}}}}}}},
+        {{"name","thread_list"},
+         {"description","List all conversation threads with session counts."},
+         {"inputSchema",{{"type","object"},{"properties",json::object()}}}},
+        {{"name","session_start"},
+         {"description","Start a new session within a thread. Returns the session id."},
+         {"inputSchema",{{"type","object"},{"required",{"thread_id"}},{"properties",{
+             {"thread_id",{{"type","integer"}}},
+             {"label",{{"type","string"}}}}}}}},
+        {{"name","session_end"},
+         {"description","Close a session and optionally compute its digest (compressed summary)."},
+         {"inputSchema",{{"type","object"},{"required",{"session_id"}},{"properties",{
+             {"session_id",{{"type","integer"}}},
+             {"compute_digest",{{"type","boolean"},{"default",true}}}}}}}},
+        {{"name","turn_add"},
+         {"description","Append a verbatim turn to a session. Automatically detects and anchors file paths and symbol names found in the content."},
+         {"inputSchema",{{"type","object"},{"required",{"session_id","role","content"}},{"properties",{
+             {"session_id",{{"type","integer"}}},
+             {"role",{{"type","string"},{"enum",{"user","assistant"}}}},
+             {"content",{{"type","string"}}}}}}}},
+        {{"name","turn_search"},
+         {"description","Semantic search over conversation turns. Returns the most relevant turns with session and thread context."},
+         {"inputSchema",{{"type","object"},{"required",{"query"}},{"properties",{
+             {"query",{{"type","string"}}},
+             {"limit",{{"type","integer"},{"default",5}}},
+             {"thread_id",{{"type","integer"},{"description","Scope to a specific thread. Omit for global search."}}}}}}}},
+        {{"name","session_get"},
+         {"description","Get all turns in a session, ordered by time."},
+         {"inputSchema",{{"type","object"},{"required",{"session_id"}},{"properties",{
+             {"session_id",{{"type","integer"}}},
+             {"limit",{{"type","integer"},{"default",500}}}}}}}},
+        {{"name","thread_get"},
+         {"description","Get all sessions in a thread, with digests."},
+         {"inputSchema",{{"type","object"},{"required",{"thread_id"}},{"properties",{
+             {"thread_id",{{"type","integer"}}}}}}}},
+        {{"name","anchor_link"},
+         {"description","Manually link a turn to a file or symbol in the project graph."},
+         {"inputSchema",{{"type","object"},{"required",{"turn_id"}},{"properties",{
+             {"turn_id",{{"type","integer"}}},
+             {"file_id",{{"type","integer"}}},
+             {"symbol_id",{{"type","integer"}}},
+             {"kind",{{"type","string"},{"default","mentions"}}}}}}}},
+        {{"name","dialogue_context"},
+         {"description","Return conversation turns relevant to a query or set of files. Use to surface past decisions and discussions before editing code."},
+         {"inputSchema",{{"type","object"},{"required",{"query"}},{"properties",{
+             {"query",{{"type","string"}}},
+             {"file_paths",{{"type","array"},{"items",{{"type","string"}}}}},
+             {"limit",{{"type","integer"},{"default",5}}},
+             {"thread_id",{{"type","integer"}}}}}}}}
     })}};
 }
 
@@ -314,6 +370,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         std::string query = args.value("query", "");
         int budget = args.value("token_budget", 8000);
+        int dialogue_budget = args.value("dialogue_budget", 0);
         bool no_cache = args.value("no_cache", false);
         std::vector<std::string> pivots;
         if (args.contains("pivot_files"))
@@ -325,8 +382,9 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         // legitimately reuse the cached payload when the caller doesn't
         // override pivots. When pivots are explicit, skip cache to avoid
         // returning a cache entry generated for the implicit-pivot path.
+        // Dialogue budget also bypasses cache (turns change independently of code index).
         const std::string epoch = current_project_epoch(*ctx.db);
-        const bool eligible_for_cache = !no_cache && pivots.empty();
+        const bool eligible_for_cache = !no_cache && pivots.empty() && dialogue_budget == 0;
         std::string cache_key;
         if (eligible_for_cache) {
             cache_key = compute_capsule_cache_key(query, budget, epoch);
@@ -341,6 +399,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                     {"query", hit->query},
                     {"pivot_files", pf},
                     {"support_files", sf},
+                    {"related_turns", json::array()},
                     {"token_estimate", hit->token_estimate},
                     {"total_files_indexed", hit->total_files},
                     {"cache", "hit"}
@@ -354,7 +413,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
 
         auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model,
-                                        ctx.graph, ctx.cfg.project_root, budget);
+                                        ctx.graph, ctx.cfg.project_root, budget,
+                                        dialogue_budget);
 
         if (eligible_for_cache) {
             capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
@@ -366,11 +426,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         json sf = json::array();
         for (const auto& f : capsule.support_files)
             sf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+        json rt = json::array();
+        for (const auto& t : capsule.related_turns)
+            rt.push_back({{"role",t.role},{"content",t.content},
+                          {"session",t.session_label},{"thread",t.thread_name},
+                          {"ts",t.ts},{"tokens",t.token_estimate}});
 
         return make_tool_result({
             {"query", capsule.query},
             {"pivot_files", pf},
             {"support_files", sf},
+            {"related_turns", rt},
             {"token_estimate", capsule.token_estimate},
             {"total_files_indexed", capsule.total_files},
             {"cache", "miss"}
@@ -1059,6 +1125,152 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"group_filter", group_filter},
             {"cross_repo_impact", cross_impact}
         });
+    }
+
+    // ── Dialogue Layer tools ──────────────────────────────────────────────────
+
+    if (name == "thread_create") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        std::string tname = args.value("name", "");
+        std::string kind  = args.value("kind", "project");
+        if (tname.empty())
+            return make_tool_result({{"error","name is required"}}, true);
+        int64_t id = thread_create(*ctx.db, tname, kind);
+        return make_tool_result({{"id", id}, {"name", tname}, {"kind", kind}});
+    }
+
+    if (name == "thread_list") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        auto threads = thread_list(*ctx.db);
+        json result = json::array();
+        for (const auto& t : threads)
+            result.push_back({{"id",t.id},{"name",t.name},{"kind",t.kind},{"created_at",t.created_at}});
+        return make_tool_result(result);
+    }
+
+    if (name == "session_start") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        std::string label = args.value("label", "");
+        if (thread_id < 0)
+            return make_tool_result({{"error","thread_id is required"}}, true);
+        int64_t id = session_start(*ctx.db, thread_id, label);
+        return make_tool_result({{"session_id", id}, {"thread_id", thread_id}, {"label", label}});
+    }
+
+    if (name == "session_end") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t session_id = args.value("session_id", int64_t(-1));
+        bool compute_digest = args.value("compute_digest", true);
+        if (session_id < 0)
+            return make_tool_result({{"error","session_id is required"}}, true);
+        session_end(*ctx.db, session_id, ctx.model_ready() ? ctx.model.get() : nullptr, compute_digest);
+        return make_tool_result({{"session_id", session_id}, {"ended", true}});
+    }
+
+    if (name == "turn_add") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t session_id = args.value("session_id", int64_t(-1));
+        std::string role    = args.value("role", "user");
+        std::string content = args.value("content", "");
+        if (session_id < 0 || content.empty())
+            return make_tool_result({{"error","session_id and content are required"}}, true);
+        int64_t id = turn_add(*ctx.db, ctx.model_ready() ? ctx.model.get() : nullptr,
+                              session_id, role, content);
+        return make_tool_result({{"turn_id", id}, {"session_id", session_id}, {"role", role}});
+    }
+
+    if (name == "turn_search") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        if (!ctx.model_ready())
+            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+        std::string query = args.value("query", "");
+        int limit         = args.value("limit", 5);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        auto hits = turn_search(*ctx.db, *ctx.model, query, limit, thread_id);
+        json result = json::array();
+        for (const auto& h : hits)
+            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
+                              {"content",h.turn.content},{"ts",h.turn.ts},
+                              {"session",h.session_label},{"thread",h.thread_name},
+                              {"score",h.score}});
+        return make_tool_result(result);
+    }
+
+    if (name == "session_get") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t session_id = args.value("session_id", int64_t(-1));
+        int limit          = args.value("limit", 500);
+        if (session_id < 0)
+            return make_tool_result({{"error","session_id is required"}}, true);
+        auto turns = session_get(*ctx.db, session_id, limit);
+        json result = json::array();
+        for (const auto& t : turns)
+            result.push_back({{"id",t.id},{"role",t.role},{"content",t.content},{"ts",t.ts}});
+        return make_tool_result(result);
+    }
+
+    if (name == "thread_get") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        if (thread_id < 0)
+            return make_tool_result({{"error","thread_id is required"}}, true);
+        auto sessions = thread_get_sessions(*ctx.db, thread_id);
+        json result = json::array();
+        for (const auto& s : sessions)
+            result.push_back({{"id",s.id},{"label",s.label},
+                              {"started_at",s.started_at},{"ended_at",s.ended_at},
+                              {"digest",s.digest}});
+        return make_tool_result(result);
+    }
+
+    if (name == "anchor_link") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t turn_id   = args.value("turn_id",   int64_t(-1));
+        int64_t file_id   = args.value("file_id",   int64_t(-1));
+        int64_t symbol_id = args.value("symbol_id", int64_t(-1));
+        std::string kind  = args.value("kind", "mentions");
+        if (turn_id < 0)
+            return make_tool_result({{"error","turn_id is required"}}, true);
+        int64_t id = anchor_link(*ctx.db, turn_id, file_id, symbol_id, kind);
+        return make_tool_result({{"anchor_id",id},{"turn_id",turn_id},
+                                 {"file_id",file_id},{"symbol_id",symbol_id},{"kind",kind}});
+    }
+
+    if (name == "dialogue_context") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        if (!ctx.model_ready())
+            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+        std::string query = args.value("query", "");
+        int limit         = args.value("limit", 5);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+
+        // Resolve optional file_paths to file_ids
+        std::vector<int64_t> file_ids;
+        if (args.contains("file_paths")) {
+            for (const auto& fp : args["file_paths"]) {
+                std::string path = fp.get<std::string>();
+                auto res = ctx.db->conn().Query(
+                    "SELECT id FROM files WHERE path LIKE '%" + sql_escape(path) + "' LIMIT 1");
+                if (!res->HasError() && res->RowCount() > 0)
+                    file_ids.push_back(res->GetValue<int64_t>(0, 0));
+            }
+        }
+
+        std::vector<TurnHit> hits;
+        if (!file_ids.empty()) {
+            hits = turns_for_files(*ctx.db, *ctx.model, query, file_ids, limit * 300);
+        } else {
+            hits = turn_search(*ctx.db, *ctx.model, query, limit, thread_id);
+        }
+
+        json result = json::array();
+        for (const auto& h : hits)
+            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
+                              {"content",h.turn.content},{"ts",h.turn.ts},
+                              {"session",h.session_label},{"thread",h.thread_name},
+                              {"score",h.score}});
+        return make_tool_result(result);
     }
 
     return make_tool_result({{"error", "Unknown tool: " + name}}, true);

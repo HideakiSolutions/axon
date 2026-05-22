@@ -5,7 +5,7 @@
 [![Lint](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)](CMakeLists.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-blue)](https://docs.anthropic.com/claude-code)
-[![MCP](https://img.shields.io/badge/MCP-15%20tools-8b5cf6)](src/mcp/server.cpp)
+[![MCP](https://img.shields.io/badge/MCP-25%20tools-8b5cf6)](src/mcp/server.cpp)
 
 <p align="center">
   <picture>
@@ -24,7 +24,8 @@
 - [What this does, in plain English](#what-this-does-in-plain-english)
 - [How it works](#how-it-works)
 - [Token reduction](#token-reduction)
-- [MCP Tools (15)](#mcp-tools-15)
+- [MCP Tools (25)](#mcp-tools-25)
+- [Dialogue Layer](#dialogue-layer)
 - [HTTP Mode & Axon Web](#http-mode--axon-web)
 - [Multi-repo Registry](#multi-repo-registry)
 - [Supported languages](#supported-languages-13)
@@ -47,7 +48,9 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 13 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 23 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+
+Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
 Axon also ships an **HTTP mode** (`axon serve --http`) that exposes a REST API consumed by [axon-web](../axon-web), an interactive dependency graph visualizer built on Sigma.js + Graphology.
 
@@ -62,6 +65,8 @@ Axon also ships an **HTTP mode** (`axon serve --http`) that exposes a REST API c
 **Use case 4 — Cross-session memory:** Found something important? `save_observation` persists it to DuckDB with a vector embedding. Future sessions retrieve it with `search_memory`.
 
 **Use case 5 — Multi-repo blast radius:** Changed a shared library? `group_impact` cross-references all registered repos in `~/.axon/registry.json` and returns which files in other projects depend on the same module path.
+
+**Use case 6 — Structured conversation memory:** Use `thread_create` + `session_start` + `turn_add` to persist every relevant exchange. Axon automatically detects file paths and symbol names in turn content and links them to the dependency graph (`auto-anchor`). Later, `turn_search` retrieves past discussions by semantic similarity. Pass `dialogue_budget` to `get_context_capsule` and receive code + conversations in one unified response.
 
 ## How it works
 
@@ -120,11 +125,11 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 
 ---
 
-## MCP Tools (15)
+## MCP Tools (25)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?` | Token-efficient context capsule: pivots complete + support skeletonized |
+| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns |
 | `get_overview` | `limit?` | Top files by coupling + top symbols — ideal for onboarding |
 | `get_impact_graph` | `files[]` | Which files depend on the given files (bidirectional BFS) |
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
@@ -140,6 +145,15 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `detect_changes` | `since?` | Symbols and files affected by recent git changes |
 | `group_list` | — | List all repos registered in `~/.axon/registry.json` |
 | `group_impact` | `file` | Cross-repo blast radius for a file path |
+| `thread_create` | `name`, `kind?` | Create a named conversation scope (project \| person \| topic) |
+| `thread_list` | — | List all threads |
+| `session_start` | `thread_id`, `label?` | Open a new working session within a thread |
+| `session_end` | `session_id`, `compute_digest?` | Close session; optionally generate and embed a digest |
+| `turn_add` | `session_id`, `role`, `content` | Append a turn (user \| assistant); auto-anchors to code artifacts |
+| `turn_search` | `query`, `limit?`, `thread_id?` | Semantic search over all turns, optionally scoped to a thread |
+| `session_get` | `session_id`, `limit?` | Retrieve turns for a session |
+| `anchor_link` | `turn_id`, `file_id?`, `symbol_id?`, `kind?` | Manually link a turn to a file or symbol |
+| `dialogue_context` | `query`, `file_paths?[]`, `limit?`, `thread_id?` | Past turns related to files or semantic query |
 
 ### Agentic workflow coverage
 
@@ -155,6 +169,89 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | Git change blast radius | `detect_changes` |
 | Multi-repo impact | `group_list` → `group_impact` |
 | Graph-safe rename | `rename` |
+| Start a dialogue session | `thread_create` → `session_start` → `turn_add` |
+| Recall past conversations | `turn_search` / `dialogue_context` |
+| Code + conversation context | `get_context_capsule` with `dialogue_budget` |
+
+---
+
+## Dialogue Layer
+
+Axon stores conversation history natively in the same DuckDB database used for code context, using the same embedding pipeline and the same token-budget model.
+
+### Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Thread** | A named scope — a project, person, or topic |
+| **Session** | A bounded working window within a thread (e.g., a coding sprint) |
+| **Turn** | A single verbatim exchange (role: `user` \| `assistant`) — never modified after insert |
+| **Anchor** | A link from a Turn to a file or symbol in the dependency graph |
+| **Digest** | A compressed summary of a session in Axon Digest Format (ADF), embedded for semantic search |
+
+### Auto-anchor
+
+When a Turn is added via `turn_add`, Axon automatically scans its content for:
+
+1. **File paths** — regex match against extensions (`.ts`, `.py`, `.rs`, etc.) → resolved against the `files` table via `LIKE '%match%'`
+2. **Symbol names** — word-boundary match against a hot-cache of the top-500 most-referenced symbols in the dependency graph → resolved against the `symbols` table
+
+Matches generate `turn_anchors` rows linking the Turn to code artifacts. No external NLP is required — Axon uses its own graph data for precision impossible with generic models.
+
+### Digest (ADF — Axon Digest Format)
+
+Rule-based session summary generated on `session_end`. Same principle as `skeletonize()` — no LLM generation, only embedding for future semantic search:
+
+```
+[SESSION: Sprint 1 auth review | 2025-01-10T09:00 → 2025-01-10T11:30]
+[ANCHORS: src/auth/token.ts, validateToken, refreshSession]
+---
+user: The TTL for auth/token.ts must be 7 days — don't summarize this!
+assistant: Confirmed — the TTL is set in validateToken at line 42. The refreshSession...
+```
+
+### Integration with `get_context_capsule`
+
+Pass `dialogue_budget` (token count) to `get_context_capsule` and the response includes a `related_turns` array — past conversations anchored to the same pivot files, ranked by semantic similarity, within budget:
+
+```json
+{
+  "pivot_files": [...],
+  "support_files": [...],
+  "related_turns": [
+    {
+      "role": "user",
+      "content": "The TTL for auth/token.ts must be 7 days",
+      "session_label": "Sprint 1 auth review",
+      "thread_name": "auth-module",
+      "ts": "2025-01-10T09:15:00"
+    }
+  ]
+}
+```
+
+When `dialogue_budget=0` (the default), behavior is bit-for-bit identical to the previous version — zero overhead.
+
+### Quick example
+
+```bash
+# Start MCP server and use dialogue tools via Claude Code:
+# 1. Create a thread for the auth module
+# thread_create { "name": "auth-module", "kind": "project" }
+
+# 2. Start a working session
+# session_start { "thread_id": 1, "label": "Token TTL review" }
+
+# 3. Add turns
+# turn_add { "session_id": 1, "role": "user", "content": "auth/token.ts must have 7-day TTL" }
+# turn_add { "session_id": 1, "role": "assistant", "content": "Confirmed — validateToken line 42." }
+
+# 4. End session (generates digest + embedding)
+# session_end { "session_id": 1, "compute_digest": true }
+
+# 5. Retrieve past context alongside code
+# get_context_capsule { "query": "auth token TTL", "dialogue_budget": 1000 }
+```
 
 ---
 
@@ -183,6 +280,10 @@ axon serve --http --port=7070 --group=backend
 | `GET` | `/api/search?q=` | Full-text + semantic search |
 | `GET` | `/api/observations?q=&limit=` | List or semantic-search saved observations |
 | `GET` | `/api/capsule?q=&budget=&pivots=` | Assemble token-budget context capsule |
+| `GET` | `/api/threads` | List all conversation threads |
+| `GET` | `/api/threads/:id/sessions` | Sessions belonging to a thread |
+| `GET` | `/api/sessions/:id/turns` | Turns within a session |
+| `GET` | `/api/dialogue/search?q=&limit=&thread_id=` | Semantic search over turns |
 
 The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend consumes this API to render an interactive force-directed graph with per-repo filtering, file tree navigation, impact analysis, memory index, and context capsule views (Axon Surgical Dark design system).
 
@@ -424,11 +525,12 @@ src/
 │   ├── registry.hpp/cpp  # Multi-repo registry (~/.axon/registry.json)
 │   ├── rename.hpp/cpp    # Graph-assisted symbol rename
 │   ├── git.hpp/cpp       # Git diff parsing for detect_changes
-│   └── routes.hpp/cpp    # HTTP route detection for route_map / api_impact
+│   ├── routes.hpp/cpp    # HTTP route detection for route_map / api_impact
+│   └── dialogue.hpp/cpp  # Dialogue Layer: threads/sessions/turns/anchors/digests
 ├── parser/
 │   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (13 langs)
 └── mcp/
-    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 15 MCP tool handlers
+    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 25 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
@@ -453,7 +555,7 @@ graph TD
     CLI --> MCP[MCP Server\nstdio JSON-RPC]
     CLI --> HTTP[HTTP Server\nREST API]
     IDX --> PARSER[Parser\n13 languages via tree-sitter]
-    IDX --> DB[(DuckDB\nfiles/symbols/edges/observations)]
+    IDX --> DB[(DuckDB\nfiles/symbols/edges/observations\nthreads/sessions/turns/anchors)]
     IDX --> EMB[Embeddings\nllama.cpp + nomic-embed]
     MCP --> CAPS[Capsule\nBFS + skeletonize]
     MCP --> GRAPH[Graph\nadjacency list]
@@ -470,10 +572,17 @@ graph TD
 ## Database schema
 
 ```sql
+-- Code graph
 files        (id, path, language, hash, byte_size, indexed_at)
 symbols      (id, file_id, name, kind, start_line, end_line, signature, docstring, embedding FLOAT[768])
 edges        (id, from_file, to_file, from_symbol, to_symbol, kind)  -- kind: imports | calls | extends
 observations (id, content, file_path, embedding FLOAT[768], created_at)
+
+-- Dialogue Layer
+threads      (id, name, kind, created_at)                              -- kind: project | person | topic
+sessions     (id, thread_id, label, started_at, ended_at, digest, digest_embedding FLOAT[768])
+turns        (id, session_id, role, content, ts, embedding FLOAT[768]) -- role: user | assistant
+turn_anchors (id, turn_id, file_id, symbol_id, kind)                   -- kind: mentions | decides | questions
 ```
 
 `from_symbol`/`to_symbol` are populated by:
@@ -492,6 +601,8 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | Token-budget context | ✅ | ❌ | ❌ | ❌ |
 | Dependency graph BFS | ✅ | ❌ | ❌ | ❌ |
 | Cross-session memory | ✅ | ❌ | ❌ | ❌ |
+| Structured conversation memory | ✅ | ❌ | ❌ | ❌ |
+| Code-linked turn anchors | ✅ | ❌ | ❌ | ❌ |
 | MCP protocol | ✅ | ❌ | ❌ | ❌ |
 | Multi-repo registry | ✅ | ❌ | ❌ | ❌ |
 | Graph visualization | ✅ (axon-web) | ❌ | ❌ | ❌ |
@@ -504,13 +615,16 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| 15 MCP tools | ✅ Done | Including multi-repo + git diff tools |
+| 25 MCP tools | ✅ Done | Code context + dialogue layer tools |
 | HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
 | Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |
 | Symbol-granular capsule rendering | ✅ Done | `assemble_capsule` extracts only matched symbol bodies (signature + lines), not full files |
 | Worktree exclusion + sweep purge | ✅ Done | `.worktrees/` ignored; `axon index` purges newly-ignored entries from DB |
 | `axon index --force` | ✅ Done | Rebuild edges/symbols even when file hash unchanged |
+| Dialogue Layer | ✅ Done | Threads/sessions/turns/anchors/digests — native DuckDB + 768-dim embeddings |
+| Auto-anchor | ✅ Done | File path (regex) + symbol name (top-500 cache) detection on every `turn_add` |
+| Dialogue context in capsule | ✅ Done | `get_context_capsule` accepts `dialogue_budget`; returns `related_turns` |
 | File watcher (inotify/FSEvents) | 🔄 Planned | Reindex on edits outside Claude Code |
 | HNSW vector index (DuckDB VSS) | 🔄 Planned | Projects > 100k symbols |
 | Filtered tags in `search_memory` | 🔄 Planned | |
@@ -552,6 +666,8 @@ MIT — see [LICENSE](LICENSE).
 
 Axon é um servidor MCP local em C++20 que entrega **contexto cirúrgico** para agentes de IA. Em vez de despejar arquivos inteiros na janela de contexto, o axon constrói um grafo de dependências do seu projeto e monta uma "cápsula de contexto" dentro de um orçamento de tokens configurável.
 
+Axon também inclui uma **Camada de Diálogo** nativa: memória de conversação estruturada diretamente no mesmo DuckDB usado para o grafo de código. Threads, sessões, turns e âncoras automáticas para artefatos de código, tudo local e com busca semântica.
+
 ### Instalação rápida
 
 ```bash
@@ -565,11 +681,11 @@ axon index /caminho/para/seu-projeto
 axon serve
 ```
 
-### Ferramentas MCP (15)
+### Ferramentas MCP (25)
 
 | Ferramenta | Descrição |
 |-----------|-----------|
-| `get_context_capsule` | Cápsula de contexto eficiente em tokens |
+| `get_context_capsule` | Cápsula de contexto eficiente em tokens (aceita `dialogue_budget`) |
 | `get_overview` | Visão geral: arquivos mais acoplados + símbolos mais referenciados |
 | `get_impact_graph` | Quais arquivos dependem dos arquivos fornecidos |
 | `get_callers` | Arquivos que importam o arquivo que define um símbolo |
@@ -584,6 +700,15 @@ axon serve
 | `api_impact` | Impacto de uma rota HTTP no grafo de dependências |
 | `detect_changes` | Símbolos e arquivos afetados por mudanças recentes no git |
 | `group_list` / `group_impact` | Registro e impacto multi-repo |
+| `thread_create` | Criar escopo nomeado de conversação (project \| person \| topic) |
+| `thread_list` | Listar todos os threads |
+| `session_start` | Abrir sessão de trabalho dentro de um thread |
+| `session_end` | Encerrar sessão; gera e embeda um digest (ADF) |
+| `turn_add` | Adicionar turn (user \| assistant) com auto-âncora em arquivos e símbolos |
+| `turn_search` | Busca semântica sobre todos os turns |
+| `session_get` | Recuperar turns de uma sessão |
+| `anchor_link` | Vincular manualmente um turn a um arquivo ou símbolo |
+| `dialogue_context` | Turns relacionados a arquivos ou query semântica |
 
 ### Modo HTTP + axon-web
 
