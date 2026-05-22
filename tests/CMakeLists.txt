@@ -64,3 +64,31 @@ target_link_libraries(test_dialogue PRIVATE
     GTest::gtest_main
 )
 add_test(NAME test_dialogue COMMAND test_dialogue)
+
+# Objectives test — token reduction + memory correctness (no model required)
+add_executable(test_objectives unit/test_objectives.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/git.cpp
+)
+target_include_directories(test_objectives PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
+)
+target_link_libraries(test_objectives PRIVATE
+    tree_sitter_lib
+    ts_typescript ts_javascript ts_python ts_rust ts_go
+    ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
+    blake3_lib
+    duckdb_lib
+    llama
+    ggml
+    GTest::gtest_main
+)
+add_test(NAME test_objectives COMMAND test_objectives)
