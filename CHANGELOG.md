@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-05-22
+
 ### Fixed
 
-- `tests/e2e/smoke.sh` version check pattern updated from `axon 0\.` to `axon 1\.` — the smoke harness was not updated when CMakeLists.txt bumped the project version from `0.5.12` to `1.1.0`
+- `axon index <path>`: now returns exit code 1 with an explicit error message when the given path does not exist (previously silently succeeded with 0 files indexed and exit 0)
+- `axon status`: now accepts an optional `[path]` argument (previously ignored any argument and always resolved the project via `.git` walk-up from cwd, silently showing the wrong project)
+- `axon help`: `axon index` usage line now shows `[--force]` flag (the flag existed but was not listed in the help output)
+- `axon serve`: `serverInfo.version` in the MCP `initialize` handshake was hardcoded to `"0.1.0"`; now reports the actual binary version via `axon::VERSION`
+- `tests/e2e/smoke.sh`: version check pattern updated from `axon 0\.` to `axon 1\.`
+- Documentation: corrected 17 discrepancies between docs and code (tool count 25→26, `thread_get` missing from tool tables, `detect_changes` param `since`→`ref`, `route_map`/`group_impact` undocumented params, `get_context_capsule` missing `no_cache?`, `get_callers` default limit 20→50, DB schema missing `skeleton`/`routes`/`capsule_cache`, HTTP endpoints `overview` and `detect-changes` missing, env var `AXON_MODEL_PATH`→`AXON_EMBEDDING_MODEL`, auto-anchor extension count 13→23, Dialogue Layer tools absent from `api-reference.md`, DuckDB version 1.1.3→1.2.2 in docs, `build.yml` DuckDB version synced)
 
 ## [1.1.0] — 2026-05-22
 
