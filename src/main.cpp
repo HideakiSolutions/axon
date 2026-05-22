@@ -186,17 +186,22 @@ int main(int argc, char* argv[]) {
         auto cfg = load_config();
         axon::mcp::ServerContext ctx;
         ctx.cfg = cfg;
+        ctx.binary_dir = fs::path(argv[0]).parent_path();
 
         // Register this repo in the global registry
         axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
 
         if (fs::exists(cfg.db_path)) {
-            ctx.db = std::make_unique<axon::Database>(cfg.db_path);
-            ctx.graph = axon::load_graph(*ctx.db);
             try {
-                auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
-                ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
-            } catch (...) {}
+                ctx.db = std::make_unique<axon::Database>(cfg.db_path);
+                ctx.graph = axon::load_graph(*ctx.db);
+                try {
+                    auto model_path = axon::find_model(ctx.binary_dir);
+                    ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
+                } catch (...) {}
+            } catch (const std::exception& e) {
+                ctx.db_error = e.what();
+            }
         }
 
         if (use_http) {
