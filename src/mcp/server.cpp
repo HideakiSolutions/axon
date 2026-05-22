@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include <queue>
 #include <algorithm>
+#include <cctype>
 
 namespace {
 inline std::string sql_escape(const std::string& s) {
@@ -181,7 +182,58 @@ static void maybe_run_sync(ServerContext& ctx) {
         ctx.graph = load_graph(*ctx.db);
 }
 
+static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
+    namespace fs = std::filesystem;
+    if (ctx.db_ready()) return true;
+
+    ctx.db_error.clear();
+    if (!create_if_missing && !fs::exists(ctx.cfg.db_path)) {
+        ctx.db_error = "No Axon index found at " + ctx.cfg.db_path.string() +
+                       ". Run run_pipeline first.";
+        return false;
+    }
+
+    try {
+        fs::create_directories(ctx.cfg.axon_dir);
+        ctx.db = std::make_unique<Database>(ctx.cfg.db_path);
+        ctx.graph = load_graph(*ctx.db);
+        if (!ctx.model_ready()) {
+            try {
+                fs::path binary_dir = ctx.binary_dir.empty()
+                    ? ctx.cfg.project_root / "models"
+                    : ctx.binary_dir;
+                auto model_path = find_model(binary_dir);
+                ctx.model = std::make_unique<EmbeddingModel>(model_path);
+            } catch (...) {
+                // The model is optional for startup; tools that need embeddings
+                // already return an explicit error when it is unavailable.
+            }
+        }
+        return true;
+    } catch (const std::exception& e) {
+        ctx.db.reset();
+        ctx.graph = DependencyGraph{};
+        ctx.db_error = e.what();
+        return false;
+    }
+}
+
+static json db_unavailable_result(const ServerContext& ctx) {
+    std::string detail = ctx.db_error.empty()
+        ? "Axon index database is not initialized."
+        : ctx.db_error;
+
+    return make_tool_result({
+        {"error", "Axon index database unavailable"},
+        {"db_path", ctx.cfg.db_path.string()},
+        {"detail", detail},
+        {"hint", "If another Claude/Codex session is open in this project, close it or stop the older axon serve process, then retry this tool. If no index exists yet, call run_pipeline."}
+    }, true);
+}
+
 static json handle_tool(const std::string& name, const json& args, ServerContext& ctx) {
+    ensure_db_open(ctx, name == "run_pipeline");
+
     // Order matters: sync first (full walk detects mv/rm/new-file side-effects),
     // then drain pending-writes (re-resolves edges for files that already have
     // peers in the DB after sync). Reversed order loses edges when a Write and
@@ -192,7 +244,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "run_pipeline") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","DB not initialized"}}, true);
+            return db_unavailable_result(ctx);
 
         auto stats = index_project(ctx.cfg, *ctx.db);
         ctx.graph = load_graph(*ctx.db);
@@ -218,7 +270,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "index_paths") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","DB not initialized"}}, true);
+            return db_unavailable_result(ctx);
 
         std::vector<std::filesystem::path> paths;
         if (args.contains("paths"))
@@ -258,7 +310,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_context_capsule") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string query = args.value("query", "");
         int budget = args.value("token_budget", 8000);
@@ -327,7 +379,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_impact_graph") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         json result = json::array();
         for (const auto& p : args["files"]) {
@@ -349,7 +401,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_skeleton") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         json result = json::array();
 
@@ -413,8 +465,10 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     }
 
     if (name == "search_memory") {
-        if (!ctx.db_ready() || !ctx.model_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+        if (!ctx.db_ready())
+            return db_unavailable_result(ctx);
+        if (!ctx.model_ready())
+            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
 
         std::string q = args.value("query", "");
         int limit = args.value("limit", 5);
@@ -447,7 +501,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "save_observation") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string content   = args.value("content", "");
         std::string file_path = args.value("file_path", "");
@@ -482,7 +536,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_overview") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         int limit = args.value("limit", 10);
         if (limit < 1)   limit = 1;
@@ -549,7 +603,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_callers") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string sym_name = args.value("symbol_name", "");
         std::string file_hint = args.value("file_path", "");
@@ -638,7 +692,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_tests_for") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         json result = json::array();
         std::unordered_set<std::string> all_tests;
@@ -683,7 +737,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "rename") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string old_name = args.value("symbol_name", "");
         std::string new_name = args.value("new_name", "");
@@ -774,7 +828,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "detect_changes") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string ref = args.value("ref", "HEAD");
         std::string root = ctx.cfg.project_root.string();
@@ -852,7 +906,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "route_map") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         // Trigger route indexing if not done (or if index_routes enabled)
         if (ctx.cfg.project_cfg.index_routes) {
@@ -883,7 +937,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "api_impact") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string route_path = args.value("route_path", "");
         if (route_path.empty())
@@ -1010,18 +1064,125 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     return make_tool_result({{"error", "Unknown tool: " + name}}, true);
 }
 
-void run_stdio(ServerContext& ctx) {
-    std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line.empty()) continue;
+struct StdioEnvelope {
+    bool framed = false;
+    bool ok = false;
+    json payload;
+    json error;
+};
 
-        json req;
-        try { req = json::parse(line); }
-        catch (...) {
-            std::cout << make_error(nullptr, PARSE_ERROR, "Parse error").dump() << "\n";
-            std::cout.flush();
+static std::string strip_cr(std::string s) {
+    if (!s.empty() && s.back() == '\r') s.pop_back();
+    return s;
+}
+
+static std::string trim_ascii(std::string s) {
+    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!s.empty() && is_space(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    while (!s.empty() && is_space(static_cast<unsigned char>(s.back()))) s.pop_back();
+    return s;
+}
+
+static std::string lower_ascii(std::string s) {
+    for (char& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+static bool parse_header_line(const std::string& line, size_t& content_length) {
+    auto colon = line.find(':');
+    if (colon == std::string::npos) return false;
+
+    std::string name = lower_ascii(trim_ascii(line.substr(0, colon)));
+    std::string value = trim_ascii(line.substr(colon + 1));
+    if (name != "content-length") return false;
+
+    try {
+        content_length = static_cast<size_t>(std::stoull(value));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool looks_like_header(const std::string& line) {
+    if (line.empty()) return false;
+    if (line.front() == '{' || line.front() == '[') return false;
+    return line.find(':') != std::string::npos;
+}
+
+static bool read_stdio_envelope(std::istream& in, StdioEnvelope& env) {
+    env = StdioEnvelope{};
+
+    std::string first;
+    while (std::getline(in, first)) {
+        first = strip_cr(first);
+        if (!first.empty()) break;
+    }
+    if (!in && first.empty()) return false;
+
+    if (looks_like_header(first)) {
+        env.framed = true;
+        size_t content_length = 0;
+        bool have_content_length = parse_header_line(first, content_length);
+
+        std::string line;
+        while (std::getline(in, line)) {
+            line = strip_cr(line);
+            if (line.empty()) break;
+            size_t parsed_length = 0;
+            if (parse_header_line(line, parsed_length)) {
+                content_length = parsed_length;
+                have_content_length = true;
+            }
+        }
+
+        if (!have_content_length) {
+            env.error = make_error(nullptr, INVALID_REQUEST, "Missing Content-Length header");
+            return true;
+        }
+
+        std::string body(content_length, '\0');
+        in.read(body.data(), static_cast<std::streamsize>(content_length));
+        if (static_cast<size_t>(in.gcount()) != content_length) return false;
+
+        try {
+            env.payload = json::parse(body);
+            env.ok = true;
+        } catch (...) {
+            env.error = make_error(nullptr, PARSE_ERROR, "Parse error");
+        }
+        return true;
+    }
+
+    try {
+        env.payload = json::parse(first);
+        env.ok = true;
+    } catch (...) {
+        env.error = make_error(nullptr, PARSE_ERROR, "Parse error");
+    }
+    return true;
+}
+
+static void write_stdio_response(const json& response, bool framed) {
+    std::string body = response.dump();
+    if (framed) {
+        std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
+    } else {
+        std::cout << body << "\n";
+    }
+    std::cout.flush();
+}
+
+void run_stdio(ServerContext& ctx) {
+    StdioEnvelope env;
+    while (read_stdio_envelope(std::cin, env)) {
+        if (!env.ok) {
+            write_stdio_response(env.error, env.framed);
             continue;
         }
+
+        const json& req = env.payload;
 
         std::string method = req.value("method", "");
         json id = req.contains("id") ? req["id"] : json(nullptr);
@@ -1054,8 +1215,7 @@ void run_stdio(ServerContext& ctx) {
             response = make_error(id, METHOD_NOT_FOUND, "Method not found: " + method);
         }
 
-        std::cout << response.dump() << "\n";
-        std::cout.flush();
+        write_stdio_response(response, env.framed);
     }
 }
 

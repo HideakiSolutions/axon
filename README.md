@@ -340,6 +340,28 @@ Add to `~/.claude.json` under `mcpServers`:
 }
 ```
 
+For Codex, add the equivalent server entry to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.axon]
+command = "/path/to/axon/build/axon"
+args = ["serve"]
+
+[mcp_servers.axon.env]
+LD_LIBRARY_PATH = "/path/to/axon/third_party/duckdb/lib"
+```
+
+If you switch from Claude to Codex while Claude is still open in the same
+project, both clients may try to start `axon serve` against the same
+`.axon/index.duckdb`. Axon now completes the MCP handshake even when that
+database is locked; DB-backed tools will return a clear lock error until the
+older server exits. To inspect active servers:
+
+```bash
+pgrep -af 'axon.*serve'
+pwdx <pid>
+```
+
 ---
 
 ## Quick Start
