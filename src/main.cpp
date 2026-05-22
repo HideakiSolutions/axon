@@ -22,7 +22,7 @@ axon — Context Engine for AI Coding Agents
 
 Usage:
   axon init   [path]                    Initialize .axon/config.toml with defaults
-  axon index  [path]                    Index project (parse + graph + embeddings)
+  axon index  [path] [--force]          Index project (parse + graph + embeddings)
   axon index-paths <files...> [--prune] Incrementally reindex specific files
                                         (--prune alone = only sweep deleted files)
   axon serve  [--http] [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
@@ -95,6 +95,10 @@ int main(int argc, char* argv[]) {
             std::string a = argv[i];
             if (a == "--force" || a == "-f") force = true;
             else if (path.empty()) path = a;
+        }
+        if (!path.empty() && !fs::exists(path)) {
+            std::cerr << "Error: path does not exist: " << path << "\n";
+            return 1;
         }
         auto cfg = load_config(path);
         std::cout << "Indexing " << cfg.project_root
@@ -307,7 +311,12 @@ int main(int argc, char* argv[]) {
 
     // ── axon status ────────────────────────────────────────────────────────
     if (cmd == "status") {
-        auto cfg = load_config();
+        std::string path = argc > 2 ? argv[2] : "";
+        if (!path.empty() && !fs::exists(path)) {
+            std::cerr << "Error: path does not exist: " << path << "\n";
+            return 1;
+        }
+        auto cfg = load_config(path);
         if (!fs::exists(cfg.db_path)) { std::cout << "No index. Run `axon index`.\n"; return 0; }
 
         axon::Database db(cfg.db_path);
