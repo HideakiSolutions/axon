@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "protocol.hpp"
+#include "version.hpp"
 #include "../core/registry.hpp"
 #include "../core/indexer.hpp"
 #include "../core/capsule.hpp"
@@ -1424,7 +1425,7 @@ void run_stdio(ServerContext& ctx) {
             response = make_response(id, {
                 {"protocolVersion", "2024-11-05"},
                 {"capabilities", {{"tools", {{"listChanged", false}}}}},
-                {"serverInfo", {{"name", "axon"}, {"version", "0.1.0"}}}
+                {"serverInfo", {{"name", "axon"}, {"version", axon::VERSION}}}
             });
         } else if (method == "notifications/initialized") {
             continue;

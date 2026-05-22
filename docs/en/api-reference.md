@@ -1,6 +1,6 @@
 # API Reference — axon MCP Tools
 
-All 15 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
+All 26 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ---
 
@@ -8,13 +8,15 @@ All 15 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ### `get_context_capsule`
 
-Token-efficient context: pivot files in full + support files skeletonized.
+Token-efficient context: pivot files in full + support files skeletonized. Optionally includes past dialogue turns anchored to the same files.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | No | Natural language query to guide pivot selection |
 | `pivot_files` | string[] | No | Force specific files as pivots |
 | `token_budget` | number | No | Max tokens for the capsule (default: 8000) |
+| `dialogue_budget` | number | No | Token budget for `related_turns[]` from dialogue history (default: 0 = disabled) |
+| `no_cache` | boolean | No | Bypass the query-hash cache and force a fresh assembly (default: false) |
 
 ---
 
@@ -46,7 +48,7 @@ Locate a symbol by name, then return the list of files that import the file defi
 |-----------|------|----------|-------------|
 | `symbol_name` | string | **Yes** | Name of the symbol to trace |
 | `file_path` | string | No | Narrow to a specific file |
-| `limit` | number | No | Max caller files returned (default: 20) |
+| `limit` | number | No | Max caller files returned (default: 50) |
 
 ---
 
@@ -132,7 +134,9 @@ List all detected HTTP routes with handler files and framework.
 
 > Requires `index_routes = true` in `.axon/config.toml`.
 
-No parameters.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `framework` | string | No | Filter by framework (`nextjs`, `express`, `fastapi`, `flask`) |
 
 ---
 
@@ -152,7 +156,7 @@ Detect which symbols and files are affected by recent git changes.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `since` | string | No | Git ref to diff from (default: `HEAD~1`) |
+| `ref` | string | No | Git ref to diff from (default: `HEAD`) |
 
 ---
 
@@ -171,6 +175,122 @@ Cross-repo blast radius: given a file path in the current repo, return impacted 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `file` | string | **Yes** | File path (relative to current project root) |
+| `group` | string | No | Limit search to repos in this group |
+
+---
+
+## Dialogue Layer Tools
+
+### `thread_create`
+
+Create a named conversation scope.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | **Yes** | Thread name |
+| `kind` | string | No | `project` \| `person` \| `topic` (default: `project`) |
+
+---
+
+### `thread_list`
+
+List all threads.
+
+No parameters.
+
+---
+
+### `thread_get`
+
+List all sessions within a thread, including digest summaries.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `thread_id` | number | **Yes** | Thread ID |
+
+---
+
+### `session_start`
+
+Open a new working session within a thread.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `thread_id` | number | **Yes** | Thread to attach this session to |
+| `label` | string | No | Human-readable session label |
+| `model` | string | No | Model identifier for this session |
+
+---
+
+### `session_end`
+
+Close a session. Optionally generate and embed an ADF digest for semantic retrieval.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | number | **Yes** | Session to close |
+| `compute_digest` | boolean | No | Generate ADF digest and embed it (default: false) |
+
+---
+
+### `turn_add`
+
+Append a turn to a session. Auto-anchors to code artifacts found in content.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | number | **Yes** | Session to append to |
+| `role` | string | **Yes** | `user` \| `assistant` |
+| `content` | string | **Yes** | Turn content (auto-anchored to file paths and top-500 symbols) |
+
+---
+
+### `turn_search`
+
+Semantic search over all turns using nomic-embed cosine similarity.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | **Yes** | Natural language query |
+| `limit` | number | No | Max results (default: 10) |
+| `thread_id` | number | No | Scope search to a specific thread |
+
+---
+
+### `session_get`
+
+Retrieve turns for a session in chronological order.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | number | **Yes** | Session ID |
+| `limit` | number | No | Max turns returned (default: 100) |
+
+---
+
+### `anchor_link`
+
+Manually link a turn to a file or symbol.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `turn_id` | number | **Yes** | Turn to link |
+| `file_id` | number | No | File ID to anchor to |
+| `symbol_id` | number | No | Symbol ID to anchor to |
+| `kind` | string | No | `mentions` \| `decides` \| `questions` (default: `mentions`) |
+
+---
+
+### `dialogue_context`
+
+Retrieve past turns related to files or a semantic query. Used to inject conversation history into `get_context_capsule` when `dialogue_budget > 0`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | No | Semantic query to rank turns |
+| `file_paths` | string[] | No | Return turns anchored to these files |
+| `limit` | number | No | Max turns (default: 10) |
+| `thread_id` | number | No | Scope to a specific thread |
 
 ---
 
@@ -181,11 +301,17 @@ When running `axon serve --http`:
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/graph` | File-level graph: `{nodes[], edges[], meta}` |
-| `GET` | `/api/graph?mode=symbol` | Symbol-level graph (functions/classes/methods/etc as nodes) |
-| `GET` | `/api/symbol/:id` | Symbol detail: `{name, kind, file, line, signature, caller_files, caller_symbols}` |
+| `GET` | `/api/graph?mode=symbol` | Symbol-level graph |
+| `GET` | `/api/overview` | Top files by coupling + top symbols (mirrors `get_overview`) |
+| `GET` | `/api/symbol/<name>` | Symbol detail: `{name, kind, file, line, signature, caller_files}` |
 | `GET` | `/api/search?q=<query>` | Search: `{files[], symbols[]}` |
-| `GET` | `/api/observations?q=<text>&limit=N` | List observations (semantic search if `q` and embeddings enabled) |
+| `GET` | `/api/observations?q=<text>&limit=N` | List observations (semantic search if embeddings enabled) |
 | `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule |
+| `POST` | `/api/detect-changes` | Detect changed symbols/files (body: `{ref?}`) |
+| `GET` | `/api/threads` | List all threads |
+| `GET` | `/api/threads/:id/sessions` | List sessions for a thread |
+| `GET` | `/api/sessions/:id/turns` | List turns for a session |
+| `GET` | `/api/dialogue/search?q=<query>&limit=N` | Semantic search over turns |
 
 ### `/api/graph` — file-mode node shape
 
@@ -235,14 +361,12 @@ When running `axon serve --http`:
 }
 ```
 
-When `granularity = "symbol"` is enabled, `pivot_files[].content` contains only the matched symbol bodies (with `// === <name> (<kind>) lines X-Y ===` headers) instead of the full file. `is_skeleton = false` because the rendering is symbol-granular, not skeletonized.
-
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LD_LIBRARY_PATH` | — | Must include path to `third_party/duckdb/lib` |
-| `AXON_MODEL_PATH` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
+| `AXON_EMBEDDING_MODEL` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
 
 ---

@@ -5,7 +5,7 @@
 [![Lint](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)](CMakeLists.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-blue)](https://docs.anthropic.com/claude-code)
-[![MCP](https://img.shields.io/badge/MCP-25%20tools-8b5cf6)](src/mcp/server.cpp)
+[![MCP](https://img.shields.io/badge/MCP-26%20tools-8b5cf6)](src/mcp/server.cpp)
 
 <p align="center">
   <picture>
@@ -24,7 +24,7 @@
 - [What this does, in plain English](#what-this-does-in-plain-english)
 - [How it works](#how-it-works)
 - [Token reduction](#token-reduction)
-- [MCP Tools (25)](#mcp-tools-25)
+- [MCP Tools (26)](#mcp-tools-26)
 - [Dialogue Layer](#dialogue-layer)
 - [HTTP Mode & Axon Web](#http-mode--axon-web)
 - [Multi-repo Registry](#multi-repo-registry)
@@ -48,7 +48,7 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 23 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 24 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
@@ -125,11 +125,11 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 
 ---
 
-## MCP Tools (25)
+## MCP Tools (26)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns |
+| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?`, `no_cache?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns |
 | `get_overview` | `limit?` | Top files by coupling + top symbols — ideal for onboarding |
 | `get_impact_graph` | `files[]` | Which files depend on the given files (bidirectional BFS) |
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
@@ -140,11 +140,11 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `run_pipeline` | `root?` | Full project index (parse + graph + embeddings) |
 | `index_paths` | `paths[]`, `prune?` | Incremental reindex of specific paths |
 | `rename` | `symbol_name`, `new_name`, `dry_run?` | Graph-assisted rename across the codebase |
-| `route_map` | — | List all detected HTTP routes with handler files |
+| `route_map` | `framework?` | List all detected HTTP routes with handler files (optionally filter by framework) |
 | `api_impact` | `route_path` | Handler file + impact graph for an HTTP route |
-| `detect_changes` | `since?` | Symbols and files affected by recent git changes |
+| `detect_changes` | `ref?` | Symbols and files affected by recent git changes (default ref: `HEAD`) |
 | `group_list` | — | List all repos registered in `~/.axon/registry.json` |
-| `group_impact` | `file` | Cross-repo blast radius for a file path |
+| `group_impact` | `file`, `group?` | Cross-repo blast radius for a file path, optionally scoped to a group |
 | `thread_create` | `name`, `kind?` | Create a named conversation scope (project \| person \| topic) |
 | `thread_list` | — | List all threads |
 | `session_start` | `thread_id`, `label?` | Open a new working session within a thread |
@@ -152,6 +152,7 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `turn_add` | `session_id`, `role`, `content` | Append a turn (user \| assistant); auto-anchors to code artifacts |
 | `turn_search` | `query`, `limit?`, `thread_id?` | Semantic search over all turns, optionally scoped to a thread |
 | `session_get` | `session_id`, `limit?` | Retrieve turns for a session |
+| `thread_get` | `thread_id` | List sessions within a thread with digest summaries |
 | `anchor_link` | `turn_id`, `file_id?`, `symbol_id?`, `kind?` | Manually link a turn to a file or symbol |
 | `dialogue_context` | `query`, `file_paths?[]`, `limit?`, `thread_id?` | Past turns related to files or semantic query |
 
@@ -534,7 +535,7 @@ src/
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
-├── duckdb/               # Pre-built shared library v1.1.3
+├── duckdb/               # Pre-built shared library v1.2.2
 ├── llama.cpp/            # Submodule — inference engine for embeddings
 ├── tree-sitter/          # Core C API
 ├── tree-sitter-{lang}/   # 13 language grammar submodules
@@ -573,10 +574,12 @@ graph TD
 
 ```sql
 -- Code graph
-files        (id, path, language, hash, byte_size, indexed_at)
+files        (id, path, language, hash, byte_size, indexed_at, skeleton)
 symbols      (id, file_id, name, kind, start_line, end_line, signature, docstring, embedding FLOAT[768])
 edges        (id, from_file, to_file, from_symbol, to_symbol, kind)  -- kind: imports | calls | extends
 observations (id, content, file_path, embedding FLOAT[768], created_at)
+routes       (id, method, path, handler_file, framework, file_id)
+capsule_cache (query_hash, epoch, payload, created_at)
 
 -- Dialogue Layer
 threads      (id, name, kind, created_at)                              -- kind: project | person | topic
@@ -681,11 +684,11 @@ axon index /caminho/para/seu-projeto
 axon serve
 ```
 
-### Ferramentas MCP (25)
+### Ferramentas MCP (26)
 
 | Ferramenta | Descrição |
 |-----------|-----------|
-| `get_context_capsule` | Cápsula de contexto eficiente em tokens (aceita `dialogue_budget`) |
+| `get_context_capsule` | Cápsula de contexto eficiente em tokens (aceita `dialogue_budget`, `no_cache`) |
 | `get_overview` | Visão geral: arquivos mais acoplados + símbolos mais referenciados |
 | `get_impact_graph` | Quais arquivos dependem dos arquivos fornecidos |
 | `get_callers` | Arquivos que importam o arquivo que define um símbolo |
@@ -696,12 +699,14 @@ axon serve
 | `run_pipeline` | Indexação completa do projeto |
 | `index_paths` | Reindexação incremental de caminhos específicos |
 | `rename` | Renomear símbolo com assistência do grafo |
-| `route_map` | Listar rotas HTTP detectadas |
+| `route_map` | Listar rotas HTTP detectadas (filtro por `framework` opcional) |
 | `api_impact` | Impacto de uma rota HTTP no grafo de dependências |
-| `detect_changes` | Símbolos e arquivos afetados por mudanças recentes no git |
-| `group_list` / `group_impact` | Registro e impacto multi-repo |
+| `detect_changes` | Símbolos e arquivos afetados por mudanças recentes no git (parâmetro `ref`, default `HEAD`) |
+| `group_list` | Registro multi-repo (`~/.axon/registry.json`) |
+| `group_impact` | Impacto cross-repo para um arquivo (filtro por `group` opcional) |
 | `thread_create` | Criar escopo nomeado de conversação (project \| person \| topic) |
 | `thread_list` | Listar todos os threads |
+| `thread_get` | Listar sessões de um thread com resumos de digest |
 | `session_start` | Abrir sessão de trabalho dentro de um thread |
 | `session_end` | Encerrar sessão; gera e embeda um digest (ADF) |
 | `turn_add` | Adicionar turn (user \| assistant) com auto-âncora em arquivos e símbolos |

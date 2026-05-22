@@ -223,6 +223,6 @@ curl -s "http://localhost:7070/api/graph?mode=symbol" | jq '.edges | length'
 ## What's Next
 
 - [Architecture](architecture.md) — how axon works internally
-- [API Reference](api-reference.md) — all 15 MCP tools with parameters
+- [API Reference](api-reference.md) — all 26 MCP tools with parameters
 - [FAQ](faq.md) — common questions
 - [Troubleshooting](troubleshooting.md) — build and runtime problems
