@@ -21,7 +21,8 @@ Axon is a single C++20 binary with two serving modes: **stdio MCP** (JSON-RPC 2.
 | **Rename** | Graph-assisted symbol rename | `src/core/rename.*` |
 | **DB** | DuckDB connection + schema + migrations | `src/core/db.*` |
 | **Config** | Project root detection via `.git` walk-up | `src/core/config.*` |
-| **MCP Server** | stdio JSON-RPC 2.0 loop + 15 tool handlers | `src/mcp/server.*` |
+| **Dialogue** | Threads/sessions/turns/anchors/digests + auto-anchor + ADF | `src/core/dialogue.*` |
+| **MCP Server** | stdio JSON-RPC 2.0 loop + 26 tool handlers | `src/mcp/server.*` |
 | **HTTP Server** | REST API + multi-repo graph aggregation | `src/mcp/http_server.*` |
 | **Protocol** | `make_response` / `make_error` / `make_tool_result` | `src/mcp/protocol.hpp` |
 
@@ -38,7 +39,7 @@ sequenceDiagram
     participant E as Embeddings (llama.cpp)
 
     CLI->>W: walk project root, skip SKIP_DIRS / .axonignore
-    W-->>CLI: source files (13 supported langs)
+    W-->>CLI: source files (13 supported languages)
     loop per file
         CLI->>P: parse() → AST
         P-->>CLI: symbols[] + imports[] + calls[]

@@ -1,5 +1,6 @@
 #include "capsule.hpp"
 #include "skeleton.hpp"
+#include "dialogue.hpp"
 #include <blake3.h>
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -300,7 +301,8 @@ ContextCapsule assemble_capsule(
     EmbeddingModel& model,
     const DependencyGraph& graph,
     const fs::path& project_root,
-    int token_budget)
+    int token_budget,
+    int dialogue_budget)
 {
     // 1. Select pivots — preserves WHICH symbol matched (if query-driven)
     std::vector<PivotMatch> pivot_matches;
@@ -429,6 +431,23 @@ ContextCapsule assemble_capsule(
     }
 
     capsule.token_estimate = tokens_used;
+
+    // ── Dialogue integration ────────────────────────────────────────────────
+    if (dialogue_budget > 0) {
+        auto hits = turns_for_files(db, model, query, pivot_ids, dialogue_budget);
+        for (const auto& h : hits) {
+            DialogueTurn dt;
+            dt.role          = h.turn.role;
+            dt.content       = h.turn.content;
+            dt.session_label = h.session_label;
+            dt.thread_name   = h.thread_name;
+            dt.ts            = h.turn.ts;
+            dt.token_estimate = estimate_tokens(dt.content);
+            capsule.token_estimate += dt.token_estimate;
+            capsule.related_turns.push_back(std::move(dt));
+        }
+    }
+
     return capsule;
 }
 

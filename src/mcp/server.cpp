@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "protocol.hpp"
+#include "version.hpp"
 #include "../core/registry.hpp"
 #include "../core/indexer.hpp"
 #include "../core/capsule.hpp"
@@ -8,6 +9,7 @@
 #include "../core/rename.hpp"
 #include "../core/git.hpp"
 #include "../core/routes.hpp"
+#include "../core/dialogue.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -16,6 +18,7 @@
 #include <unordered_set>
 #include <queue>
 #include <algorithm>
+#include <cctype>
 
 namespace {
 inline std::string sql_escape(const std::string& s) {
@@ -38,11 +41,12 @@ static json tools_list() {
              {"paths",{{"type","array"},{"items",{{"type","string"}}}}},
              {"prune",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_context_capsule"},
-         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass."},
+         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass. Set dialogue_budget>0 to include relevant conversation turns anchored to the pivot files."},
          {"inputSchema",{{"type","object"},{"properties",{
              {"query",{{"type","string"}}},
              {"pivot_files",{{"type","array"},{"items",{{"type","string"}}}}},
              {"token_budget",{{"type","integer"},{"default",8000}}},
+             {"dialogue_budget",{{"type","integer"},{"default",0}}},
              {"no_cache",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_impact_graph"},
          {"description","Return files that depend on (or are depended on by) the given files."},
@@ -103,6 +107,60 @@ static json tools_list() {
          {"inputSchema",{{"type","object"},{"required",{"file"}},{"properties",{
              {"file",{{"type","string"},{"description","Relative or absolute path to the file to analyze"}}},
              {"group",{{"type","string"},{"description","Optional: limit to repos in this group"}}}}}}}},
+        // ── Dialogue Layer ─────────────────────────────────────────────────────
+        {{"name","thread_create"},
+         {"description","Create a named conversation thread. kind: project|person|topic."},
+         {"inputSchema",{{"type","object"},{"required",{"name"}},{"properties",{
+             {"name",{{"type","string"}}},
+             {"kind",{{"type","string"},{"default","project"}}}}}}}},
+        {{"name","thread_list"},
+         {"description","List all conversation threads with session counts."},
+         {"inputSchema",{{"type","object"},{"properties",json::object()}}}},
+        {{"name","session_start"},
+         {"description","Start a new session within a thread. Returns the session id."},
+         {"inputSchema",{{"type","object"},{"required",{"thread_id"}},{"properties",{
+             {"thread_id",{{"type","integer"}}},
+             {"label",{{"type","string"}}}}}}}},
+        {{"name","session_end"},
+         {"description","Close a session and optionally compute its digest (compressed summary)."},
+         {"inputSchema",{{"type","object"},{"required",{"session_id"}},{"properties",{
+             {"session_id",{{"type","integer"}}},
+             {"compute_digest",{{"type","boolean"},{"default",true}}}}}}}},
+        {{"name","turn_add"},
+         {"description","Append a verbatim turn to a session. Automatically detects and anchors file paths and symbol names found in the content."},
+         {"inputSchema",{{"type","object"},{"required",{"session_id","role","content"}},{"properties",{
+             {"session_id",{{"type","integer"}}},
+             {"role",{{"type","string"},{"enum",{"user","assistant"}}}},
+             {"content",{{"type","string"}}}}}}}},
+        {{"name","turn_search"},
+         {"description","Semantic search over conversation turns. Returns the most relevant turns with session and thread context."},
+         {"inputSchema",{{"type","object"},{"required",{"query"}},{"properties",{
+             {"query",{{"type","string"}}},
+             {"limit",{{"type","integer"},{"default",5}}},
+             {"thread_id",{{"type","integer"},{"description","Scope to a specific thread. Omit for global search."}}}}}}}},
+        {{"name","session_get"},
+         {"description","Get all turns in a session, ordered by time."},
+         {"inputSchema",{{"type","object"},{"required",{"session_id"}},{"properties",{
+             {"session_id",{{"type","integer"}}},
+             {"limit",{{"type","integer"},{"default",500}}}}}}}},
+        {{"name","thread_get"},
+         {"description","Get all sessions in a thread, with digests."},
+         {"inputSchema",{{"type","object"},{"required",{"thread_id"}},{"properties",{
+             {"thread_id",{{"type","integer"}}}}}}}},
+        {{"name","anchor_link"},
+         {"description","Manually link a turn to a file or symbol in the project graph."},
+         {"inputSchema",{{"type","object"},{"required",{"turn_id"}},{"properties",{
+             {"turn_id",{{"type","integer"}}},
+             {"file_id",{{"type","integer"}}},
+             {"symbol_id",{{"type","integer"}}},
+             {"kind",{{"type","string"},{"default","mentions"}}}}}}}},
+        {{"name","dialogue_context"},
+         {"description","Return conversation turns relevant to a query or set of files. Use to surface past decisions and discussions before editing code."},
+         {"inputSchema",{{"type","object"},{"required",{"query"}},{"properties",{
+             {"query",{{"type","string"}}},
+             {"file_paths",{{"type","array"},{"items",{{"type","string"}}}}},
+             {"limit",{{"type","integer"},{"default",5}}},
+             {"thread_id",{{"type","integer"}}}}}}}}
     })}};
 }
 
@@ -150,7 +208,10 @@ static int drain_pending_writes(ServerContext& ctx) {
 
     auto stats = index_files(ctx.cfg, *ctx.db, unique, false);
     if (stats.files_indexed > 0 && ctx.model_ready()) {
-        try { embed_pending_symbols(*ctx.db, *ctx.model); }
+        try {
+            embed_pending_symbols(*ctx.db, *ctx.model);
+            embed_pending_turns(*ctx.db, *ctx.model);
+        }
         catch (...) { /* silent — will retry on next drain */ }
     }
     if (stats.files_indexed > 0)
@@ -174,14 +235,68 @@ static void maybe_run_sync(ServerContext& ctx) {
 
     auto stats = sync_project(ctx.cfg, *ctx.db);
     if (stats.files_indexed > 0 && ctx.model_ready()) {
-        try { embed_pending_symbols(*ctx.db, *ctx.model); }
+        try {
+            embed_pending_symbols(*ctx.db, *ctx.model);
+            embed_pending_turns(*ctx.db, *ctx.model);
+        }
         catch (...) { /* silent — will retry next drain */ }
     }
     if (stats.files_indexed > 0 || stats.files_pruned > 0)
         ctx.graph = load_graph(*ctx.db);
 }
 
+static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
+    namespace fs = std::filesystem;
+    if (ctx.db_ready()) return true;
+
+    ctx.db_error.clear();
+    if (!create_if_missing && !fs::exists(ctx.cfg.db_path)) {
+        ctx.db_error = "No Axon index found at " + ctx.cfg.db_path.string() +
+                       ". Run run_pipeline first.";
+        return false;
+    }
+
+    try {
+        fs::create_directories(ctx.cfg.axon_dir);
+        ctx.db = std::make_unique<Database>(ctx.cfg.db_path);
+        ctx.graph = load_graph(*ctx.db);
+        if (!ctx.model_ready()) {
+            try {
+                fs::path binary_dir = ctx.binary_dir.empty()
+                    ? ctx.cfg.project_root / "models"
+                    : ctx.binary_dir;
+                auto model_path = find_model(binary_dir);
+                ctx.model = std::make_unique<EmbeddingModel>(model_path);
+            } catch (...) {
+                // The model is optional for startup; tools that need embeddings
+                // already return an explicit error when it is unavailable.
+            }
+        }
+        return true;
+    } catch (const std::exception& e) {
+        ctx.db.reset();
+        ctx.graph = DependencyGraph{};
+        ctx.db_error = e.what();
+        return false;
+    }
+}
+
+static json db_unavailable_result(const ServerContext& ctx) {
+    std::string detail = ctx.db_error.empty()
+        ? "Axon index database is not initialized."
+        : ctx.db_error;
+
+    return make_tool_result({
+        {"error", "Axon index database unavailable"},
+        {"db_path", ctx.cfg.db_path.string()},
+        {"detail", detail},
+        {"hint", "If another Claude/Codex session is open in this project, close it or stop the older axon serve process, then retry this tool. If no index exists yet, call run_pipeline."}
+    }, true);
+}
+
 static json handle_tool(const std::string& name, const json& args, ServerContext& ctx) {
+    ensure_db_open(ctx, name == "run_pipeline");
+
     // Order matters: sync first (full walk detects mv/rm/new-file side-effects),
     // then drain pending-writes (re-resolves edges for files that already have
     // peers in the DB after sync). Reversed order loses edges when a Write and
@@ -192,7 +307,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "run_pipeline") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","DB not initialized"}}, true);
+            return db_unavailable_result(ctx);
 
         auto stats = index_project(ctx.cfg, *ctx.db);
         ctx.graph = load_graph(*ctx.db);
@@ -209,16 +324,25 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 });
             }
         }
+
+        int sym_embedded = 0, turn_embedded = 0;
+        try {
+            sym_embedded  = embed_pending_symbols(*ctx.db, *ctx.model);
+            turn_embedded = embed_pending_turns(*ctx.db, *ctx.model);
+        } catch (...) { /* silent — will retry on next drain */ }
+
         return make_tool_result({
-            {"files_indexed", stats.files_indexed},
-            {"symbols_found", stats.symbols_found},
-            {"edges_found",   stats.edges_found}
+            {"files_indexed",   stats.files_indexed},
+            {"symbols_found",   stats.symbols_found},
+            {"edges_found",     stats.edges_found},
+            {"symbols_embedded", sym_embedded},
+            {"turns_embedded",   turn_embedded}
         });
     }
 
     if (name == "index_paths") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","DB not initialized"}}, true);
+            return db_unavailable_result(ctx);
 
         std::vector<std::filesystem::path> paths;
         if (args.contains("paths"))
@@ -229,10 +353,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         // If we inserted new symbols and a model is available, embed them inline
         // so the next semantic query already sees them.
-        int embedded = 0;
+        int embedded = 0, turns_embedded = 0;
         if (stats.files_indexed > 0 && ctx.model_ready()) {
             try {
-                embedded = embed_pending_symbols(*ctx.db, *ctx.model);
+                embedded       = embed_pending_symbols(*ctx.db, *ctx.model);
+                turns_embedded = embed_pending_turns(*ctx.db, *ctx.model);
             } catch (const std::exception& e) {
                 return make_tool_result({
                     {"warning", std::string("Indexed but embedding failed: ") + e.what()},
@@ -252,16 +377,18 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"files_skipped",    stats.files_skipped},
             {"files_pruned",     stats.files_pruned},
             {"symbols_found",    stats.symbols_found},
-            {"symbols_embedded", embedded}
+            {"symbols_embedded", embedded},
+            {"turns_embedded",   turns_embedded}
         });
     }
 
     if (name == "get_context_capsule") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string query = args.value("query", "");
         int budget = args.value("token_budget", 8000);
+        int dialogue_budget = args.value("dialogue_budget", 0);
         bool no_cache = args.value("no_cache", false);
         std::vector<std::string> pivots;
         if (args.contains("pivot_files"))
@@ -273,8 +400,9 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         // legitimately reuse the cached payload when the caller doesn't
         // override pivots. When pivots are explicit, skip cache to avoid
         // returning a cache entry generated for the implicit-pivot path.
+        // Dialogue budget also bypasses cache (turns change independently of code index).
         const std::string epoch = current_project_epoch(*ctx.db);
-        const bool eligible_for_cache = !no_cache && pivots.empty();
+        const bool eligible_for_cache = !no_cache && pivots.empty() && dialogue_budget == 0;
         std::string cache_key;
         if (eligible_for_cache) {
             cache_key = compute_capsule_cache_key(query, budget, epoch);
@@ -289,6 +417,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                     {"query", hit->query},
                     {"pivot_files", pf},
                     {"support_files", sf},
+                    {"related_turns", json::array()},
                     {"token_estimate", hit->token_estimate},
                     {"total_files_indexed", hit->total_files},
                     {"cache", "hit"}
@@ -302,7 +431,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
 
         auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model,
-                                        ctx.graph, ctx.cfg.project_root, budget);
+                                        ctx.graph, ctx.cfg.project_root, budget,
+                                        dialogue_budget);
 
         if (eligible_for_cache) {
             capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
@@ -314,11 +444,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         json sf = json::array();
         for (const auto& f : capsule.support_files)
             sf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+        json rt = json::array();
+        for (const auto& t : capsule.related_turns)
+            rt.push_back({{"role",t.role},{"content",t.content},
+                          {"session",t.session_label},{"thread",t.thread_name},
+                          {"ts",t.ts},{"tokens",t.token_estimate}});
 
         return make_tool_result({
             {"query", capsule.query},
             {"pivot_files", pf},
             {"support_files", sf},
+            {"related_turns", rt},
             {"token_estimate", capsule.token_estimate},
             {"total_files_indexed", capsule.total_files},
             {"cache", "miss"}
@@ -327,7 +463,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_impact_graph") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         json result = json::array();
         for (const auto& p : args["files"]) {
@@ -349,7 +485,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_skeleton") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         json result = json::array();
 
@@ -418,8 +554,10 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     }
 
     if (name == "search_memory") {
-        if (!ctx.db_ready() || !ctx.model_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+        if (!ctx.db_ready())
+            return db_unavailable_result(ctx);
+        if (!ctx.model_ready())
+            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
 
         std::string q = args.value("query", "");
         int limit = args.value("limit", 5);
@@ -452,7 +590,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "save_observation") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string content   = args.value("content", "");
         std::string file_path = args.value("file_path", "");
@@ -487,7 +625,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_overview") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         int limit = args.value("limit", 10);
         if (limit < 1)   limit = 1;
@@ -554,7 +692,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_callers") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string sym_name = args.value("symbol_name", "");
         std::string file_hint = args.value("file_path", "");
@@ -643,7 +781,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "get_tests_for") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         json result = json::array();
         std::unordered_set<std::string> all_tests;
@@ -688,7 +826,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "rename") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string old_name = args.value("symbol_name", "");
         std::string new_name = args.value("new_name", "");
@@ -779,7 +917,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "detect_changes") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string ref = args.value("ref", "HEAD");
         std::string root = ctx.cfg.project_root.string();
@@ -857,7 +995,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "route_map") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         // Trigger route indexing if not done (or if index_routes enabled)
         if (ctx.cfg.project_cfg.index_routes) {
@@ -888,7 +1026,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "api_impact") {
         if (!ctx.db_ready())
-            return make_tool_result({{"error","Run run_pipeline first"}}, true);
+            return db_unavailable_result(ctx);
 
         std::string route_path = args.value("route_path", "");
         if (route_path.empty())
@@ -1012,21 +1150,274 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         });
     }
 
+    // ── Dialogue Layer tools ──────────────────────────────────────────────────
+
+    if (name == "thread_create") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        std::string tname = args.value("name", "");
+        std::string kind  = args.value("kind", "project");
+        if (tname.empty())
+            return make_tool_result({{"error","name is required"}}, true);
+        int64_t id = thread_create(*ctx.db, tname, kind);
+        return make_tool_result({{"id", id}, {"name", tname}, {"kind", kind}});
+    }
+
+    if (name == "thread_list") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        auto threads = thread_list(*ctx.db);
+        json result = json::array();
+        for (const auto& t : threads)
+            result.push_back({{"id",t.id},{"name",t.name},{"kind",t.kind},{"created_at",t.created_at}});
+        return make_tool_result(result);
+    }
+
+    if (name == "session_start") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        std::string label = args.value("label", "");
+        if (thread_id < 0)
+            return make_tool_result({{"error","thread_id is required"}}, true);
+        int64_t id = session_start(*ctx.db, thread_id, label);
+        return make_tool_result({{"session_id", id}, {"thread_id", thread_id}, {"label", label}});
+    }
+
+    if (name == "session_end") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t session_id = args.value("session_id", int64_t(-1));
+        bool compute_digest = args.value("compute_digest", true);
+        if (session_id < 0)
+            return make_tool_result({{"error","session_id is required"}}, true);
+        session_end(*ctx.db, session_id, ctx.model_ready() ? ctx.model.get() : nullptr, compute_digest);
+        return make_tool_result({{"session_id", session_id}, {"ended", true}});
+    }
+
+    if (name == "turn_add") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t session_id = args.value("session_id", int64_t(-1));
+        std::string role    = args.value("role", "user");
+        std::string content = args.value("content", "");
+        if (session_id < 0 || content.empty())
+            return make_tool_result({{"error","session_id and content are required"}}, true);
+        int64_t id = turn_add(*ctx.db, ctx.model_ready() ? ctx.model.get() : nullptr,
+                              session_id, role, content);
+        return make_tool_result({{"turn_id", id}, {"session_id", session_id}, {"role", role}});
+    }
+
+    if (name == "turn_search") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        if (!ctx.model_ready())
+            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+        std::string query = args.value("query", "");
+        int limit         = args.value("limit", 5);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        auto hits = turn_search(*ctx.db, *ctx.model, query, limit, thread_id);
+        json result = json::array();
+        for (const auto& h : hits)
+            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
+                              {"content",h.turn.content},{"ts",h.turn.ts},
+                              {"session",h.session_label},{"thread",h.thread_name},
+                              {"score",h.score}});
+        return make_tool_result(result);
+    }
+
+    if (name == "session_get") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t session_id = args.value("session_id", int64_t(-1));
+        int limit          = args.value("limit", 500);
+        if (session_id < 0)
+            return make_tool_result({{"error","session_id is required"}}, true);
+        auto turns = session_get(*ctx.db, session_id, limit);
+        json result = json::array();
+        for (const auto& t : turns)
+            result.push_back({{"id",t.id},{"role",t.role},{"content",t.content},{"ts",t.ts}});
+        return make_tool_result(result);
+    }
+
+    if (name == "thread_get") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        if (thread_id < 0)
+            return make_tool_result({{"error","thread_id is required"}}, true);
+        auto sessions = thread_get_sessions(*ctx.db, thread_id);
+        json result = json::array();
+        for (const auto& s : sessions)
+            result.push_back({{"id",s.id},{"label",s.label},
+                              {"started_at",s.started_at},{"ended_at",s.ended_at},
+                              {"digest",s.digest}});
+        return make_tool_result(result);
+    }
+
+    if (name == "anchor_link") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        int64_t turn_id   = args.value("turn_id",   int64_t(-1));
+        int64_t file_id   = args.value("file_id",   int64_t(-1));
+        int64_t symbol_id = args.value("symbol_id", int64_t(-1));
+        std::string kind  = args.value("kind", "mentions");
+        if (turn_id < 0)
+            return make_tool_result({{"error","turn_id is required"}}, true);
+        int64_t id = anchor_link(*ctx.db, turn_id, file_id, symbol_id, kind);
+        return make_tool_result({{"anchor_id",id},{"turn_id",turn_id},
+                                 {"file_id",file_id},{"symbol_id",symbol_id},{"kind",kind}});
+    }
+
+    if (name == "dialogue_context") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        if (!ctx.model_ready())
+            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+        std::string query = args.value("query", "");
+        int limit         = args.value("limit", 5);
+        int64_t thread_id = args.value("thread_id", int64_t(-1));
+
+        // Resolve optional file_paths to file_ids
+        std::vector<int64_t> file_ids;
+        if (args.contains("file_paths")) {
+            for (const auto& fp : args["file_paths"]) {
+                std::string path = fp.get<std::string>();
+                auto res = ctx.db->conn().Query(
+                    "SELECT id FROM files WHERE path LIKE '%" + sql_escape(path) + "' LIMIT 1");
+                if (!res->HasError() && res->RowCount() > 0)
+                    file_ids.push_back(res->GetValue<int64_t>(0, 0));
+            }
+        }
+
+        std::vector<TurnHit> hits;
+        if (!file_ids.empty()) {
+            hits = turns_for_files(*ctx.db, *ctx.model, query, file_ids, limit * 300);
+        } else {
+            hits = turn_search(*ctx.db, *ctx.model, query, limit, thread_id);
+        }
+
+        json result = json::array();
+        for (const auto& h : hits)
+            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
+                              {"content",h.turn.content},{"ts",h.turn.ts},
+                              {"session",h.session_label},{"thread",h.thread_name},
+                              {"score",h.score}});
+        return make_tool_result(result);
+    }
+
     return make_tool_result({{"error", "Unknown tool: " + name}}, true);
 }
 
-void run_stdio(ServerContext& ctx) {
-    std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line.empty()) continue;
+struct StdioEnvelope {
+    bool framed = false;
+    bool ok = false;
+    json payload;
+    json error;
+};
 
-        json req;
-        try { req = json::parse(line); }
-        catch (...) {
-            std::cout << make_error(nullptr, PARSE_ERROR, "Parse error").dump() << "\n";
-            std::cout.flush();
+static std::string strip_cr(std::string s) {
+    if (!s.empty() && s.back() == '\r') s.pop_back();
+    return s;
+}
+
+static std::string trim_ascii(std::string s) {
+    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!s.empty() && is_space(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    while (!s.empty() && is_space(static_cast<unsigned char>(s.back()))) s.pop_back();
+    return s;
+}
+
+static std::string lower_ascii(std::string s) {
+    for (char& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+static bool parse_header_line(const std::string& line, size_t& content_length) {
+    auto colon = line.find(':');
+    if (colon == std::string::npos) return false;
+
+    std::string name = lower_ascii(trim_ascii(line.substr(0, colon)));
+    std::string value = trim_ascii(line.substr(colon + 1));
+    if (name != "content-length") return false;
+
+    try {
+        content_length = static_cast<size_t>(std::stoull(value));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool looks_like_header(const std::string& line) {
+    if (line.empty()) return false;
+    if (line.front() == '{' || line.front() == '[') return false;
+    return line.find(':') != std::string::npos;
+}
+
+static bool read_stdio_envelope(std::istream& in, StdioEnvelope& env) {
+    env = StdioEnvelope{};
+
+    std::string first;
+    while (std::getline(in, first)) {
+        first = strip_cr(first);
+        if (!first.empty()) break;
+    }
+    if (!in && first.empty()) return false;
+
+    if (looks_like_header(first)) {
+        env.framed = true;
+        size_t content_length = 0;
+        bool have_content_length = parse_header_line(first, content_length);
+
+        std::string line;
+        while (std::getline(in, line)) {
+            line = strip_cr(line);
+            if (line.empty()) break;
+            size_t parsed_length = 0;
+            if (parse_header_line(line, parsed_length)) {
+                content_length = parsed_length;
+                have_content_length = true;
+            }
+        }
+
+        if (!have_content_length) {
+            env.error = make_error(nullptr, INVALID_REQUEST, "Missing Content-Length header");
+            return true;
+        }
+
+        std::string body(content_length, '\0');
+        in.read(body.data(), static_cast<std::streamsize>(content_length));
+        if (static_cast<size_t>(in.gcount()) != content_length) return false;
+
+        try {
+            env.payload = json::parse(body);
+            env.ok = true;
+        } catch (...) {
+            env.error = make_error(nullptr, PARSE_ERROR, "Parse error");
+        }
+        return true;
+    }
+
+    try {
+        env.payload = json::parse(first);
+        env.ok = true;
+    } catch (...) {
+        env.error = make_error(nullptr, PARSE_ERROR, "Parse error");
+    }
+    return true;
+}
+
+static void write_stdio_response(const json& response, bool framed) {
+    std::string body = response.dump();
+    if (framed) {
+        std::cout << "Content-Length: " << body.size() << "\r\n\r\n" << body;
+    } else {
+        std::cout << body << "\n";
+    }
+    std::cout.flush();
+}
+
+void run_stdio(ServerContext& ctx) {
+    StdioEnvelope env;
+    while (read_stdio_envelope(std::cin, env)) {
+        if (!env.ok) {
+            write_stdio_response(env.error, env.framed);
             continue;
         }
+
+        const json& req = env.payload;
 
         std::string method = req.value("method", "");
         json id = req.contains("id") ? req["id"] : json(nullptr);
@@ -1039,7 +1430,7 @@ void run_stdio(ServerContext& ctx) {
             response = make_response(id, {
                 {"protocolVersion", "2024-11-05"},
                 {"capabilities", {{"tools", {{"listChanged", false}}}}},
-                {"serverInfo", {{"name", "axon"}, {"version", "0.1.0"}}}
+                {"serverInfo", {{"name", "axon"}, {"version", axon::VERSION}}}
             });
         } else if (method == "notifications/initialized") {
             continue;
@@ -1059,8 +1450,7 @@ void run_stdio(ServerContext& ctx) {
             response = make_error(id, METHOD_NOT_FOUND, "Method not found: " + method);
         }
 
-        std::cout << response.dump() << "\n";
-        std::cout.flush();
+        write_stdio_response(response, env.framed);
     }
 }
 

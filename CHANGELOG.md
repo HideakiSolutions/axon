@@ -7,11 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-05-22
+
 ### Added
 
 - Lua grammar via `tree-sitter-grammars/tree-sitter-lua` submodule — parses `.lua` files, surfaces `function`/`method` symbols (including `function tbl.foo`, `function tbl:foo`, `local function`) and `require("mod")` calls as import edges.
 - Nix language support — 15th tree-sitter grammar. `.nix` files now produce symbols for top-level `binding` (kind `function` / `attrset` / `binding` based on RHS), per-attr `variable` symbols from `inherit` / `inherit_from` clauses, import edges from `import <path>` / `import ./foo.nix` / `inherit (src) …`, and call sites via `apply_expression`.
-- `capsule.cpp::lang_from_string()` and `mcp/server.cpp` skeleton dispatch now recognize `bash`, `cpp`, `kotlin`, `vue`, `lua`, `nix` — previously these wired-up grammars fell through to the TypeScript default in skeleton lookups. Count of supported languages: 13 → 15.
+- `capsule.cpp::lang_from_string()` and `mcp/server.cpp` skeleton dispatch now recognize `bash`, `cpp`, `kotlin`, `vue`, `lua`, `nix`. Count of supported languages: 13 → 15.
+
+### Fixed
+
+- `axon index <path>`: now returns exit code 1 with an explicit error message when the given path does not exist (previously silently succeeded with 0 files indexed and exit 0)
+- `axon status`: now accepts an optional `[path]` argument (previously ignored any argument and always resolved the project via `.git` walk-up from cwd, silently showing the wrong project)
+- `axon help`: `axon index` usage line now shows `[--force]` flag (the flag existed but was not listed in the help output)
+- `axon serve`: `serverInfo.version` in the MCP `initialize` handshake was hardcoded to `"0.1.0"`; now reports the actual binary version via `axon::VERSION`
+- `tests/e2e/smoke.sh`: version check pattern updated from `axon 0\.` to `axon 1\.`
+- Documentation: corrected 17 discrepancies between docs and code (tool count 25→26, `thread_get` missing from tool tables, `detect_changes` param `since`→`ref`, `route_map`/`group_impact` undocumented params, `get_context_capsule` missing `no_cache?`, `get_callers` default limit 20→50, DB schema missing `skeleton`/`routes`/`capsule_cache`, HTTP endpoints `overview` and `detect-changes` missing, env var `AXON_MODEL_PATH`→`AXON_EMBEDDING_MODEL`, auto-anchor extension count 13→23, Dialogue Layer tools absent from `api-reference.md`, DuckDB version 1.1.3→1.2.2 in docs, `build.yml` DuckDB version synced)
+
+## [1.1.0] — 2026-05-22
+
+### Added
+
+- **Dialogue Layer** — native structured conversation memory in the same DuckDB store used for the code graph. Threads, sessions, turns, anchors, and digests, all locally stored with 768-dim embeddings via nomic-embed-text.
+- **Auto-anchor** — on every `turn_add`, axon scans content with a regex for source file paths (23 extensions) and performs word-boundary lookup against the top-500 most-referenced symbols in the dependency graph, automatically linking turns to code artifacts in `turn_anchors`.
+- **Axon Digest Format (ADF)** — rule-based session summary generated on `session_end`: `[SESSION:]`, `[ANCHORS:]`, and turn excerpts (first, last, anchored). Embedded with nomic-embed-text for semantic retrieval.
+- **`get_context_capsule` extended** — new optional `dialogue_budget` parameter: when > 0, the capsule response includes a `related_turns[]` array of past conversations anchored to the same pivot files, ranked by cosine similarity, within budget. Zero-overhead when omitted.
+- **10 new MCP tools** (26 total, up from 16): `thread_create`, `thread_list`, `session_start`, `session_end`, `turn_add`, `turn_search`, `session_get`, `thread_get`, `anchor_link`, `dialogue_context`.
+- **4 new HTTP REST endpoints**: `GET /api/threads`, `GET /api/threads/:id/sessions`, `GET /api/sessions/:id/turns`, `GET /api/dialogue/search`.
+- **`embed_pending_turns`** — mirrors `embed_pending_symbols`; drains turns with NULL embedding on `run_pipeline`, `index_paths`, and the background sync path.
+- **New DB tables**: `threads`, `sessions`, `turns`, `turn_anchors` (incremental migration, backwards-compatible).
+- **Test suites**: `test_dialogue` (15 tests), `test_objectives` (23 tests), `test_semantic` (9 model-dependent tests, auto-skip in CI).
+
+### Changed
+
+- **DuckDB 1.1.3 → 1.2.2** — fixes a silent bug where `UPDATE` on `FLOAT[N]` columns produced no effect. All embedding UPDATE paths in `dialogue.cpp` and `embeddings.cpp` now use direct `UPDATE`.
+- `run_pipeline` and `index_paths` responses now include `turns_embedded` count alongside `symbols_embedded`.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.12 → 1.1.0 (syncs with git tag series; v1.0.0 was released without a CMakeLists bump)
+- DuckDB prebuilt in `release.yml` workflow: 1.1.3 → 1.2.2
+
+## [0.5.12] — 2026-05-19
+
+### Changed
+
+- Remove legacy local runtimes em `.hseos/` — agentes/skills/workflows do projeto agora delegam ao runtime global `enterprise-hseos`. Sem impacto em comportamento do binário; release cut para alinhar tag com working tree e disparar pipeline multi-OS (linux-x64, macos-arm64, windows-x64).
+>>>>>>> origin/develop
 
 ## [0.5.11] — 2026-05-09
 

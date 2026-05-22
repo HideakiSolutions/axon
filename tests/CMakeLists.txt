@@ -44,3 +44,72 @@ function(add_axon_test name)
 endfunction()
 
 add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp)
+
+# Dialogue Layer tests require DuckDB (cannot use the parser-only axon_parser_objs target).
+add_executable(test_dialogue unit/test_dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+)
+target_include_directories(test_dialogue PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
+)
+target_link_libraries(test_dialogue PRIVATE
+    duckdb_lib
+    llama
+    ggml
+    GTest::gtest_main
+)
+add_test(NAME test_dialogue COMMAND test_dialogue)
+
+# Objectives test — token reduction + memory correctness (no model required)
+add_executable(test_objectives unit/test_objectives.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/git.cpp
+)
+target_include_directories(test_objectives PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
+)
+target_link_libraries(test_objectives PRIVATE
+    tree_sitter_lib
+    ts_typescript ts_javascript ts_python ts_rust ts_go
+    ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
+    blake3_lib
+    duckdb_lib
+    llama
+    ggml
+    GTest::gtest_main
+)
+add_test(NAME test_objectives COMMAND test_objectives)
+
+# Semantic tests — require a real GGUF model; auto-skip via GTEST_SKIP when absent.
+# Set AXON_EMBEDDING_MODEL env var to override the default path discovery.
+add_executable(test_semantic unit/test_semantic.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+)
+target_include_directories(test_semantic PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
+)
+target_link_libraries(test_semantic PRIVATE
+    duckdb_lib
+    llama
+    ggml
+    GTest::gtest_main
+)
+add_test(NAME test_semantic COMMAND test_semantic)

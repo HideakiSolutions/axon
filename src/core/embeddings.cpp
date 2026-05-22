@@ -109,8 +109,6 @@ std::vector<float> deserialize_embedding(const uint8_t* data, size_t byte_len) {
 }
 
 int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
-    // DuckDB 1.1.x workaround: neither UPDATE nor ON CONFLICT DO UPDATE
-    // work reliably for FLOAT[] columns. Use DELETE + INSERT per row.
     auto sq2 = [](const std::string& s) {
         std::string r; r.reserve(s.size());
         for (char c : s) { if (c == '\'') r += "''"; else r += c; }
@@ -118,57 +116,36 @@ int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
     };
 
     auto syms = db.conn().Query(
-        "SELECT id, file_id, name, kind, start_line, end_line, signature, docstring "
+        "SELECT id, name, kind, signature "
         "FROM symbols WHERE embedding IS NULL LIMIT " + std::to_string(limit));
     if (syms->HasError())
         throw std::runtime_error("Failed to fetch pending symbols: " + syms->GetError());
 
-    struct SymRow { int64_t id, file_id; std::string name, kind, sig, doc; int sl, el; };
-    std::vector<SymRow> rows;
+    std::vector<int64_t>     ids;
     std::vector<std::string> texts;
-    auto& sym_mat = *syms;
-    for (duckdb::idx_t i = 0; i < sym_mat.RowCount(); i++) {
-        SymRow r;
-        r.id      = sym_mat.GetValue<int64_t>(0, i);
-        r.file_id = sym_mat.GetValue<int64_t>(1, i);
-        r.name    = sym_mat.GetValue(2, i).ToString();
-        r.kind    = sym_mat.GetValue(3, i).ToString();
-        r.sl      = sym_mat.GetValue<int32_t>(4, i);
-        r.el      = sym_mat.GetValue<int32_t>(5, i);
-        r.sig     = sym_mat.GetValue(6, i).ToString();
-        r.doc     = sym_mat.GetValue(7, i).ToString();
-        texts.push_back(r.name + " " + r.kind + " " + r.sig);
-        rows.push_back(std::move(r));
+    for (duckdb::idx_t i = 0; i < syms->RowCount(); i++) {
+        ids.push_back(syms->GetValue<int64_t>(0, i));
+        texts.push_back(syms->GetValue(1, i).ToString() + " " +
+                        syms->GetValue(2, i).ToString() + " " +
+                        syms->GetValue(3, i).ToString());
     }
 
     if (texts.empty()) return 0;
 
     auto embeddings = model.embed_batch(texts);
+    int  dims       = model.dims();
 
-    for (size_t i = 0; i < rows.size(); i++) {
-        const auto& r = rows[i];
+    for (size_t i = 0; i < ids.size(); i++) {
+        std::ostringstream sql;
+        sql << "UPDATE symbols SET embedding = [";
         const auto& emb = embeddings[i];
-
-        auto del_res = db.conn().Query(
-            "DELETE FROM symbols WHERE id = " + std::to_string(r.id));
-        if (del_res->HasError())
-            throw std::runtime_error("DELETE failed (id=" + std::to_string(r.id) + "): " + del_res->GetError());
-
-        std::ostringstream ins;
-        ins << "INSERT INTO symbols "
-               "(id,file_id,name,kind,start_line,end_line,signature,docstring,embedding) "
-               "VALUES ("
-            << r.id << "," << r.file_id << ",'"
-            << sq2(r.name) << "','" << sq2(r.kind) << "',"
-            << r.sl << "," << r.el << ",'"
-            << sq2(r.sig) << "','" << sq2(r.doc) << "',[";
-        for (size_t j = 0; j < emb.size(); j++) { if (j) ins << ","; ins << emb[j]; }
-        ins << "]::FLOAT[" << model.dims() << "])";
-        auto ins_res = db.conn().Query(ins.str());
-        if (ins_res->HasError())
-            throw std::runtime_error("INSERT failed (id=" + std::to_string(r.id) + "): " + ins_res->GetError());
+        for (size_t j = 0; j < emb.size(); j++) { if (j) sql << ","; sql << emb[j]; }
+        sql << "]::FLOAT[" << dims << "] WHERE id = " << ids[i];
+        auto r = db.conn().Query(sql.str());
+        if (r->HasError())
+            throw std::runtime_error("UPDATE symbols failed (id=" + std::to_string(ids[i]) + "): " + r->GetError());
     }
-    return (int)rows.size();
+    return (int)ids.size();
 }
 
 } // namespace axon
