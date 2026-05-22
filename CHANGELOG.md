@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-anchor** — on every `turn_add`, axon scans content with a regex for source file paths (13 extensions) and performs word-boundary lookup against the top-500 most-referenced symbols in the dependency graph, automatically linking turns to code artifacts in `turn_anchors`.
 - **Axon Digest Format (ADF)** — rule-based session summary generated on `session_end`: `[SESSION:]`, `[ANCHORS:]`, and turn excerpts (first, last, anchored). Embedded with nomic-embed-text for semantic retrieval.
 - **`get_context_capsule` extended** — new optional `dialogue_budget` parameter: when > 0, the capsule response includes a `related_turns[]` array of past conversations anchored to the same pivot files, ranked by cosine similarity, within budget. Zero-overhead when omitted.
-- **10 new MCP tools** (25 total, up from 15): `thread_create`, `thread_list`, `session_start`, `session_end`, `turn_add`, `turn_search`, `session_get`, `anchor_link`, `dialogue_context`.
+- **10 new MCP tools** (26 total, up from 16): `thread_create`, `thread_list`, `session_start`, `session_end`, `turn_add`, `turn_search`, `session_get`, `thread_get`, `anchor_link`, `dialogue_context`.
 - **4 new HTTP REST endpoints**: `GET /api/threads`, `GET /api/threads/:id/sessions`, `GET /api/sessions/:id/turns`, `GET /api/dialogue/search`.
 - **`embed_pending_turns`** — mirrors `embed_pending_symbols`; drains turns with NULL embedding on `run_pipeline`, `index_paths`, and the background sync path.
 - **New DB tables**: `threads`, `sessions`, `turns`, `turn_anchors` (incremental migration, backwards-compatible).
