@@ -207,7 +207,10 @@ static int drain_pending_writes(ServerContext& ctx) {
 
     auto stats = index_files(ctx.cfg, *ctx.db, unique, false);
     if (stats.files_indexed > 0 && ctx.model_ready()) {
-        try { embed_pending_symbols(*ctx.db, *ctx.model); }
+        try {
+            embed_pending_symbols(*ctx.db, *ctx.model);
+            embed_pending_turns(*ctx.db, *ctx.model);
+        }
         catch (...) { /* silent — will retry on next drain */ }
     }
     if (stats.files_indexed > 0)
@@ -231,7 +234,10 @@ static void maybe_run_sync(ServerContext& ctx) {
 
     auto stats = sync_project(ctx.cfg, *ctx.db);
     if (stats.files_indexed > 0 && ctx.model_ready()) {
-        try { embed_pending_symbols(*ctx.db, *ctx.model); }
+        try {
+            embed_pending_symbols(*ctx.db, *ctx.model);
+            embed_pending_turns(*ctx.db, *ctx.model);
+        }
         catch (...) { /* silent — will retry next drain */ }
     }
     if (stats.files_indexed > 0 || stats.files_pruned > 0)
@@ -317,10 +323,19 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 });
             }
         }
+
+        int sym_embedded = 0, turn_embedded = 0;
+        try {
+            sym_embedded  = embed_pending_symbols(*ctx.db, *ctx.model);
+            turn_embedded = embed_pending_turns(*ctx.db, *ctx.model);
+        } catch (...) { /* silent — will retry on next drain */ }
+
         return make_tool_result({
-            {"files_indexed", stats.files_indexed},
-            {"symbols_found", stats.symbols_found},
-            {"edges_found",   stats.edges_found}
+            {"files_indexed",   stats.files_indexed},
+            {"symbols_found",   stats.symbols_found},
+            {"edges_found",     stats.edges_found},
+            {"symbols_embedded", sym_embedded},
+            {"turns_embedded",   turn_embedded}
         });
     }
 
@@ -337,10 +352,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         // If we inserted new symbols and a model is available, embed them inline
         // so the next semantic query already sees them.
-        int embedded = 0;
+        int embedded = 0, turns_embedded = 0;
         if (stats.files_indexed > 0 && ctx.model_ready()) {
             try {
-                embedded = embed_pending_symbols(*ctx.db, *ctx.model);
+                embedded       = embed_pending_symbols(*ctx.db, *ctx.model);
+                turns_embedded = embed_pending_turns(*ctx.db, *ctx.model);
             } catch (const std::exception& e) {
                 return make_tool_result({
                     {"warning", std::string("Indexed but embedding failed: ") + e.what()},
@@ -360,7 +376,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"files_skipped",    stats.files_skipped},
             {"files_pruned",     stats.files_pruned},
             {"symbols_found",    stats.symbols_found},
-            {"symbols_embedded", embedded}
+            {"symbols_embedded", embedded},
+            {"turns_embedded",   turns_embedded}
         });
     }
 
