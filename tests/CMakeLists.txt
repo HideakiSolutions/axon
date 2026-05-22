@@ -92,3 +92,24 @@ target_link_libraries(test_objectives PRIVATE
     GTest::gtest_main
 )
 add_test(NAME test_objectives COMMAND test_objectives)
+
+# Semantic tests — require a real GGUF model; auto-skip via GTEST_SKIP when absent.
+# Set AXON_EMBEDDING_MODEL env var to override the default path discovery.
+add_executable(test_semantic unit/test_semantic.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+)
+target_include_directories(test_semantic PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
+)
+target_link_libraries(test_semantic PRIVATE
+    duckdb_lib
+    llama
+    ggml
+    GTest::gtest_main
+)
+add_test(NAME test_semantic COMMAND test_semantic)
