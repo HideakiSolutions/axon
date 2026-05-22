@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-05-22
+
+### Added
+
+- **Dialogue Layer** — native structured conversation memory in the same DuckDB store used for the code graph. Threads, sessions, turns, anchors, and digests, all locally stored with 768-dim embeddings via nomic-embed-text.
+- **Auto-anchor** — on every `turn_add`, axon scans content with a regex for source file paths (13 extensions) and performs word-boundary lookup against the top-500 most-referenced symbols in the dependency graph, automatically linking turns to code artifacts in `turn_anchors`.
+- **Axon Digest Format (ADF)** — rule-based session summary generated on `session_end`: `[SESSION:]`, `[ANCHORS:]`, and turn excerpts (first, last, anchored). Embedded with nomic-embed-text for semantic retrieval.
+- **`get_context_capsule` extended** — new optional `dialogue_budget` parameter: when > 0, the capsule response includes a `related_turns[]` array of past conversations anchored to the same pivot files, ranked by cosine similarity, within budget. Zero-overhead when omitted.
+- **10 new MCP tools** (25 total, up from 15): `thread_create`, `thread_list`, `session_start`, `session_end`, `turn_add`, `turn_search`, `session_get`, `anchor_link`, `dialogue_context`.
+- **4 new HTTP REST endpoints**: `GET /api/threads`, `GET /api/threads/:id/sessions`, `GET /api/sessions/:id/turns`, `GET /api/dialogue/search`.
+- **`embed_pending_turns`** — mirrors `embed_pending_symbols`; drains turns with NULL embedding on `run_pipeline`, `index_paths`, and the background sync path.
+- **New DB tables**: `threads`, `sessions`, `turns`, `turn_anchors` (incremental migration, backwards-compatible).
+- **Test suites**: `test_dialogue` (15 tests), `test_objectives` (23 tests), `test_semantic` (9 model-dependent tests, auto-skip in CI).
+
+### Changed
+
+- **DuckDB 1.1.3 → 1.2.2** — fixes a silent bug where `UPDATE` on `FLOAT[N]` columns produced no effect. All embedding UPDATE paths in `dialogue.cpp` and `embeddings.cpp` now use direct `UPDATE`.
+- `run_pipeline` and `index_paths` responses now include `turns_embedded` count alongside `symbols_embedded`.
+
+### Bumped
+
+- CMakeLists.txt project version 0.5.12 → 1.1.0 (syncs with git tag series; v1.0.0 was released without a CMakeLists bump)
+- DuckDB prebuilt in `release.yml` workflow: 1.1.3 → 1.2.2
+
 ## [0.5.12] — 2026-05-19
 
 ### Changed
