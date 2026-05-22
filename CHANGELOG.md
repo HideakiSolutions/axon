@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tests/e2e/smoke.sh` version check pattern updated from `axon 0\.` to `axon 1\.` — the smoke harness was not updated when CMakeLists.txt bumped the project version from `0.5.12` to `1.1.0`
+
 ## [1.1.0] — 2026-05-22
 
 ### Added

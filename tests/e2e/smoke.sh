@@ -53,7 +53,7 @@ log "axon binary: $AXON"
 [ -x "$AXON" ] || { echo "axon binary missing: $AXON" >&2; exit 1; }
 
 VERSION_OUTPUT=$("$AXON" --version)
-assert_contains "axon 0\." "$VERSION_OUTPUT" "--version prints a 0.x line"
+assert_contains "axon 1\." "$VERSION_OUTPUT" "--version prints a 1.x line"
 
 HELP_OUTPUT=$("$AXON" help 2>&1)
 assert_contains "axon capsule" "$HELP_OUTPUT" "help mentions capsule subcommand"
