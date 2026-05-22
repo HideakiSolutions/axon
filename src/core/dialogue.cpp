@@ -183,39 +183,10 @@ void session_end(Database& db, int64_t session_id, EmbeddingModel* model, bool c
 
     if (model) {
         auto emb = model->embed(digest);
-
-        // DuckDB 1.1.x workaround: UPDATE on FLOAT[] is unreliable.
-        // Store digest (VARCHAR) via UPDATE, then store the embedding via
-        // DELETE + INSERT of the full sessions row.
         db.conn().Query(
             "UPDATE sessions SET digest = '" + sq(digest) +
-            "' WHERE id = " + std::to_string(session_id));
-
-        // Fetch the full row to reconstruct with embedding.
-        auto sr = db.conn().Query(
-            "SELECT id, thread_id, COALESCE(label,''),"
-            "       CAST(started_at AS VARCHAR), COALESCE(CAST(ended_at AS VARCHAR),'')"
-            " FROM sessions WHERE id = " + std::to_string(session_id));
-        if (!sr->HasError() && sr->RowCount() > 0) {
-            int64_t     sid2       = sr->GetValue<int64_t>(0, 0);
-            int64_t     thread_id2 = sr->GetValue<int64_t>(1, 0);
-            std::string label2     = sr->GetValue(2, 0).ToString();
-            std::string started2   = sr->GetValue(3, 0).ToString();
-            std::string ended2     = sr->GetValue(4, 0).ToString();
-
-            db.conn().Query("DELETE FROM sessions WHERE id = " + std::to_string(sid2));
-
-            std::ostringstream ins;
-            ins << "INSERT INTO sessions "
-                   "(id, thread_id, label, started_at, ended_at, digest, digest_embedding) VALUES ("
-                << sid2 << ", " << thread_id2
-                << ", '" << sq(label2) << "'"
-                << ", TIMESTAMPTZ '" << started2 << "'"
-                << ", TIMESTAMPTZ '" << ended2 << "'"
-                << ", '" << sq(digest) << "'"
-                << ", " << vec_literal(emb, model->dims()) << ")";
-            db.conn().Query(ins.str());
-        }
+            "', digest_embedding = " + vec_literal(emb, model->dims()) +
+            " WHERE id = " + std::to_string(session_id));
     } else {
         db.conn().Query(
             "UPDATE sessions SET digest = '" + sq(digest) +
@@ -503,46 +474,28 @@ std::vector<TurnHit> turns_for_files(Database& db, EmbeddingModel& model,
 // ── Embed pipeline ────────────────────────────────────────────────────────────
 
 int embed_pending_turns(Database& db, EmbeddingModel& model, int limit) {
-    // DuckDB 1.1.x workaround: UPDATE on FLOAT[] columns is unreliable.
-    // Use DELETE + INSERT per row (same pattern as embed_pending_symbols).
     auto res = db.conn().Query(
-        "SELECT id, session_id, role, content, CAST(ts AS VARCHAR)"
-        " FROM turns WHERE embedding IS NULL LIMIT " + std::to_string(limit));
+        "SELECT id, content FROM turns WHERE embedding IS NULL LIMIT " +
+        std::to_string(limit));
     if (res->HasError()) return 0;
     if (res->RowCount() == 0) return 0;
 
-    struct TurnRow { int64_t id, session_id; std::string role, content, ts; };
-    std::vector<TurnRow>     rows;
+    std::vector<int64_t>     ids;
     std::vector<std::string> texts;
     for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
-        TurnRow r;
-        r.id         = res->GetValue<int64_t>(0, i);
-        r.session_id = res->GetValue<int64_t>(1, i);
-        r.role       = res->GetValue(2, i).ToString();
-        r.content    = res->GetValue(3, i).ToString();
-        r.ts         = res->GetValue(4, i).ToString();
-        texts.push_back(r.content);
-        rows.push_back(std::move(r));
+        ids.push_back(res->GetValue<int64_t>(0, i));
+        texts.push_back(res->GetValue(1, i).ToString());
     }
 
     auto embeddings = model.embed_batch(texts);
     int  dims       = model.dims();
 
-    for (size_t i = 0; i < rows.size(); i++) {
-        const auto& r   = rows[i];
-        const auto& emb = embeddings[i];
-
-        db.conn().Query("DELETE FROM turns WHERE id = " + std::to_string(r.id));
-
-        std::ostringstream ins;
-        ins << "INSERT INTO turns (id, session_id, role, content, ts, embedding) VALUES ("
-            << r.id << ", " << r.session_id
-            << ", '" << sq(r.role) << "', '" << sq(r.content) << "'"
-            << ", TIMESTAMPTZ '" << r.ts << "', "
-            << vec_literal(emb, dims) << ")";
-        db.conn().Query(ins.str());
+    for (size_t i = 0; i < ids.size(); i++) {
+        db.conn().Query(
+            "UPDATE turns SET embedding = " + vec_literal(embeddings[i], dims) +
+            " WHERE id = " + std::to_string(ids[i]));
     }
-    return (int)rows.size();
+    return (int)ids.size();
 }
 
 // ── Symbol name cache ─────────────────────────────────────────────────────────
