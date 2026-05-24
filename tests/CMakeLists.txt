@@ -27,6 +27,7 @@ target_link_libraries(axon_parser_objs PUBLIC
     tree_sitter_lib
     ts_typescript ts_javascript ts_python ts_rust ts_go
     ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue ts_lua ts_nix
+    ts_ruby ts_swift ts_scala
     blake3_lib
 )
 
@@ -85,7 +86,7 @@ target_link_libraries(test_objectives PRIVATE
     tree_sitter_lib
     ts_typescript ts_javascript ts_python ts_rust ts_go
     ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
-    ts_lua ts_nix
+    ts_lua ts_nix ts_ruby ts_swift ts_scala
     blake3_lib
     duckdb_lib
     llama
@@ -94,8 +95,8 @@ target_link_libraries(test_objectives PRIVATE
 )
 add_test(NAME test_objectives COMMAND test_objectives)
 
-# Semantic tests — require a real GGUF model; auto-skip via GTEST_SKIP when absent.
-# Set AXON_EMBEDDING_MODEL env var to override the default path discovery.
+# Semantic tests — require a real GGUF model; auto-skip via GTEST_SKIP unless
+# AXON_EMBEDDING_MODEL points at the model explicitly.
 add_executable(test_semantic unit/test_semantic.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp

@@ -14,6 +14,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AXON="${AXON:-${REPO_ROOT}/build/axon}"
+if [[ "$AXON" != /* ]]; then
+  AXON="${REPO_ROOT}/${AXON#./}"
+fi
 TMP_BASE="${TMPDIR:-/tmp}/axon-e2e-$$"
 mkdir -p "${TMP_BASE}"
 
@@ -53,12 +56,13 @@ log "axon binary: $AXON"
 [ -x "$AXON" ] || { echo "axon binary missing: $AXON" >&2; exit 1; }
 
 VERSION_OUTPUT=$("$AXON" --version)
-assert_contains "axon 1\." "$VERSION_OUTPUT" "--version prints a 1.x line"
+assert_contains "axon 1.2" "$VERSION_OUTPUT" "--version prints a 1.2 line"
 
 HELP_OUTPUT=$("$AXON" help 2>&1)
 assert_contains "axon capsule" "$HELP_OUTPUT" "help mentions capsule subcommand"
 assert_contains "axon web" "$HELP_OUTPUT" "help mentions web subcommand"
 assert_contains "axon lsp" "$HELP_OUTPUT" "help mentions lsp subcommand"
+assert_contains "axon watch" "$HELP_OUTPUT" "help mentions watch subcommand"
 
 LSP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 LSP_OUTPUT=$(printf 'Content-Length: %s\r\n\r\n%s' "${#LSP_INIT}" "$LSP_INIT" | "$AXON" lsp)
@@ -82,16 +86,43 @@ TS_FILES=$(printf '%s' "$TS_STATUS" | awk '/^Files:/ {print $2}')
 if command -v curl >/dev/null 2>&1; then
   WEB_PORT=$((17070 + ($$ % 1000)))
   WEB_LOG="${TMP_BASE}/axon-web.log"
-  ( cd "$TS_DIR" && "$AXON" web --port="${WEB_PORT}" >"$WEB_LOG" 2>&1 ) &
+  ( cd "$TS_DIR" && exec "$AXON" web --port="${WEB_PORT}" >"$WEB_LOG" 2>&1 ) &
   WEB_PID=$!
   sleep 1
   WEB_HTML=$(curl -fsS "http://127.0.0.1:${WEB_PORT}/" || true)
+  WEB_METRICS=$(curl -fsS "http://127.0.0.1:${WEB_PORT}/api/metrics" || true)
   kill "$WEB_PID" >/dev/null 2>&1 || true
   wait "$WEB_PID" >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
+    if ( cd "$TS_DIR" && "$AXON" status >/dev/null 2>&1 ); then
+      break
+    fi
+    sleep 0.1
+  done
   assert_contains "Axon Web" "$WEB_HTML" "web serves browser UI at /"
+  assert_contains "telemetry_enabled" "$WEB_METRICS" "web serves /api/metrics"
 else
   log "curl unavailable — skipping web HTTP smoke"
 fi
+
+# ── Watch mode: modified file reindexes; deleted file prunes ──────────────
+WATCH_DIR="${TMP_BASE}/watchtest"
+cp -r "${REPO_ROOT}/examples/ts-mini" "$WATCH_DIR"
+mkdir -p "$WATCH_DIR/.git" && echo "ref: refs/heads/main" > "$WATCH_DIR/.git/HEAD"
+( cd "$WATCH_DIR" && "$AXON" init >/dev/null && "$AXON" index >/dev/null 2>&1 || true )
+WATCH_LOG="${TMP_BASE}/axon-watch.log"
+"$AXON" watch "$WATCH_DIR" --interval-ms=200 --debounce-ms=100 >"$WATCH_LOG" 2>&1 &
+WATCH_PID=$!
+sleep 0.5
+printf '\nexport function watchedSymbol() { return 1; }\n' >> "$WATCH_DIR/src/util.ts"
+sleep 1
+rm -f "$WATCH_DIR/src/util.ts"
+sleep 1
+kill "$WATCH_PID" >/dev/null 2>&1 || true
+wait "$WATCH_PID" >/dev/null 2>&1 || true
+WATCH_STATUS=$( cd "$WATCH_DIR" && "$AXON" status )
+assert_contains "Files:" "$WATCH_STATUS" "watch leaves index readable after modify/delete"
+assert_contains "pruned" "$(cat "$WATCH_LOG" 2>/dev/null || true)" "watch prunes deleted file"
 
 # ── Capsule cache: miss → hit → no-cache ──────────────────────────────────
 # `axon capsule` needs an embedding model on the miss path. In CI we may
@@ -99,12 +130,23 @@ fi
 # to fail) and skip the cache section gracefully — the structural tests
 # above still validate the binary.
 HAS_MODEL=1
-if ! ( cd "$TS_DIR" && "$AXON" capsule "_probe_" >/dev/null 2>&1 ); then
-  if [ "${AXON_REQUIRE_MODEL:-0}" = "1" ]; then
-    fail "capsule probe failed and AXON_REQUIRE_MODEL=1 is set"
+set +e
+CAPSULE_PROBE_OUTPUT=$( cd "$TS_DIR" && "$AXON" capsule "_probe_" 2>&1 )
+CAPSULE_PROBE_STATUS=$?
+set -e
+if [ "$CAPSULE_PROBE_STATUS" -ne 0 ]; then
+  if [ "$CAPSULE_PROBE_STATUS" -eq 134 ] ||
+     printf '%s' "$CAPSULE_PROBE_OUTPUT" | grep -Eiq 'aborted|core dumped|trace/breakpoint trap|segmentation fault'; then
+    fail "capsule probe aborted instead of returning a controlled error:\n${CAPSULE_PROBE_OUTPUT}"
+  elif printf '%s' "$CAPSULE_PROBE_OUTPUT" | grep -qi 'embedding model'; then
+    if [ "${AXON_REQUIRE_MODEL:-0}" = "1" ]; then
+      fail "capsule probe failed because the embedding model is missing and AXON_REQUIRE_MODEL=1 is set"
+    else
+      log "embedding model unavailable — skipping capsule cache section"
+      HAS_MODEL=0
+    fi
   else
-    log "embedding model unavailable — skipping capsule cache section"
-    HAS_MODEL=0
+    fail "capsule probe failed for a non-model reason:\n${CAPSULE_PROBE_OUTPUT}"
   fi
 fi
 
