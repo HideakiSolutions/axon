@@ -53,8 +53,9 @@ std::string db_path_for_uri(const axon::mcp::ServerContext& ctx, const std::stri
     fs::path absolute = fs::weakly_canonical(uri_to_path(uri));
     std::error_code ec;
     fs::path rel = fs::relative(absolute, ctx.cfg.project_root, ec);
-    if (!ec && !rel.empty() && rel.native().rfind("..", 0) != 0)
-        return rel.generic_string();
+    std::string rel_text = rel.generic_string();
+    if (!ec && !rel_text.empty() && rel_text.rfind("..", 0) != 0)
+        return rel_text;
     return absolute.generic_string();
 }
 
