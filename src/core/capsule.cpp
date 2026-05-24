@@ -35,6 +35,10 @@ static std::optional<Language> lang_from_string(const std::string& s) {
     if (s == "kotlin")     return Language::Kotlin;
     if (s == "vue")        return Language::Vue;
     if (s == "lua")        return Language::Lua;
+    if (s == "nix")        return Language::Nix;
+    if (s == "ruby")       return Language::Ruby;
+    if (s == "swift")      return Language::Swift;
+    if (s == "scala")      return Language::Scala;
     return std::nullopt;
 }
 
@@ -358,6 +362,20 @@ ContextCapsule assemble_capsule(
                 cap.support_files.push_back(std::move(cf));
             }
             cap.token_estimate = tokens_used;
+        }
+        if (dialogue_budget > 0) {
+            auto hits = turns_for_files(db, model, query, pivot_ids, dialogue_budget);
+            for (const auto& h : hits) {
+                DialogueTurn dt;
+                dt.role           = h.turn.role;
+                dt.content        = h.turn.content;
+                dt.session_label  = h.session_label;
+                dt.thread_name    = h.thread_name;
+                dt.ts             = h.turn.ts;
+                dt.token_estimate = estimate_tokens(dt.content);
+                cap.token_estimate += dt.token_estimate;
+                cap.related_turns.push_back(std::move(dt));
+            }
         }
         return cap;
     }
