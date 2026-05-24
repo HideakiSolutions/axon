@@ -276,8 +276,8 @@ int main(int argc, char* argv[]) {
             auto t = fs::last_write_time(p, ec);
             auto s = fs::file_size(p, ec);
             return Stamp{
-                ec ? 0 : t.time_since_epoch().count(),
-                ec ? 0 : s
+                ec ? int64_t{0} : static_cast<int64_t>(t.time_since_epoch().count()),
+                ec ? uintmax_t{0} : s
             };
         };
         auto snapshot = [&]() {

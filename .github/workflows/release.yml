@@ -134,6 +134,12 @@ jobs:
           New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
           Copy-Item "build\axon.exe"                      "$stage\bin\axon.exe"
           Copy-Item "third_party\duckdb\lib\duckdb.dll"  "$stage\bin\duckdb.dll"
+          # Copy any runtime DLL emitted by llama.cpp / ggml / tree-sitter into bin
+          Get-ChildItem -Path "build" -Filter "*.dll" -Recurse |
+              Where-Object { $_.FullName -notmatch '\\CMakeFiles\\' } |
+              ForEach-Object {
+                  Copy-Item $_.FullName "$stage\bin\" -Force
+              }
           Copy-Item "README.md","LICENSE","CHANGELOG.md"  "$stage\"
           Copy-Item "scripts\install.ps1"                 "$stage\install.ps1"
           $stage | Out-File -Encoding ascii .stage-name
