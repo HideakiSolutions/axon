@@ -284,12 +284,27 @@ axon web --port=7070 --group=backend
 | `GET` | `/api/search?q=` | Full-text + semantic search |
 | `GET` | `/api/observations?q=&limit=` | List or semantic-search saved observations |
 | `GET` | `/api/capsule?q=&budget=&pivots=` | Assemble token-budget context capsule |
+| `GET` | `/api/metrics` | Telemetry aggregates when enabled; graph/cache metrics otherwise |
 | `GET` | `/api/threads` | List all conversation threads |
 | `GET` | `/api/threads/:id/sessions` | Sessions belonging to a thread |
 | `GET` | `/api/sessions/:id/turns` | Turns within a session |
 | `GET` | `/api/dialogue/search?q=&limit=&thread_id=` | Semantic search over turns |
 
 The built-in page renders the indexed graph directly from `/api/graph`. The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend can still consume the same API for the richer Sigma.js + Graphology experience.
+
+Telemetry is local and off by default. Enable it with `AXON_TELEMETRY=1` or `telemetry = true` in `.axon/config.toml`; events are stored in DuckDB and exposed through `/api/metrics`. Remote POST is attempted only when `AXON_TELEMETRY_ENDPOINT` is set, and failures are ignored.
+
+### Watch mode
+
+```bash
+axon watch [path] --interval-ms=1000 --debounce-ms=500
+```
+
+`watch` uses portable polling and calls the same incremental indexer as `axon index-paths`. Claude hooks remain the fastest path for Claude Code edits; watch mode covers external editors, git checkouts, generators, and manual deletes.
+
+### VS Code
+
+The release includes `axon-vscode-<version>.vsix`. Install it with VS Code's "Install from VSIX" command, then configure `axon.path` if the binary is not on `PATH`. The extension starts `axon lsp`, exposes `Axon: Index Workspace`, and opens the local explorer with `Axon: Open Web Explorer`.
 
 ---
 
@@ -320,7 +335,7 @@ Registry format (`~/.axon/registry.json`):
 
 ---
 
-## Supported languages (15)
+## Supported languages (18)
 
 | Language | Extensions |
 |----------|-----------|
@@ -339,6 +354,9 @@ Registry format (`~/.axon/registry.json`):
 | Vue | `.vue` (SFC with TS/JS sub-parse) |
 | Lua | `.lua` |
 | Nix | `.nix` (bindings, inherit, `import` edges) |
+| Ruby | `.rb` |
+| Swift | `.swift` |
+| Scala | `.scala`, `.sc` |
 
 ---
 
@@ -380,7 +398,7 @@ Download the pre-built binary for your platform from the [releases page](https:/
 
 ```bash
 # Example for Linux x86-64 (replace X.Y.Z with the latest version)
-VERSION=1.1.2
+VERSION=1.2.0
 curl -L -o axon.tar.gz \
   "https://github.com/HideakiSolutions/axon-releases/releases/download/v${VERSION}/axon-${VERSION}-linux-x64.tar.gz"
 tar xzf axon.tar.gz
@@ -409,14 +427,11 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j2
 ```
 
-> Use `-j2` maximum. Higher parallelism during the llama.cpp + 15 grammar compilation can lock up shared hosts. First build ~10–12 min; subsequent builds with `ccache` ~70% faster.
+> Use `-j2` maximum. Higher parallelism during the llama.cpp + 18 grammar compilation can lock up shared hosts. First build ~10–12 min; subsequent builds with `ccache` ~70% faster.
 
-#### 3. Set library path
+#### 3. Library path
 
-```bash
-export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
-# Add to ~/.bashrc or ~/.zshrc for persistence
-```
+Release tarballs are relocatable: Linux uses `$ORIGIN/../lib`, macOS uses `@executable_path/../lib`, and Windows ships `duckdb.dll` next to `axon.exe`. `LD_LIBRARY_PATH` is only needed for ad hoc source-tree runs when your local build cannot find `third_party/duckdb/lib`.
 
 #### 4. Embedding model (optional — enables semantic search)
 
@@ -534,7 +549,7 @@ src/
 │   ├── routes.hpp/cpp    # HTTP route detection for route_map / api_impact
 │   └── dialogue.hpp/cpp  # Dialogue Layer: threads/sessions/turns/anchors/digests
 ├── parser/
-│   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (15 langs)
+│   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (18 langs)
 └── mcp/
     ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 26 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
@@ -543,7 +558,7 @@ third_party/
 ├── duckdb/               # Pre-built shared library v1.2.2
 ├── llama.cpp/            # Submodule — inference engine for embeddings
 ├── tree-sitter/          # Core C API
-├── tree-sitter-{lang}/   # 15 language grammar submodules
+├── tree-sitter-{lang}/   # 18 language grammar submodules
 ├── blake3/               # Fast file hashing (incremental reindex)
 └── nlohmann-json/        # Header-only JSON
 ```
@@ -560,7 +575,7 @@ graph TD
     CLI[main.cpp CLI] --> IDX[Indexer]
     CLI --> MCP[MCP Server\nstdio JSON-RPC]
     CLI --> HTTP[HTTP Server\nREST API]
-    IDX --> PARSER[Parser\n15 languages via tree-sitter]
+    IDX --> PARSER[Parser\n18 languages via tree-sitter]
     IDX --> DB[(DuckDB\nfiles/symbols/edges/observations\nthreads/sessions/turns/anchors)]
     IDX --> EMB[Embeddings\nllama.cpp + nomic-embed]
     MCP --> CAPS[Capsule\nBFS + skeletonize]
@@ -614,7 +629,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | MCP protocol | ✅ | ❌ | ❌ | ❌ |
 | Multi-repo registry | ✅ | ❌ | ❌ | ❌ |
 | Graph visualization | ✅ (`axon web`) | ❌ | ❌ | ❌ |
-| 15 languages | ✅ | ✅ | ✅ | ✅ |
+| 18 languages | ✅ | ✅ | ✅ | ✅ |
 | Zero cloud dependency | ✅ | ❌ | ❌ | ❌ |
 
 ---
@@ -633,7 +648,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | Dialogue Layer | ✅ Done | Threads/sessions/turns/anchors/digests — native DuckDB + 768-dim embeddings |
 | Auto-anchor | ✅ Done | File path (regex) + symbol name (top-500 cache) detection on every `turn_add` |
 | Dialogue context in capsule | ✅ Done | `get_context_capsule` accepts `dialogue_budget`; returns `related_turns` |
-| File watcher (inotify/FSEvents) | 🔄 Planned | Reindex on edits outside Claude Code |
+| Portable watch mode | ✅ Done | `axon watch` polling reindexes edits outside Claude Code |
 | HNSW vector index (DuckDB VSS) | 🔄 Planned | Projects > 100k symbols |
 | Filtered tags in `search_memory` | 🔄 Planned | |
 | Capsule cache by query hash | 🔄 Planned | |

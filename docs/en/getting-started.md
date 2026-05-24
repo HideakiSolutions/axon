@@ -82,15 +82,11 @@ Expected output (last lines):
 [100%] Built target axon
 ```
 
-> **Why `-j2`?** The llama.cpp + 13 tree-sitter grammar compilation is memory-intensive. Higher parallelism can lock up shared development hosts. First build: ~10–12 min. Subsequent builds with ccache: ~3 min.
+> **Why `-j2`?** The llama.cpp + 18 tree-sitter grammar compilation is memory-intensive. Higher parallelism can lock up shared development hosts. First build: ~10–12 min. Subsequent builds with ccache: ~3 min.
 
-### Step 3 — Set library path
+### Step 3 — Library path
 
-```bash
-export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
-# Persist it:
-echo 'export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib' >> ~/.bashrc
-```
+Release packages are relocatable and should find bundled libraries automatically. For source-tree binaries, set `LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib` only if your shell cannot start `build/axon`.
 
 ### Step 4 — (Optional) Download embedding model
 
@@ -112,10 +108,7 @@ Add to `~/.claude.json`:
   "mcpServers": {
     "axon": {
       "command": "/path/to/axon/build/axon",
-      "args": ["serve"],
-      "env": {
-        "LD_LIBRARY_PATH": "/path/to/axon/third_party/duckdb/lib"
-      }
+      "args": ["serve"]
     }
   }
 }

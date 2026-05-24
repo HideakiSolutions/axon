@@ -69,14 +69,11 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j2
 ```
 
-> **Por que `-j2`?** A compilação do llama.cpp + 13 gramáticas do tree-sitter é intensiva em memória. Primeira build: ~10–12 min. Com ccache: ~3 min.
+> **Por que `-j2`?** A compilação do llama.cpp + 18 gramáticas do tree-sitter é intensiva em memória. Primeira build: ~10–12 min. Com ccache: ~3 min.
 
-### Passo 3 — Configurar library path
+### Passo 3 — Library path
 
-```bash
-export LD_LIBRARY_PATH=/caminho/para/axon/third_party/duckdb/lib
-echo 'export LD_LIBRARY_PATH=/caminho/para/axon/third_party/duckdb/lib' >> ~/.bashrc
-```
+Os pacotes de release são relocáveis e encontram as bibliotecas empacotadas automaticamente. Para binários rodando direto da árvore de código, use `LD_LIBRARY_PATH=/caminho/para/axon/third_party/duckdb/lib` apenas se o shell não conseguir iniciar `build/axon`.
 
 ### Passo 4 — (Opcional) Baixar modelo de embeddings
 
@@ -96,10 +93,7 @@ Adicionar ao `~/.claude.json`:
   "mcpServers": {
     "axon": {
       "command": "/caminho/para/axon/build/axon",
-      "args": ["serve"],
-      "env": {
-        "LD_LIBRARY_PATH": "/caminho/para/axon/third_party/duckdb/lib"
-      }
+      "args": ["serve"]
     }
   }
 }

@@ -86,7 +86,7 @@ sequenceDiagram
 DuckDB supports `FLOAT[768]` array columns natively, enabling cosine similarity queries without a separate vector store. Trade-off: heavier binary, but zero extra dependencies.
 
 **2. Tree-sitter for parsing (not regex)**
-Tree-sitter produces a proper CST that survives syntactically valid-but-unusual code. Regex-based import extraction breaks on multiline imports, comments inside import blocks, and language-specific edge cases. Trade-off: 13 grammar submodules add build complexity.
+Tree-sitter produces a proper CST that survives syntactically valid-but-unusual code. Regex-based import extraction breaks on multiline imports, comments inside import blocks, and language-specific edge cases. Trade-off: 18 grammar submodules add build complexity.
 
 **3. stdio MCP, Web/HTTP, and LSP**
 Claude Code's MCP transport is stdio JSON-RPC, browsers need HTTP, and editors speak LSP. Keeping three thin serving adapters over one DuckDB graph avoids duplicating indexing logic. Trade-off: three protocol surfaces to keep compatible.
@@ -109,7 +109,7 @@ The parser emits one `CallSite{caller, callee, line}` per `call_expression` AST 
 |-----------|--------|
 | DuckDB single-writer | Multi-repo aggregation opens secondaries in READ_ONLY |
 | llama.cpp CPU inference | Embedding 50k symbols takes ~60s on first index; incremental reindex is fast |
-| tree-sitter 13 grammars | First build ~10–12 min; ccache makes subsequent builds ~3 min |
+| tree-sitter 18 grammars | First build ~10–12 min; ccache makes subsequent builds ~3 min |
 | Callee resolution by name | `resolve_calls` matches callees by simple name lookup (no type inference) — overloaded callees may resolve to the wrong overload |
 | Noverlap sync | Skipped for graphs > 5000 nodes to prevent UI freeze in axon-web |
 | Call graph requires `granularity = "symbol"` | Default is `"file"` for compatibility; opt-in via `.axon/config.toml` then `axon index --force` |

@@ -307,6 +307,7 @@ When running `axon web` or `axon serve --http`:
 | `GET` | `/api/search?q=<query>` | Search: `{files[], symbols[]}` |
 | `GET` | `/api/observations?q=<text>&limit=N` | List observations (semantic search if embeddings enabled) |
 | `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule |
+| `GET` | `/api/metrics` | Request/token/cache/cost aggregates when telemetry is enabled; graph/cache summary otherwise |
 | `POST` | `/api/detect-changes` | Detect changed symbols/files (body: `{ref?}`) |
 | `GET` | `/api/threads` | List all threads |
 | `GET` | `/api/threads/:id/sessions` | List sessions for a thread |
@@ -365,9 +366,12 @@ When running `axon web` or `axon serve --http`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LD_LIBRARY_PATH` | — | Must include path to `third_party/duckdb/lib` |
+| `LD_LIBRARY_PATH` | — | Only needed for source-tree runs if the binary cannot find DuckDB; release packages set RPATH/RUNPATH |
 | `AXON_EMBEDDING_MODEL` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
+| `AXON_TELEMETRY` | off | Opt into local telemetry with `1`, `true`, `yes`, or `on` |
+| `AXON_TELEMETRY_ENDPOINT` | — | Optional HTTP endpoint for best-effort remote telemetry POSTs |
+| `AXON_COST_PER_M_INPUT_USD` | `3.0` | Cost basis for `/api/metrics` estimated input cost |
 
 ---
 
@@ -386,6 +390,7 @@ When running `axon web` or `axon serve --http`:
 | `axon web --all` | Browser graph explorer over all registered repos |
 | `axon web --group=<name>` | Browser graph explorer over a named registry group |
 | `axon lsp` | Language Server Protocol stdio server for workspace symbols, document symbols, definitions, and references |
+| `axon watch [path] [--interval-ms=N] [--debounce-ms=N]` | Portable polling watcher for external edits; reindexes modified files and prunes deletions |
 | `axon status` | Show index summary for the current project |
 
 ### Project config (`.axon/config.toml`)
@@ -394,6 +399,7 @@ When running `axon web` or `axon serve --http`:
 granularity   = "symbol"   # "file" (default) | "symbol" — enables call graph extraction
 index_routes  = false      # enable HTTP route detection for route_map / api_impact
 fts_enabled   = true       # full-text search index over symbols
+telemetry     = false      # opt-in local telemetry; env AXON_TELEMETRY overrides
 ```
 
 ### Ignore patterns (`.axonignore`)
