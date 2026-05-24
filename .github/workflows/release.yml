@@ -42,7 +42,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build
+          sudo apt-get install -y cmake build-essential ninja-build patchelf
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
@@ -102,9 +102,14 @@ jobs:
           mkdir -p "${stage}/bin" "${stage}/lib"
           cp build/axon "${stage}/bin/axon"
           # Bundle llama.cpp shared libs (libllama, libggml*) from build output
-          find build/bin -name "lib*.so*" -o -name "lib*.dylib" 2>/dev/null | xargs -I{} cp {} "${stage}/lib/" || true
+          find build/bin \( -name "lib*.so*" -o -name "lib*.dylib" \) 2>/dev/null | xargs -I{} cp {} "${stage}/lib/" || true
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp third_party/duckdb/lib/libduckdb.so "${stage}/lib/"
+            # llama.cpp bakes the CI build path into RUNPATH; rewrite to $ORIGIN
+            # so the libs resolve their siblings on any host that extracts the tarball.
+            for lib in "${stage}/lib/"lib*.so*; do
+              [ -f "$lib" ] && [ ! -L "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" || true
+            done
           else
             cp third_party/duckdb/lib/libduckdb.dylib "${stage}/lib/"
             install_name_tool -id @rpath/libduckdb.dylib "${stage}/lib/libduckdb.dylib" || true
@@ -112,6 +117,20 @@ jobs:
               "$(pwd)/third_party/duckdb/lib/libduckdb.dylib" \
               "@rpath/libduckdb.dylib" \
               "${stage}/bin/axon" || true
+            # Rewrite each llama/ggml dylib to use @rpath identity and rewrite any
+            # absolute CI-host load paths into @rpath references so the package
+            # resolves siblings on any extraction target.
+            for dylib in "${stage}/lib/"lib*.dylib; do
+              [ -f "$dylib" ] && [ ! -L "$dylib" ] || continue
+              base="$(basename "$dylib")"
+              install_name_tool -id "@rpath/${base}" "$dylib" || true
+              otool -L "$dylib" | awk 'NR>1 {print $1}' | while read -r dep; do
+                case "$dep" in
+                  /home/runner/*|"$(pwd)"/*)
+                    install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$dylib" || true ;;
+                esac
+              done
+            done
           fi
           cp README.md LICENSE CHANGELOG.md "${stage}/"
           cp scripts/install.sh "${stage}/install.sh"
