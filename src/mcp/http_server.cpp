@@ -3,6 +3,7 @@
 #include "../core/registry.hpp"
 #include "../core/capsule.hpp"
 #include "../core/dialogue.hpp"
+#include "../core/telemetry.hpp"
 #include <nlohmann/json.hpp>
 #ifdef _WIN32
 #  include <winsock2.h>
@@ -18,6 +19,7 @@
 #  include <unistd.h>
 #endif
 #include <csignal>    // SIGINT, signal() — available on all platforms
+#include <chrono>
 #include <sstream>
 #include <iostream>
 
@@ -114,6 +116,7 @@ static std::string web_index_html() {
     button { cursor: pointer; }
     .toolbar { display: flex; gap: 8px; margin-left: auto; }
     .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
     .stat { border: 1px solid #263449; border-radius: 6px; padding: 9px; background: #111827; }
     .stat b { display: block; font-size: 18px; }
     .search { width: calc(100% - 22px); margin-bottom: 10px; }
@@ -145,6 +148,7 @@ static std::string web_index_html() {
         <div class="stat"><b id="edges">0</b><span>edges</span></div>
         <div class="stat"><b id="files">0</b><span>files</span></div>
       </div>
+      <div class="metrics" id="metrics"></div>
       <input id="filter" class="search" placeholder="Filter nodes">
       <div id="list" class="list"></div>
     </aside>
@@ -195,6 +199,31 @@ static std::string web_index_html() {
       list.innerHTML = nodes.slice(0, 120).map(n => `<div class="item"><strong>${escapeHtml(n.label || n.id)}</strong><span>${escapeHtml(n.path || n.kind || '')}</span></div>`).join('') || '<div class="empty">No nodes</div>';
     }
 
+    function metricCard(label, value) {
+      return `<div class="stat"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`;
+    }
+
+    async function loadMetrics() {
+      const data = await fetch('/api/metrics').then(r => r.json());
+      const el = document.getElementById('metrics');
+      if (data.telemetry_enabled) {
+        el.innerHTML = [
+          metricCard('requests', data.requests || 0),
+          metricCard('tokens sent', data.tokens_sent || 0),
+          metricCard('tokens saved', data.tokens_saved || 0),
+          metricCard('cache hit', Math.round((data.cache_hit_rate || 0) * 100) + '%')
+        ].join('');
+      } else {
+        const g = data.graph || {};
+        el.innerHTML = [
+          metricCard('symbols', g.symbols || 0),
+          metricCard('graph edges', g.edges || 0),
+          metricCard('bytes', g.bytes_indexed || 0),
+          metricCard('capsule tok', data.last_capsule_token_estimate || 0)
+        ].join('');
+      }
+    }
+
     async function load() {
       const suffix = mode.value === 'symbol' ? '?mode=symbol' : '';
       const data = await fetch('/api/graph' + suffix).then(r => r.json());
@@ -202,6 +231,7 @@ static std::string web_index_html() {
       document.getElementById('nodes').textContent = data.nodes?.length || 0;
       document.getElementById('edges').textContent = data.edges?.length || 0;
       document.getElementById('files').textContent = data.meta?.files || data.nodes?.length || 0;
+      loadMetrics().catch(() => {});
       render();
     }
     document.getElementById('refresh').onclick = load;
@@ -226,6 +256,11 @@ static std::string handle_request(const std::string& method, const std::string& 
 
     if (method == "GET" && (path == "/" || path == "/index.html")) {
         return web_index_html();
+    }
+
+    // GET /api/metrics
+    if (method == "GET" && path == "/api/metrics") {
+        return axon::metrics_json(ctx.cfg, ctx.db.get()).dump();
     }
 
     // GET /api/graph
@@ -748,10 +783,19 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             parse_request_line(request, method, path, query, body);
 
             std::string response_body;
+            auto start = std::chrono::steady_clock::now();
             if (method == "OPTIONS") {
                 response_body = "";
             } else {
                 response_body = handle_request(method, path, query, body, ctx, cfg);
+            }
+            if (path != "/api/metrics") {
+                int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count();
+                int64_t tokens = static_cast<int64_t>(response_body.size() / 4);
+                axon::record_telemetry(ctx.cfg, ctx.db.get(), {
+                    path, "http", latency_ms, tokens, tokens * 4, tokens * 3, false
+                });
             }
             std::string content_type = (path == "/" || path == "/index.html") ? "text/html" : "application/json";
             build_response(client_fd, 200, response_body, content_type);

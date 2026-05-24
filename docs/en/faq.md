@@ -50,7 +50,7 @@ In `.axon/index.duckdb` at the project root (detected via `.git` walk-up).
 Pass `token_budget` to `get_context_capsule`. Default is 8000 tokens.
 
 **Q: Can I configure which file extensions axon indexes?**
-Yes, via `.axon/config.toml`. See `index_routes`, `exclude_patterns`, and `extensions` keys.
+Not yet. Axon indexes the built-in supported extensions and uses `.axonignore` for path-level exclusions. `.axon/config.toml` currently supports `granularity`, `index_routes`, `fts_enabled`, `token_budget`, and `telemetry`.
 
 **Q: How do I add a project to a named group?**
 Edit `~/.axon/registry.json` directly, or use `axon serve --group=<name>` — axon will auto-register the current repo and associate it with the group.
@@ -60,7 +60,7 @@ Edit `~/.axon/registry.json` directly, or use `axon serve --group=<name>` — ax
 ## Troubleshooting
 
 **Q: `axon: error while loading shared libraries: libduckdb.so`**
-Set `LD_LIBRARY_PATH`:
+Release packages are relocatable and should not need `LD_LIBRARY_PATH`. For source-tree runs, set it manually:
 ```bash
 export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
 ```
@@ -72,10 +72,10 @@ git submodule update --init --recursive
 ```
 
 **Q: `search_memory` returns nothing**
-The embedding model is not loaded. Check that `models/nomic-embed-text-v1.5.Q4_K_M.gguf` exists and `AXON_MODEL_PATH` points to it.
+The embedding model is not loaded. Check that `models/nomic-embed-text-v1.5.Q4_K_M.gguf` exists and `AXON_EMBEDDING_MODEL` points to it when using a custom path.
 
 **Q: Claude Code shows axon as disconnected**
-1. Check `LD_LIBRARY_PATH` is set in the MCP `env` block in `~/.claude.json`
+1. If running from a source tree, check `LD_LIBRARY_PATH` is set in the MCP `env` block in `~/.claude.json`
 2. Run `axon serve` manually and check for errors
 3. Verify the binary path is correct
 

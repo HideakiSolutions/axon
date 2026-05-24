@@ -1,0 +1,95 @@
+{
+  "name": "axon-vscode",
+  "displayName": "Axon",
+  "description": "Axon language server and web explorer integration.",
+  "version": "1.2.0",
+  "publisher": "hideakisolutions",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HideakiSolutions/axon.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:axon.restartLanguageServer",
+    "onCommand:axon.openWebExplorer",
+    "onCommand:axon.indexWorkspace"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "typecheck": "tsc -p ./ --noEmit",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=dist/extension.js --sourcemap",
+    "compile": "npm run typecheck && npm run bundle",
+    "watch": "npm run bundle -- --watch",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --no-dependencies --out axon-vscode-1.2.0.vsix"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/vscode": "^1.92.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.5.4"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "Axon",
+      "properties": {
+        "axon.path": {
+          "type": "string",
+          "default": "axon",
+          "description": "Path to the axon executable."
+        },
+        "axon.projectRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Project root passed as the language server working directory. Defaults to the first workspace folder."
+        },
+        "axon.lspArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional arguments appended after `axon lsp`."
+        },
+        "axon.webPort": {
+          "type": "number",
+          "default": 7070,
+          "description": "Port used by Axon: Open Web Explorer."
+        },
+        "axon.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace communication with the Axon language server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "axon.restartLanguageServer",
+        "title": "Axon: Restart Language Server"
+      },
+      {
+        "command": "axon.openWebExplorer",
+        "title": "Axon: Open Web Explorer"
+      },
+      {
+        "command": "axon.indexWorkspace",
+        "title": "Axon: Index Workspace"
+      }
+    ]
+  }
+}

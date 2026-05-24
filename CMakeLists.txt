@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(axon VERSION 1.1.2 LANGUAGES C CXX ASM)
+project(axon VERSION 1.2.0 LANGUAGES C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +48,7 @@ endif()
 # be placed next to the executable.
 if(NOT WIN32)
     set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 endif()
 
 # ── tree-sitter core ─────────────────────────────────────────────────────────
@@ -165,6 +166,27 @@ add_library(ts_nix STATIC
 target_include_directories(ts_nix PUBLIC ${TS_INCLUDE}
     third_party/tree-sitter-nix/src)
 
+add_library(ts_ruby STATIC
+    third_party/tree-sitter-ruby/src/parser.c
+    third_party/tree-sitter-ruby/src/scanner.c
+)
+target_include_directories(ts_ruby PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-ruby/src)
+
+add_library(ts_swift STATIC
+    third_party/tree-sitter-swift-generated/src/parser.c
+    third_party/tree-sitter-swift-generated/src/scanner.c
+)
+target_include_directories(ts_swift PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-swift-generated/src)
+
+add_library(ts_scala STATIC
+    third_party/tree-sitter-scala/src/parser.c
+    third_party/tree-sitter-scala/src/scanner.c
+)
+target_include_directories(ts_scala PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-scala/src)
+
 # ── llama.cpp ────────────────────────────────────────────────────────────────
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -256,10 +278,25 @@ target_link_libraries(axon PRIVATE
     ts_vue
     ts_lua
     ts_nix
+    ts_ruby
+    ts_swift
+    ts_scala
     llama
     ggml
     blake3_lib
 )
+
+if(APPLE)
+    set_target_properties(axon PROPERTIES
+        BUILD_RPATH "@executable_path/../lib;${CMAKE_SOURCE_DIR}/third_party/duckdb/lib"
+        INSTALL_RPATH "@executable_path/../lib"
+    )
+elseif(NOT WIN32)
+    set_target_properties(axon PROPERTIES
+        BUILD_RPATH "$ORIGIN/../lib;${CMAKE_SOURCE_DIR}/third_party/duckdb/lib"
+        INSTALL_RPATH "$ORIGIN/../lib"
+    )
+endif()
 
 if(WIN32)
     target_link_libraries(axon PRIVATE ws2_32)

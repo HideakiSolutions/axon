@@ -1,7 +1,35 @@
 #include "db.hpp"
+#include <algorithm>
+#include <cctype>
 #include <iostream>
 
 namespace axon {
+
+bool is_database_lock_error(const std::string& message) {
+    std::string lower;
+    lower.reserve(message.size());
+    for (unsigned char ch : message)
+        lower.push_back(static_cast<char>(std::tolower(ch)));
+
+    return lower.find("conflicting lock") != std::string::npos ||
+           lower.find("could not set lock") != std::string::npos ||
+           lower.find("database is locked") != std::string::npos ||
+           lower.find("failed to create file lock") != std::string::npos ||
+           (lower.find("lock") != std::string::npos &&
+            lower.find("duckdb") != std::string::npos);
+}
+
+std::string database_open_error_message(const std::filesystem::path& db_path,
+                                        const std::exception& error) {
+    const std::string detail = error.what();
+    if (is_database_lock_error(detail)) {
+        return "DuckDB index is locked: " + db_path.string() + "\n"
+               "Another axon process, usually `axon serve` or `axon web`, is using this index. "
+               "Stop that process and retry.\n"
+               "DuckDB detail: " + detail;
+    }
+    return "Failed to open DuckDB index: " + db_path.string() + "\n" + detail;
+}
 
 Database::Database(const std::filesystem::path& db_path)
     : db_(db_path.string()), conn_(std::make_unique<duckdb::Connection>(db_))
@@ -90,6 +118,19 @@ void Database::run_migrations() {
          "  payload     VARCHAR NOT NULL,"
          "  created_at  TIMESTAMP NOT NULL DEFAULT now()"
          ")");
+
+    exec("CREATE TABLE IF NOT EXISTS telemetry_events ("
+         "  id                         BIGINT PRIMARY KEY,"
+         "  type                       VARCHAR NOT NULL,"
+         "  origin                     VARCHAR NOT NULL,"
+         "  created_at                 TIMESTAMP NOT NULL DEFAULT now(),"
+         "  latency_ms                 BIGINT NOT NULL DEFAULT 0,"
+         "  tokens_estimated           BIGINT NOT NULL DEFAULT 0,"
+         "  baseline_tokens_estimated  BIGINT NOT NULL DEFAULT 0,"
+         "  tokens_saved               BIGINT NOT NULL DEFAULT 0,"
+         "  cache_hit                  BOOLEAN NOT NULL DEFAULT false"
+         ")");
+    try { exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_created ON telemetry_events(created_at)"); } catch (...) {}
 
     // ── Dialogue Layer ────────────────────────────────────────────────────────
     // Structured conversation memory: Thread → Session → Turn, with automatic

@@ -6,6 +6,10 @@
 
 namespace axon {
 
+bool is_database_lock_error(const std::string& message);
+std::string database_open_error_message(const std::filesystem::path& db_path,
+                                        const std::exception& error);
+
 // Run query and return MaterializedQueryResult or throw
 inline duckdb::MaterializedQueryResult& require_ok(
     std::unique_ptr<duckdb::MaterializedQueryResult>& res,

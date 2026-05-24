@@ -20,6 +20,9 @@ extern "C" {
     TSLanguage* tree_sitter_vue();
     TSLanguage* tree_sitter_lua();
     TSLanguage* tree_sitter_nix();
+    TSLanguage* tree_sitter_ruby();
+    TSLanguage* tree_sitter_swift();
+    TSLanguage* tree_sitter_scala();
 }
 
 namespace axon {
@@ -41,6 +44,9 @@ static TSLanguage* get_ts_language(Language lang) {
         case Language::Vue:         return tree_sitter_vue();
         case Language::Lua:         return tree_sitter_lua();
         case Language::Nix:         return tree_sitter_nix();
+        case Language::Ruby:        return tree_sitter_ruby();
+        case Language::Swift:       return tree_sitter_swift();
+        case Language::Scala:       return tree_sitter_scala();
     }
     return nullptr;
 }
@@ -89,6 +95,8 @@ static void build_skeleton(TSNode node, const std::string& src,
                     kind == "function_item"        ||
                     kind == "method_definition"    ||
                     kind == "method_declaration"   ||
+                    kind == "method"               ||     // Ruby
+                    kind == "singleton_method"     ||     // Ruby
                     kind == "constructor_declaration" ||  // C#/Java
                     kind == "function_signature"   ||     // Dart
                     kind == "generator_function_declaration");
@@ -103,6 +111,14 @@ static void build_skeleton(TSNode node, const std::string& src,
                      kind == "class_definition"   ||
                      kind == "impl_item"          ||
                      kind == "struct_item"        ||
+                     kind == "struct_declaration" ||
+                     (lang == Language::Swift && kind == "struct") ||
+                     kind == "protocol_declaration" ||
+                     kind == "extension_declaration" ||
+                     kind == "module"             ||      // Ruby
+                     kind == "class"              ||      // Ruby
+                     kind == "object_definition"  ||
+                     kind == "trait_definition"   ||
                      kind == "interface_declaration" ||
                      kind == "enum_declaration");
 

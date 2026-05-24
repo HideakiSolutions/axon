@@ -1,9 +1,12 @@
 #include "server.hpp"
 #include "../mcp/protocol.hpp"
+#include "../core/indexer.hpp"
 #include "version.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -100,6 +103,51 @@ std::optional<json> symbol_at(const axon::mcp::ServerContext& ctx,
         "AND s.start_line <= " + std::to_string(line) + " "
         "AND s.end_line >= " + std::to_string(line) + " "
         "ORDER BY (s.end_line - s.start_line) ASC, s.id ASC LIMIT 1");
+    if (res->HasError() || res->RowCount() == 0) return std::nullopt;
+    return json{
+        {"id", res->GetValue<int64_t>(0, 0)},
+        {"name", res->GetValue(1, 0).ToString()},
+        {"kind", res->GetValue(2, 0).ToString()},
+        {"start_line", res->GetValue<int32_t>(3, 0)},
+        {"end_line", res->GetValue<int32_t>(4, 0)},
+        {"path", res->GetValue(5, 0).ToString()}
+    };
+}
+
+std::string word_at_position(const axon::mcp::ServerContext& ctx,
+                             const std::string& uri, int line_zero_based,
+                             int character_zero_based) {
+    fs::path path = uri_to_path(uri);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return "";
+    std::string line;
+    for (int i = 0; i <= line_zero_based && std::getline(in, line); i++) {
+        if (i != line_zero_based) continue;
+        int pos = std::max(0, std::min<int>(character_zero_based, static_cast<int>(line.size())));
+        auto is_word = [](unsigned char c) {
+            return std::isalnum(c) || c == '_' || c == '$';
+        };
+        int start = pos;
+        while (start > 0 && is_word(static_cast<unsigned char>(line[start - 1]))) start--;
+        int end = pos;
+        while (end < static_cast<int>(line.size()) && is_word(static_cast<unsigned char>(line[end]))) end++;
+        if (end <= start) return "";
+        return line.substr(start, end - start);
+    }
+    return "";
+}
+
+std::optional<json> symbol_named(const axon::mcp::ServerContext& ctx,
+                                 const std::string& uri,
+                                 const std::string& name) {
+    if (!ctx.db_ready() || name.empty()) return std::nullopt;
+    std::string fpath = sql_escape(db_path_for_uri(ctx, uri));
+    std::string escaped = sql_escape(name);
+    auto res = ctx.db->conn().Query(
+        "SELECT s.id, s.name, s.kind, s.start_line, s.end_line, f.path "
+        "FROM symbols s JOIN files f ON s.file_id = f.id "
+        "WHERE s.name = '" + escaped + "' "
+        "ORDER BY (f.path = '" + fpath + "') DESC, s.id ASC LIMIT 1");
     if (res->HasError() || res->RowCount() == 0) return std::nullopt;
     return json{
         {"id", res->GetValue<int64_t>(0, 0)},
@@ -210,7 +258,10 @@ json document_symbol(axon::mcp::ServerContext& ctx, const json& params) {
 json definition(axon::mcp::ServerContext& ctx, const json& params) {
     auto text_doc = params.value("textDocument", json::object());
     auto pos = params.value("position", json::object());
-    auto sym = symbol_at(ctx, text_doc.value("uri", ""), pos.value("line", 0));
+    std::string uri = text_doc.value("uri", "");
+    std::string word = word_at_position(ctx, uri, pos.value("line", 0), pos.value("character", 0));
+    auto sym = symbol_named(ctx, uri, word);
+    if (!sym) sym = symbol_at(ctx, uri, pos.value("line", 0));
     if (!sym) return nullptr;
     return location(ctx, sym->value("path", ""), sym->value("start_line", 1), sym->value("end_line", 1));
 }
@@ -218,15 +269,43 @@ json definition(axon::mcp::ServerContext& ctx, const json& params) {
 json references(axon::mcp::ServerContext& ctx, const json& params) {
     auto text_doc = params.value("textDocument", json::object());
     auto pos = params.value("position", json::object());
-    auto sym = symbol_at(ctx, text_doc.value("uri", ""), pos.value("line", 0));
+    std::string uri = text_doc.value("uri", "");
+    std::string word = word_at_position(ctx, uri, pos.value("line", 0), pos.value("character", 0));
+    auto sym = symbol_named(ctx, uri, word);
+    if (!sym) sym = symbol_at(ctx, uri, pos.value("line", 0));
     if (!sym || !ctx.db_ready()) return json::array();
 
     std::string name = sql_escape(sym->value("name", ""));
+    int64_t sym_id = sym->value("id", 0);
+    bool include_decl = params.value("context", json::object()).value("includeDeclaration", true);
+    json out = json::array();
+
+    if (include_decl) {
+        out.push_back(location(ctx, sym->value("path", ""),
+                               sym->value("start_line", 1),
+                               sym->value("end_line", 1)));
+    }
+
+    auto edge_res = ctx.db->conn().Query(
+        "SELECT f.path, s.start_line, s.end_line "
+        "FROM edges e "
+        "JOIN symbols s ON e.from_symbol = s.id "
+        "JOIN files f ON s.file_id = f.id "
+        "WHERE e.to_symbol = " + std::to_string(sym_id) + " "
+        "ORDER BY f.path, s.start_line LIMIT 100");
+    if (!edge_res->HasError() && edge_res->RowCount() > 0) {
+        for (duckdb::idx_t i = 0; i < edge_res->RowCount(); i++) {
+            out.push_back(location(ctx, edge_res->GetValue(0, i).ToString(),
+                                   edge_res->GetValue<int32_t>(1, i),
+                                   edge_res->GetValue<int32_t>(2, i)));
+        }
+        return out;
+    }
+
     auto res = ctx.db->conn().Query(
         "SELECT f.path, s.start_line, s.end_line "
         "FROM symbols s JOIN files f ON s.file_id = f.id "
         "WHERE s.name = '" + name + "' ORDER BY f.path, s.start_line LIMIT 100");
-    json out = json::array();
     if (res->HasError()) return out;
     for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
         out.push_back(location(ctx, res->GetValue(0, i).ToString(),
@@ -234,6 +313,29 @@ json references(axon::mcp::ServerContext& ctx, const json& params) {
                                res->GetValue<int32_t>(2, i)));
     }
     return out;
+}
+
+void handle_notification(axon::mcp::ServerContext& ctx, const json& req) {
+    std::string method = req.value("method", "");
+    if (method == "initialized" || method == "textDocument/didOpen" ||
+        method == "textDocument/didChange" || method == "textDocument/didClose") {
+        return;
+    }
+    if (method == "textDocument/didSave" && ctx.db_ready()) {
+        auto params = req.value("params", json::object());
+        auto doc = params.value("textDocument", json::object());
+        std::string uri = doc.value("uri", "");
+        if (uri.empty()) return;
+        try {
+            fs::path abs = uri_to_path(uri);
+            std::error_code ec;
+            fs::path rel = fs::relative(abs, ctx.cfg.project_root, ec);
+            if (ec || rel.empty() || rel.generic_string().rfind("..", 0) == 0) return;
+            auto stats = axon::index_files(ctx.cfg, *ctx.db, {rel}, false);
+            if (stats.files_indexed > 0)
+                ctx.graph = axon::load_graph(*ctx.db);
+        } catch (...) {}
+    }
 }
 
 json handle(axon::mcp::ServerContext& ctx, const json& req) {
@@ -245,6 +347,10 @@ json handle(axon::mcp::ServerContext& ctx, const json& req) {
         return axon::mcp::make_response(id, initialize_result());
     if (method == "shutdown")
         return axon::mcp::make_response(id, nullptr);
+    if (method == "initialized" || method == "textDocument/didOpen" ||
+        method == "textDocument/didChange" || method == "textDocument/didSave" ||
+        method == "textDocument/didClose")
+        return nullptr;
     if (method == "workspace/symbol")
         return axon::mcp::make_response(id, workspace_symbol(ctx, params));
     if (method == "textDocument/documentSymbol")
@@ -267,7 +373,10 @@ void run_stdio(axon::mcp::ServerContext& ctx) {
         std::string method = req.value("method", "");
         bool has_id = req.contains("id") && !req["id"].is_null();
         if (method == "exit") break;
-        if (!has_id) continue;
+        if (!has_id) {
+            handle_notification(ctx, req);
+            continue;
+        }
         write_message(handle(ctx, req));
     }
 }

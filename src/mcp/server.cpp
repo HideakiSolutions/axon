@@ -10,6 +10,7 @@
 #include "../core/git.hpp"
 #include "../core/routes.hpp"
 #include "../core/dialogue.hpp"
+#include "../core/telemetry.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -19,6 +20,7 @@
 #include <queue>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 
 namespace {
 inline std::string sql_escape(const std::string& s) {
@@ -546,6 +548,10 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 else if (ls == "kotlin")     lang = Language::Kotlin;
                 else if (ls == "vue")        lang = Language::Vue;
                 else if (ls == "lua")        lang = Language::Lua;
+                else if (ls == "nix")        lang = Language::Nix;
+                else if (ls == "ruby")       lang = Language::Ruby;
+                else if (ls == "swift")      lang = Language::Swift;
+                else if (ls == "scala")      lang = Language::Scala;
 
                 result.push_back({{"path", path}, {"skeleton", skeletonize(content, lang)}});
             }
@@ -1440,12 +1446,22 @@ void run_stdio(ServerContext& ctx) {
             auto params = req.value("params", json::object());
             std::string tool_name = params.value("name", "");
             json targs = params.value("arguments", json::object());
+            auto start = std::chrono::steady_clock::now();
             try {
                 response = make_response(id, handle_tool(tool_name, targs, ctx));
             } catch (const std::exception& e) {
                 response = make_response(id, make_tool_result(
                     {{"error", std::string(e.what())}}, true));
             }
+            int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            std::string body = response.dump();
+            int64_t tokens = static_cast<int64_t>(body.size() / 4);
+            bool cache_hit = body.find("\\\"cache\\\": \\\"hit\\\"") != std::string::npos ||
+                             body.find("\"cache\":\"hit\"") != std::string::npos;
+            axon::record_telemetry(ctx.cfg, ctx.db.get(), {
+                tool_name, "mcp", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit
+            });
         } else {
             response = make_error(id, METHOD_NOT_FOUND, "Method not found: " + method);
         }

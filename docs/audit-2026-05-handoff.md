@@ -21,7 +21,7 @@ Outcome: 4 dual-platform releases shipped, 53+ commits, 11 PRs merged, ~75 % of 
 | W2 — engine quick-wins | ✅ 5/5 | Capsule cache, `.axonignore` globbing, pending-writes cap, env-var overrides, `axon --version`. |
 | W3 — test foundation | 🟡 7/17 | GoogleTest+CTest foundation, 11 unit tests across Rust/Python/Java/Bash/Kotlin/TS/Go/C#/PHP/Dart/C++, e2e smoke harness wired into `build.yml`. Remaining tasks are deeper edge-case coverage with diminishing returns. |
 | W4 — CI/CD + hooks | ✅ 7/9 | build/release/lint/sanitizers/ci workflows live; structured hook logging via `_log.sh`; build-guard covers `cmake --parallel`. T08/T09 marked won't-fix-without-evidence. |
-| W5 — public packaging | ✅ 9/10 | Hardened `install.sh`, `CODE_OF_CONDUCT.md`, dependabot, multi-stage Dockerfile, dual-platform `release.yml`, examples. T06 telemetry HTTP client deferred (env-var plumbing landed). |
+| W5 — public packaging | ✅ 10/10 | Hardened `install.sh`, `CODE_OF_CONDUCT.md`, dependabot, multi-stage Dockerfile, release workflow, examples, and telemetry plumbing. |
 
 ## What remains (genuinely open)
 
@@ -34,7 +34,7 @@ Outcome: 4 dual-platform releases shipped, 53+ commits, 11 PRs merged, ~75 % of 
 
 ### Features — real gaps
 
-- **W5.T06** — telemetry HTTP client. `AXON_TELEMETRY` env var is plumbed end-to-end into `ProjectConfig.telemetry`; what's missing is the actual sender (`src/core/telemetry.{cpp,hpp}`), an endpoint URL contract, and `docs/{en,pt-br}/telemetry.md` describing the consent + payload model. Without an endpoint, the work is theoretical.
+- **W5.T06** — telemetry HTTP client landed in v1.2.0. Telemetry remains opt-in, stores local aggregates in DuckDB, exposes `/api/metrics`, and attempts remote POST only when `AXON_TELEMETRY_ENDPOINT` is set.
 - **Dart grammar bump** — vendored `tree-sitter-dart` doesn't emit `mixin_declaration`; the W1.T07 handler is correct but never fires. Submodule update or alternate node-kind handler.
 
 ### W6 roadmap — out of scope, separate effort

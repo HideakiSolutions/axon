@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-05-24
+
+### Added
+
+- `axon watch [path] [--interval-ms=N] [--debounce-ms=N]` portable polling watcher for external editor changes, generated files, git checkouts, and deletions.
+- Local opt-in telemetry stored in DuckDB via `AXON_TELEMETRY=1` or `telemetry = true`, with optional best-effort remote POST through `AXON_TELEMETRY_ENDPOINT`.
+- `GET /api/metrics` plus Axon Web metric cards. With telemetry off, the endpoint returns graph/cache summary; with telemetry on, it returns request, token, latency, cache, reduction, and cost aggregates.
+- VS Code extension under `editors/vscode`, including `axon lsp` client, restart/index/web commands, settings, TypeScript compile, and VSIX packaging.
+- Ruby, Swift, and Scala parser support. Supported language count is now 18.
+
+### Changed
+
+- Release packages are relocatable: Linux RUNPATH includes `$ORIGIN/../lib`, macOS uses `@executable_path/../lib`, and Windows keeps DLLs next to the executable.
+- `axon lsp` definition now resolves the word under cursor first; references use symbol-level call edges when available and fall back by name.
+- LSP notifications `initialized`, `didOpen`, `didChange`, `didSave`, and `didClose` are accepted; `didSave` reindexes the saved file when the DB is ready.
+- Release/build workflows compile the VS Code extension and attach `.vsix` artifacts; release smoke validates staged binaries run without `LD_LIBRARY_PATH`.
+
+### Fixed
+
+- Documentation now reflects 18 languages, `AXON_EMBEDDING_MODEL`, telemetry, `/api/metrics`, watch mode, VSIX installation, and package RPATH behavior.
+
 ## [1.1.2] — 2026-05-24
 
 ### Added

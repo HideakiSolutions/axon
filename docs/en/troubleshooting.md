@@ -46,7 +46,7 @@ cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j2
 make -j2
 ```
 
-The llama.cpp + 13 grammar compilation is memory-intensive. `-j2` is the safe maximum for shared hosts.
+The llama.cpp + 18 grammar compilation is memory-intensive. `-j2` is the safe maximum for shared hosts.
 
 ---
 
@@ -68,7 +68,7 @@ cmake .. -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_BUILD_TYPE=Release
 
 **Symptom:** Binary starts, immediately crashes with shared library error.
 
-**Fix:**
+**Fix:** release packages should find bundled libraries without `LD_LIBRARY_PATH` (`$ORIGIN/../lib` on Linux, `@executable_path/../lib` on macOS, DLL next to `axon.exe` on Windows). If you are running a source-tree binary directly, set:
 ```bash
 export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
 ```

@@ -25,17 +25,13 @@ protected:
     std::unique_ptr<axon::EmbeddingModel> model;
 
     void SetUp() override {
-        fs::path mp;
-        if (const char* env = std::getenv("AXON_EMBEDDING_MODEL")) {
-            mp = env;
-        } else {
-            // __FILE__ is .../tests/unit/test_semantic.cpp
-            // repo root is three levels up → models/ dir
-            mp = fs::path(__FILE__).parent_path()
-                     .parent_path().parent_path()
-                 / "models" / "nomic-embed-text-v1.5.Q4_K_M.gguf";
+        const char* env = std::getenv("AXON_EMBEDDING_MODEL");
+        if (!env || std::string(env).empty()) {
+            GTEST_SKIP() << "Set AXON_EMBEDDING_MODEL to a GGUF embedding model "
+                         << "to enable semantic tests";
         }
 
+        fs::path mp = env;
         if (!fs::exists(mp)) {
             GTEST_SKIP() << "Embedding model not found at " << mp.string()
                          << " — set AXON_EMBEDDING_MODEL to enable semantic tests";

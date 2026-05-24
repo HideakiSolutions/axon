@@ -78,6 +78,13 @@ jobs:
       - name: Build
         run: cmake --build build --target axon -j 2
 
+      - name: Build VS Code extension
+        if: runner.os == 'Linux'
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run package
+
       - name: Resolve version
         id: ver
         shell: bash   # explicit bash — runner default is pwsh on windows-2022
@@ -112,6 +119,12 @@ jobs:
           cp -r scripts/templates "${stage}/templates"
           echo "${stage}" > .stage-name
 
+      - name: Validate extracted package runs (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          stage="$(cat .stage-name)"
+          "${stage}/bin/axon" --version
+
       - name: Stage release tree (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -121,9 +134,22 @@ jobs:
           New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
           Copy-Item "build\axon.exe"                      "$stage\bin\axon.exe"
           Copy-Item "third_party\duckdb\lib\duckdb.dll"  "$stage\bin\duckdb.dll"
+          # Copy any runtime DLL emitted by llama.cpp / ggml / tree-sitter into bin
+          Get-ChildItem -Path "build" -Filter "*.dll" -Recurse |
+              Where-Object { $_.FullName -notmatch '\\CMakeFiles\\' } |
+              ForEach-Object {
+                  Copy-Item $_.FullName "$stage\bin\" -Force
+              }
           Copy-Item "README.md","LICENSE","CHANGELOG.md"  "$stage\"
           Copy-Item "scripts\install.ps1"                 "$stage\install.ps1"
           $stage | Out-File -Encoding ascii .stage-name
+
+      - name: Validate staged package runs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = Get-Content .stage-name -Raw | ForEach-Object { $_.Trim() }
+          & "$stage\bin\axon.exe" --version
 
       - name: Archive + checksum (Unix)
         if: runner.os != 'Windows'
@@ -131,6 +157,10 @@ jobs:
           stage="$(cat .stage-name)"
           tar czf "${stage}.tar.gz" "${stage}"
           shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+          if [ -f editors/vscode/*.vsix ]; then
+            cp editors/vscode/*.vsix .
+            shasum -a 256 *.vsix > axon-vscode.vsix.sha256
+          fi
 
       - name: Archive + checksum (Windows)
         if: runner.os == 'Windows'
@@ -150,6 +180,8 @@ jobs:
             axon-*-${{ matrix.target }}.tar.gz.sha256
             axon-*-${{ matrix.target }}.zip
             axon-*-${{ matrix.target }}.zip.sha256
+            *.vsix
+            *.vsix.sha256
 
   publish:
     name: Publish GitHub Release
@@ -209,5 +241,7 @@ jobs:
             dist/**/*.tar.gz.sha256
             dist/**/*.zip
             dist/**/*.zip.sha256
+            dist/**/*.vsix
+            dist/**/*.vsix.sha256
           fail_on_unmatched_files: true
           generate_release_notes: false
