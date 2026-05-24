@@ -13,7 +13,8 @@ flowchart TD
     A3[axon index --force] -->|reprocess unchanged files| A
     B --> C{How to serve?}
     C -->|stdio MCP| D[axon serve<br/>Claude Code MCP]
-    C -->|HTTP REST| E[axon serve --http<br/>axon-web frontend]
+    C -->|Web UI + HTTP REST| E[axon web<br/>browser graph explorer]
+    C -->|Language Server| L[axon lsp<br/>editor stdio LSP]
     E -->|--all flag| F[Aggregate all<br/>registered repos]
     E -->|--group=name| G[Aggregate<br/>named group]
     E -->|?mode=symbol| H[Symbol-level graph<br/>function/class/method nodes]
@@ -170,15 +171,12 @@ What would break if I change src/auth/token.ts?
 
 Claude will call `get_impact_graph` and `get_tests_for` automatically.
 
-### 5. (Optional) Open axon-web
+### 5. (Optional) Open Axon Web
 
 ```bash
-# Start HTTP server (in background)
-axon serve --http --port=7070 &
-
-# In axon-web directory:
-npm run dev
-# Open http://localhost:5173
+# Start browser graph explorer + REST API
+axon web --port=7070
+# Open http://localhost:7070
 ```
 
 ### 6. (Optional) Enable symbol-level granularity

@@ -85,6 +85,7 @@ target_link_libraries(test_objectives PRIVATE
     tree_sitter_lib
     ts_typescript ts_javascript ts_python ts_rust ts_go
     ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
+    ts_lua ts_nix
     blake3_lib
     duckdb_lib
     llama

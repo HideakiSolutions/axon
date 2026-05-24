@@ -96,6 +96,124 @@ static std::string url_decode(const std::string& s) {
     return out;
 }
 
+static std::string web_index_html() {
+    return R"HTML(<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Axon Web</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #0f172a; color: #e5e7eb; }
+    header { display: flex; align-items: center; gap: 16px; padding: 14px 18px; border-bottom: 1px solid #243044; background: #111827; }
+    h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    main { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; min-height: calc(100vh - 58px); }
+    aside { border-right: 1px solid #243044; padding: 14px; overflow: auto; }
+    input, select, button { border: 1px solid #334155; background: #172033; color: #e5e7eb; border-radius: 6px; padding: 8px 10px; }
+    button { cursor: pointer; }
+    .toolbar { display: flex; gap: 8px; margin-left: auto; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .stat { border: 1px solid #263449; border-radius: 6px; padding: 9px; background: #111827; }
+    .stat b { display: block; font-size: 18px; }
+    .search { width: calc(100% - 22px); margin-bottom: 10px; }
+    .list { display: grid; gap: 6px; }
+    .item { border: 1px solid #263449; border-radius: 6px; padding: 8px; background: #101827; }
+    .item strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+    .item span { color: #9ca3af; font-size: 12px; overflow-wrap: anywhere; }
+    .canvas { position: relative; overflow: hidden; background: #0b1020; }
+    svg { width: 100%; height: 100%; min-height: calc(100vh - 58px); display: block; }
+    line { stroke: #334155; stroke-width: 1; }
+    circle { fill: #38bdf8; stroke: #e5e7eb; stroke-width: 1; cursor: pointer; }
+    text { fill: #e5e7eb; font-size: 11px; paint-order: stroke; stroke: #0b1020; stroke-width: 3px; }
+    .empty { color: #9ca3af; padding: 14px; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid #243044; max-height: 42vh; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Axon Web</h1>
+    <div class="toolbar">
+      <select id="mode"><option value="file">Files</option><option value="symbol">Symbols</option></select>
+      <button id="refresh">Refresh</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="stats">
+        <div class="stat"><b id="nodes">0</b><span>nodes</span></div>
+        <div class="stat"><b id="edges">0</b><span>edges</span></div>
+        <div class="stat"><b id="files">0</b><span>files</span></div>
+      </div>
+      <input id="filter" class="search" placeholder="Filter nodes">
+      <div id="list" class="list"></div>
+    </aside>
+    <section class="canvas"><svg id="graph" role="img" aria-label="Axon dependency graph"></svg></section>
+  </main>
+  <script>
+    const graph = document.getElementById('graph');
+    const list = document.getElementById('list');
+    const mode = document.getElementById('mode');
+    const filter = document.getElementById('filter');
+    let current = { nodes: [], edges: [], meta: {} };
+
+    function point(i, n) {
+      const w = graph.clientWidth || 900, h = graph.clientHeight || 600;
+      const r = Math.max(80, Math.min(w, h) * 0.38);
+      const a = (Math.PI * 2 * i) / Math.max(n, 1);
+      return { x: w / 2 + Math.cos(a) * r, y: h / 2 + Math.sin(a) * r };
+    }
+
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+
+    function render() {
+      const q = filter.value.toLowerCase();
+      const nodes = current.nodes.filter(n => (n.label || n.id || '').toLowerCase().includes(q));
+      const ids = new Set(nodes.map(n => String(n.id)));
+      const pos = new Map(nodes.map((n, i) => [String(n.id), point(i, nodes.length)]));
+      graph.replaceChildren();
+      graph.setAttribute('viewBox', `0 0 ${graph.clientWidth || 900} ${graph.clientHeight || 600}`);
+      current.edges.filter(e => ids.has(String(e.source)) && ids.has(String(e.target))).forEach(e => {
+        const a = pos.get(String(e.source)), b = pos.get(String(e.target));
+        if (!a || !b) return;
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+        line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+        graph.appendChild(line);
+      });
+      nodes.forEach(n => {
+        const p = pos.get(String(n.id));
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); c.setAttribute('r', Math.max(4, Math.min(14, Number(n.size || 4) + 3)));
+        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('x', p.x + 10); t.setAttribute('y', p.y + 4); t.textContent = n.label || n.id;
+        g.append(c, t); graph.appendChild(g);
+      });
+      list.innerHTML = nodes.slice(0, 120).map(n => `<div class="item"><strong>${escapeHtml(n.label || n.id)}</strong><span>${escapeHtml(n.path || n.kind || '')}</span></div>`).join('') || '<div class="empty">No nodes</div>';
+    }
+
+    async function load() {
+      const suffix = mode.value === 'symbol' ? '?mode=symbol' : '';
+      const data = await fetch('/api/graph' + suffix).then(r => r.json());
+      current = data;
+      document.getElementById('nodes').textContent = data.nodes?.length || 0;
+      document.getElementById('edges').textContent = data.edges?.length || 0;
+      document.getElementById('files').textContent = data.meta?.files || data.nodes?.length || 0;
+      render();
+    }
+    document.getElementById('refresh').onclick = load;
+    mode.onchange = load;
+    filter.oninput = render;
+    addEventListener('resize', render);
+    load().catch(err => { list.innerHTML = `<div class="empty">${err.message}</div>`; });
+  </script>
+</body>
+</html>)HTML";
+}
+
 static std::string handle_request(const std::string& method, const std::string& path,
                                   const std::string& query, const std::string& body,
                                   ServerContext& ctx, const HttpConfig& cfg) {
@@ -105,6 +223,10 @@ static std::string handle_request(const std::string& method, const std::string& 
         for (char c : s) { if (c == '\'') out += '\''; out += c; }
         return out;
     };
+
+    if (method == "GET" && (path == "/" || path == "/index.html")) {
+        return web_index_html();
+    }
 
     // GET /api/graph
     if (method == "GET" && path == "/api/graph") {
@@ -604,7 +726,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
         return;
     }
     listen(server_fd, 16);
-    std::cout << "Axon HTTP API listening on http://" << cfg.host << ":" << cfg.port << "\n";
+    std::cout << "Axon Web listening on http://" << cfg.host << ":" << cfg.port << "\n";
     std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  /api/detect-changes  /api/observations  /api/capsule\n";
 
     while (g_running) {
@@ -631,7 +753,8 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             } else {
                 response_body = handle_request(method, path, query, body, ctx, cfg);
             }
-            build_response(client_fd, 200, response_body);
+            std::string content_type = (path == "/" || path == "/index.html") ? "text/html" : "application/json";
+            build_response(client_fd, 200, response_body, content_type);
         }
         close(client_fd);
     }

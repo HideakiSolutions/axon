@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-05-24
+
+### Added
+
+- `axon web` command: starts the native browser graph explorer at `/` and exposes the existing HTTP REST API, including `--all` and `--group=<name>` graph aggregation.
+- `axon lsp` command: starts a stdio Language Server Protocol server backed by the DuckDB index, with workspace symbols, document symbols, definitions, and references.
+
+### Fixed
+
+- `test_objectives` now links the Lua and Nix tree-sitter grammars required by `skeleton.cpp`, keeping the native CTest suite green after the language expansion.
+
 ## [1.1.1] — 2026-05-22
 
 ### Added
@@ -53,8 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Remove legacy local runtimes em `.hseos/` — agentes/skills/workflows do projeto agora delegam ao runtime global `enterprise-hseos`. Sem impacto em comportamento do binário; release cut para alinhar tag com working tree e disparar pipeline multi-OS (linux-x64, macos-arm64, windows-x64).
->>>>>>> origin/develop
-
 ## [0.5.11] — 2026-05-09
 
 ### Fixed

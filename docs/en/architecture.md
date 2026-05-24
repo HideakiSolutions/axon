@@ -2,7 +2,7 @@
 
 ## Overview
 
-Axon is a single C++20 binary with two serving modes: **stdio MCP** (JSON-RPC 2.0, consumed by Claude Code) and **HTTP REST** (consumed by axon-web). Both modes share the same DuckDB index built by the indexer.
+Axon is a single C++20 binary with three serving modes: **stdio MCP** (JSON-RPC 2.0, consumed by Claude Code), **Web/HTTP** (`axon web` browser graph explorer plus REST API), and **stdio LSP** (`axon lsp`, consumed by editors). All modes share the same DuckDB index built by the indexer.
 
 ## Components
 
@@ -23,7 +23,8 @@ Axon is a single C++20 binary with two serving modes: **stdio MCP** (JSON-RPC 2.
 | **Config** | Project root detection via `.git` walk-up | `src/core/config.*` |
 | **Dialogue** | Threads/sessions/turns/anchors/digests + auto-anchor + ADF | `src/core/dialogue.*` |
 | **MCP Server** | stdio JSON-RPC 2.0 loop + 26 tool handlers | `src/mcp/server.*` |
-| **HTTP Server** | REST API + multi-repo graph aggregation | `src/mcp/http_server.*` |
+| **HTTP Server** | Browser graph explorer, REST API, and multi-repo graph aggregation | `src/mcp/http_server.*` |
+| **LSP Server** | Language Server Protocol stdio loop for workspace/document symbols, definitions, and references | `src/lsp/server.*` |
 | **Protocol** | `make_response` / `make_error` / `make_tool_result` | `src/mcp/protocol.hpp` |
 
 ## Data Flow
@@ -87,8 +88,8 @@ DuckDB supports `FLOAT[768]` array columns natively, enabling cosine similarity 
 **2. Tree-sitter for parsing (not regex)**
 Tree-sitter produces a proper CST that survives syntactically valid-but-unusual code. Regex-based import extraction breaks on multiline imports, comments inside import blocks, and language-specific edge cases. Trade-off: 13 grammar submodules add build complexity.
 
-**3. stdio MCP (not HTTP-only)**
-Claude Code's MCP transport is stdio JSON-RPC. Adding HTTP was a secondary feature for the visual frontend. The stdio path is the primary integration point. Trade-off: two serving modes to maintain.
+**3. stdio MCP, Web/HTTP, and LSP**
+Claude Code's MCP transport is stdio JSON-RPC, browsers need HTTP, and editors speak LSP. Keeping three thin serving adapters over one DuckDB graph avoids duplicating indexing logic. Trade-off: three protocol surfaces to keep compatible.
 
 **4. 2-pass indexing (files then edges)**
 Files are inserted in pass 1 so that edge FKs (`from_file`, `to_file`) are always valid in pass 2. Alternative (single pass with deferred constraints) was messier to implement in DuckDB.

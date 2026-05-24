@@ -57,6 +57,12 @@ assert_contains "axon 1\." "$VERSION_OUTPUT" "--version prints a 1.x line"
 
 HELP_OUTPUT=$("$AXON" help 2>&1)
 assert_contains "axon capsule" "$HELP_OUTPUT" "help mentions capsule subcommand"
+assert_contains "axon web" "$HELP_OUTPUT" "help mentions web subcommand"
+assert_contains "axon lsp" "$HELP_OUTPUT" "help mentions lsp subcommand"
+
+LSP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+LSP_OUTPUT=$(printf 'Content-Length: %s\r\n\r\n%s' "${#LSP_INIT}" "$LSP_INIT" | "$AXON" lsp)
+assert_contains "axon-lsp" "$LSP_OUTPUT" "lsp initialize returns axon-lsp serverInfo"
 
 # ── Examples: ts-mini ──────────────────────────────────────────────────────
 # axon walks up looking for project markers (.git, Cargo.toml, etc.) — drop
@@ -72,6 +78,20 @@ TS_STATUS=$( cd "$TS_DIR" && "$AXON" status )
 assert_contains "Files:" "$TS_STATUS" "ts-mini status reports Files line"
 TS_FILES=$(printf '%s' "$TS_STATUS" | awk '/^Files:/ {print $2}')
 [ "$TS_FILES" -ge 4 ] && pass "ts-mini indexed >= 4 files (got $TS_FILES)" || fail "ts-mini indexed too few files: $TS_FILES"
+
+if command -v curl >/dev/null 2>&1; then
+  WEB_PORT=$((17070 + ($$ % 1000)))
+  WEB_LOG="${TMP_BASE}/axon-web.log"
+  ( cd "$TS_DIR" && "$AXON" web --port="${WEB_PORT}" >"$WEB_LOG" 2>&1 ) &
+  WEB_PID=$!
+  sleep 1
+  WEB_HTML=$(curl -fsS "http://127.0.0.1:${WEB_PORT}/" || true)
+  kill "$WEB_PID" >/dev/null 2>&1 || true
+  wait "$WEB_PID" >/dev/null 2>&1 || true
+  assert_contains "Axon Web" "$WEB_HTML" "web serves browser UI at /"
+else
+  log "curl unavailable — skipping web HTTP smoke"
+fi
 
 # ── Capsule cache: miss → hit → no-cache ──────────────────────────────────
 # `axon capsule` needs an embedding model on the miss path. In CI we may

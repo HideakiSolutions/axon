@@ -8,6 +8,7 @@
 #include "core/embeddings.hpp"
 #include "mcp/server.hpp"
 #include "mcp/http_server.hpp"
+#include "lsp/server.hpp"
 #include "version.hpp"
 #include <iostream>
 #include <string>
@@ -27,6 +28,9 @@ Usage:
                                         (--prune alone = only sweep deleted files)
   axon serve  [--http] [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
                                         Start MCP server (stdio default; --http for REST API)
+  axon web    [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
+                                        Start browser graph explorer + REST API
+  axon lsp                              Start Language Server Protocol server (stdio)
   axon capsule <query> [--no-cache]     Print context capsule for a query
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
@@ -41,6 +45,32 @@ static axon::Config load_config(const std::string& path_arg = "") {
     auto root = axon::find_project_root(start);
     if (!root) root = start;  // fallback: use given path as root
     return axon::make_config(*root);
+}
+
+static axon::mcp::ServerContext make_server_context(const char* binary_path, bool load_model = true) {
+    auto cfg = load_config();
+    axon::mcp::ServerContext ctx;
+    ctx.cfg = cfg;
+    ctx.binary_dir = fs::path(binary_path).parent_path();
+
+    axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
+
+    if (fs::exists(cfg.db_path)) {
+        try {
+            ctx.db = std::make_unique<axon::Database>(cfg.db_path);
+            ctx.graph = axon::load_graph(*ctx.db);
+            if (load_model) {
+                try {
+                    auto model_path = axon::find_model(ctx.binary_dir);
+                    ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
+                } catch (...) {}
+            }
+        } catch (const std::exception& e) {
+            ctx.db_error = e.what();
+        }
+    }
+
+    return ctx;
 }
 
 int main(int argc, char* argv[]) {
@@ -170,9 +200,9 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── axon serve ─────────────────────────────────────────────────────────
-    if (cmd == "serve") {
-        bool use_http = false;
+    // ── axon serve | axon web ──────────────────────────────────────────────
+    if (cmd == "serve" || cmd == "web") {
+        bool use_http = (cmd == "web");
         std::string http_host = "127.0.0.1";
         int http_port = 7070;
         std::string http_group;
@@ -187,26 +217,7 @@ int main(int argc, char* argv[]) {
             else if (a == "--all") http_all_repos = true;
         }
 
-        auto cfg = load_config();
-        axon::mcp::ServerContext ctx;
-        ctx.cfg = cfg;
-        ctx.binary_dir = fs::path(argv[0]).parent_path();
-
-        // Register this repo in the global registry
-        axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
-
-        if (fs::exists(cfg.db_path)) {
-            try {
-                ctx.db = std::make_unique<axon::Database>(cfg.db_path);
-                ctx.graph = axon::load_graph(*ctx.db);
-                try {
-                    auto model_path = axon::find_model(ctx.binary_dir);
-                    ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
-                } catch (...) {}
-            } catch (const std::exception& e) {
-                ctx.db_error = e.what();
-            }
-        }
+        auto ctx = make_server_context(argv[0]);
 
         if (use_http) {
             axon::mcp::HttpConfig http_cfg;
@@ -218,6 +229,13 @@ int main(int argc, char* argv[]) {
         } else {
             axon::mcp::run_stdio(ctx);
         }
+        return 0;
+    }
+
+    // ── axon lsp ───────────────────────────────────────────────────────────
+    if (cmd == "lsp") {
+        auto ctx = make_server_context(argv[0], false);
+        axon::lsp::run_stdio(ctx);
         return 0;
     }
 

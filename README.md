@@ -52,7 +52,7 @@ It integrates directly with Claude Code via MCP, responding to `get_context_caps
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
-Axon also ships an **HTTP mode** (`axon serve --http`) that exposes a REST API consumed by [axon-web](../axon-web), an interactive dependency graph visualizer built on Sigma.js + Graphology.
+Axon also ships a native **Web mode** (`axon web`) with a browser graph explorer at `/` plus the same REST API previously exposed by `axon serve --http`.
 
 ## What this does, in plain English
 
@@ -261,14 +261,17 @@ When `dialogue_budget=0` (the default), behavior is bit-for-bit identical to the
 Axon can expose a REST API instead of (or alongside) the MCP stdio protocol:
 
 ```bash
-# Single project
+# Browser UI + REST API for one project
+axon web --port=7070
+
+# REST API only, compatible with older axon-web frontends
 axon serve --http --port=7070
 
 # Aggregate all registered repos into one graph
-axon serve --http --port=7070 --all
+axon web --port=7070 --all
 
 # Specific group from registry
-axon serve --http --port=7070 --group=backend
+axon web --port=7070 --group=backend
 ```
 
 **REST endpoints:**
@@ -286,7 +289,7 @@ axon serve --http --port=7070 --group=backend
 | `GET` | `/api/sessions/:id/turns` | Turns within a session |
 | `GET` | `/api/dialogue/search?q=&limit=&thread_id=` | Semantic search over turns |
 
-The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend consumes this API to render an interactive force-directed graph with per-repo filtering, file tree navigation, impact analysis, memory index, and context capsule views (Axon Surgical Dark design system).
+The built-in page renders the indexed graph directly from `/api/graph`. The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend can still consume the same API for the richer Sigma.js + Graphology experience.
 
 ---
 
@@ -368,7 +371,7 @@ axon-setup /path/to/your-project
 
 ### Direct download (no Homebrew)
 
-Download the pre-built binary for your platform from the [releases page](https://github.com/HideakiSolutions/axon/releases/latest):
+Download the pre-built binary for your platform from the [releases page](https://github.com/HideakiSolutions/axon-releases/releases/latest):
 
 | Platform | File |
 |----------|------|
@@ -377,9 +380,9 @@ Download the pre-built binary for your platform from the [releases page](https:/
 
 ```bash
 # Example for Linux x86-64 (replace X.Y.Z with the latest version)
-VERSION=0.5.5
+VERSION=1.1.2
 curl -L -o axon.tar.gz \
-  "https://github.com/HideakiSolutions/axon/releases/download/v${VERSION}/axon-${VERSION}-linux-x64.tar.gz"
+  "https://github.com/HideakiSolutions/axon-releases/releases/download/v${VERSION}/axon-${VERSION}-linux-x64.tar.gz"
 tar xzf axon.tar.gz
 cd "axon-${VERSION}-linux-x64"
 ./install.sh /path/to/your-project
@@ -487,9 +490,9 @@ axon status
 # 3. Start MCP server (Claude Code connects automatically)
 axon serve
 
-# 4. (Optional) Start HTTP server + open axon-web
-axon serve --http --port=7070
-# Then open http://localhost:5173 with axon-web running
+# 4. (Optional) Start browser graph explorer + REST API
+axon web --port=7070
+# Then open http://localhost:7070
 ```
 
 ### Project config — symbol-level granularity
@@ -610,7 +613,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | Code-linked turn anchors | ✅ | ❌ | ❌ | ❌ |
 | MCP protocol | ✅ | ❌ | ❌ | ❌ |
 | Multi-repo registry | ✅ | ❌ | ❌ | ❌ |
-| Graph visualization | ✅ (axon-web) | ❌ | ❌ | ❌ |
+| Graph visualization | ✅ (`axon web`) | ❌ | ❌ | ❌ |
 | 15 languages | ✅ | ✅ | ✅ | ✅ |
 | Zero cloud dependency | ✅ | ❌ | ❌ | ❌ |
 
@@ -717,12 +720,12 @@ axon serve
 | `anchor_link` | Vincular manualmente um turn a um arquivo ou símbolo |
 | `dialogue_context` | Turns relacionados a arquivos ou query semântica |
 
-### Modo HTTP + axon-web
+### Modo Web
 
 ```bash
 # Agregar todos os repos registrados em um grafo
-axon serve --http --port=7070 --all
-# Abrir http://localhost:5173 (axon-web)
+axon web --port=7070 --all
+# Abrir http://localhost:7070
 ```
 
 ### Redução de tokens (exemplos reais)

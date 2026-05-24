@@ -13,7 +13,8 @@ flowchart TD
     A3[axon index --force] -->|reprocessa arquivos inalterados| A
     B --> C{Como servir?}
     C -->|stdio MCP| D[axon serve<br/>Claude Code MCP]
-    C -->|HTTP REST| E[axon serve --http<br/>frontend axon-web]
+    C -->|Web UI + HTTP REST| E[axon web<br/>explorador no navegador]
+    C -->|Language Server| L[axon lsp<br/>LSP stdio para editor]
     E -->|flag --all| F[Agrega todos os<br/>repos registrados]
     E -->|--group=nome| G[Agrega grupo<br/>nomeado]
     E -->|?mode=symbol| H[Grafo symbol-level<br/>nós são function/class/method]
@@ -117,6 +118,13 @@ axon status
 
 # 3. Iniciar o servidor MCP
 axon serve
+```
+
+### (Opcional) Abrir o Axon Web
+
+```bash
+axon web --port=7070
+# Abrir http://localhost:7070
 ```
 
 ### (Opcional) Habilitar granularidade symbol-level

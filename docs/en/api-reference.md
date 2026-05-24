@@ -296,7 +296,7 @@ Retrieve past turns related to files or a semantic query. Used to inject convers
 
 ## HTTP REST API
 
-When running `axon serve --http`:
+When running `axon web` or `axon serve --http`:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -382,6 +382,10 @@ When running `axon serve --http`:
 | `axon serve --http [--port=N] [--host=H]` | HTTP REST API server |
 | `axon serve --http --all` | Aggregate all registered repos into one HTTP graph |
 | `axon serve --http --group=<name>` | Aggregate a named group from `~/.axon/registry.json` |
+| `axon web [--port=N] [--host=H]` | Browser graph explorer plus HTTP REST API |
+| `axon web --all` | Browser graph explorer over all registered repos |
+| `axon web --group=<name>` | Browser graph explorer over a named registry group |
+| `axon lsp` | Language Server Protocol stdio server for workspace symbols, document symbols, definitions, and references |
 | `axon status` | Show index summary for the current project |
 
 ### Project config (`.axon/config.toml`)
