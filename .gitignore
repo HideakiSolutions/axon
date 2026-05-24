@@ -1,6 +1,7 @@
 build/
 models/*.gguf
 .axon/
+.worktrees/
 *.o
 *.a
 .DS_Store

@@ -96,6 +96,13 @@ jobs:
         # downloading on every PR — caught by AXON_REQUIRE_MODEL=0 default).
         run: bash tests/e2e/smoke.sh
 
+      - name: Build VS Code extension
+        if: runner.os == 'Linux'
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run package
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -103,4 +110,5 @@ jobs:
           path: |
             build/axon
             third_party/duckdb/lib/libduckdb.*
+            editors/vscode/*.vsix
           retention-days: 7
