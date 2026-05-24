@@ -76,7 +76,7 @@ jobs:
         run: cmake --build build --target axon -j 2
 
       - name: Build tests
-        run: cmake --build build --target test_parser_smoke -j 2
+        run: cmake --build build --target test_parser_smoke test_dialogue test_objectives test_semantic -j 2
 
       - name: Run unit tests
         # CTest aggregates every test registered via add_axon_test().
