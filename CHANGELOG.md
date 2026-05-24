@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-05-24
+
+### Fixed
+
+- Linux tarballs now ship `libllama.so.*` and `libggml*.so.*` with `RUNPATH=$ORIGIN`, so the bundled libs resolve their siblings on any extraction target. Previously the CI build path (`/home/runner/work/axon/...`) was baked into the libraries' runpath, which made `axon --version` fail with `libggml.so.0: cannot open shared object file` on every host except the runner.
+- macOS tarballs rewrite each `libllama`/`libggml` dylib to use `@rpath` as identity and load name, mirroring the existing `libduckdb.dylib` handling. Without this the same class of broken paths affected `.dylib` siblings.
+- `release.yml` Unix staging step fixes a precedence bug in `find -name X -o -name Y` (POSIX `-o` requires `\( ... \)` grouping) that quietly dropped the `*.so*` half of the glob.
+
 ## [1.2.0] — 2026-05-24
 
 ### Added
