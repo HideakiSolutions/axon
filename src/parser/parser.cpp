@@ -24,6 +24,9 @@ extern "C" {
     TSLanguage* tree_sitter_vue();
     TSLanguage* tree_sitter_lua();
     TSLanguage* tree_sitter_nix();
+    TSLanguage* tree_sitter_ruby();
+    TSLanguage* tree_sitter_swift();
+    TSLanguage* tree_sitter_scala();
 }
 
 namespace axon {
@@ -44,6 +47,9 @@ std::optional<Language> language_from_extension(const std::string& ext) {
     if (ext == "vue") return Language::Vue;
     if (ext == "lua") return Language::Lua;
     if (ext == "nix") return Language::Nix;
+    if (ext == "rb") return Language::Ruby;
+    if (ext == "swift") return Language::Swift;
+    if (ext == "scala" || ext == "sc") return Language::Scala;
     return std::nullopt;
 }
 
@@ -64,6 +70,9 @@ std::string language_name(Language lang) {
         case Language::Vue:         return "vue";
         case Language::Lua:         return "lua";
         case Language::Nix:         return "nix";
+        case Language::Ruby:        return "ruby";
+        case Language::Swift:       return "swift";
+        case Language::Scala:       return "scala";
     }
     return "unknown";
 }
@@ -97,6 +106,9 @@ static TSLanguage* get_ts_language(Language lang) {
         case Language::Vue:         return tree_sitter_vue();
         case Language::Lua:         return tree_sitter_lua();
         case Language::Nix:         return tree_sitter_nix();
+        case Language::Ruby:        return tree_sitter_ruby();
+        case Language::Swift:       return tree_sitter_swift();
+        case Language::Scala:       return tree_sitter_scala();
     }
     return nullptr;
 }
@@ -183,6 +195,7 @@ static bool is_call_kind(const std::string& kind) {
         "macro_invocation",         // Rust
         "function_call",            // Lua
         "apply_expression",         // Nix
+        "command",                  // Ruby
     };
     return kinds.count(kind) > 0;
 }
@@ -311,6 +324,26 @@ static inline void push_import_edge(TSNode node, const std::string& src,
     spec = spec.substr(a, b - a + 1);
     if (spec.empty()) return;
     imports.push_back({"", spec, "imports"});
+}
+
+static std::string first_string_literal(TSNode node, const std::string& src) {
+    std::string kind = ts_node_type(node);
+    if (kind == "string" || kind == "string_literal" ||
+        kind == "interpreted_string_literal") {
+        auto s = node_text(node, src);
+        while (s.size() >= 2 &&
+               (s.front() == '"' || s.front() == '\'' || s.front() == '`') &&
+               s.front() == s.back()) {
+            s = s.substr(1, s.size() - 2);
+        }
+        return s;
+    }
+    uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        auto s = first_string_literal(ts_node_child(node, i), src);
+        if (!s.empty()) return s;
+    }
+    return "";
 }
 
 static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
@@ -1348,6 +1381,95 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                     }
                 }
             }
+        }
+    }
+
+    // Ruby
+    if (ctx.lang == Language::Ruby) {
+        if (kind == "method" || kind == "singleton_method") {
+            sym.kind = "method";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "class") {
+            sym.kind = "class";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "module") {
+            sym.kind = "module";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "call" || kind == "command") {
+            std::string line = first_line(node, ctx.src);
+            if (line.rfind("require ", 0) == 0 || line.rfind("require_relative ", 0) == 0) {
+                auto spec = first_string_literal(node, ctx.src);
+                if (!spec.empty()) ctx.imports.push_back({"", spec, "imports"});
+            }
+        }
+    }
+
+    // Swift
+    if (ctx.lang == Language::Swift) {
+        if (kind == "function_declaration") {
+            sym.kind = "function";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "class_declaration" || kind == "struct_declaration" || kind == "struct" ||
+                   kind == "enum_declaration" || kind == "protocol_declaration") {
+            if (kind == "class_declaration") {
+                sym.kind = "class";
+                TSNode decl_kind = ts_node_child_by_field_name(node, "declaration_kind", 16);
+                if (!ts_node_is_null(decl_kind)) {
+                    std::string dk = node_text(decl_kind, ctx.src);
+                    if (dk == "struct") sym.kind = "struct";
+                    else if (dk == "actor") sym.kind = "actor";
+                }
+            }
+            else if (kind == "struct_declaration" || kind == "struct") sym.kind = "struct";
+            else if (kind == "enum_declaration") sym.kind = "enum";
+            else sym.kind = "protocol";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "extension_declaration") {
+            sym.kind = "extension";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            if (sym.name.empty()) sym.name = first_line(node, ctx.src).substr(0, 60);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "import_declaration") {
+            push_import_edge(node, ctx.src, ctx.imports);
+        }
+    }
+
+    // Scala
+    if (ctx.lang == Language::Scala) {
+        if (kind == "function_definition" || kind == "function_declaration") {
+            sym.kind = "function";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "class_definition" || kind == "object_definition" ||
+                   kind == "trait_definition") {
+            if (kind == "class_definition") sym.kind = "class";
+            else if (kind == "object_definition") sym.kind = "object";
+            else sym.kind = "trait";
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "import_declaration") {
+            push_import_edge(node, ctx.src, ctx.imports);
         }
     }
 

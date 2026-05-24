@@ -457,3 +457,81 @@ in
     EXPECT_TRUE(saw_pinned)  << "`import ./pinned.nix` did not produce import edge";
     EXPECT_TRUE(saw_channel) << "`import <nixpkgs>` did not strip angle brackets";
 }
+
+// ── Ruby ──────────────────────────────────────────────────────────────────
+TEST(ParserRuby, ModulesClassesMethodsRequire) {
+    auto p = write_temp("rb", R"RB(
+require "json"
+require_relative "support/user"
+
+module Billing
+  class Invoice
+    def total
+      42
+    end
+  end
+end
+)RB");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "module"));
+    EXPECT_TRUE(has_kind(pf->symbols, "class"));
+    EXPECT_TRUE(has_kind(pf->symbols, "method"));
+
+    bool saw_json = false, saw_support = false;
+    for (const auto& e : pf->imports) {
+        if (e.to_specifier == "json") saw_json = true;
+        if (e.to_specifier == "support/user") saw_support = true;
+    }
+    EXPECT_TRUE(saw_json);
+    EXPECT_TRUE(saw_support);
+}
+
+// ── Swift ─────────────────────────────────────────────────────────────────
+TEST(ParserSwift, StructProtocolClassFunctionImports) {
+    auto p = write_temp("swift", R"SWIFT(
+import Foundation
+
+protocol Payable { func pay() }
+struct Invoice { let id: String }
+class BillingService {
+  func total() -> Int { return 42 }
+}
+func makeInvoice() -> Invoice { Invoice(id: "1") }
+)SWIFT");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "protocol"));
+    EXPECT_TRUE(has_kind(pf->symbols, "struct"));
+    EXPECT_TRUE(has_kind(pf->symbols, "class"));
+    EXPECT_TRUE(has_kind(pf->symbols, "function"));
+    EXPECT_FALSE(pf->imports.empty());
+}
+
+// ── Scala ─────────────────────────────────────────────────────────────────
+TEST(ParserScala, TraitsObjectsClassesFunctionsImports) {
+    auto p = write_temp("scala", R"SCALA(
+import scala.concurrent.Future
+
+trait Repository { def find(id: String): String }
+class UserRepository extends Repository {
+  def find(id: String): String = id
+}
+object Main {
+  def run(): Unit = println("ok")
+}
+)SCALA");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "trait"));
+    EXPECT_TRUE(has_kind(pf->symbols, "class"));
+    EXPECT_TRUE(has_kind(pf->symbols, "object"));
+    EXPECT_TRUE(has_kind(pf->symbols, "function"));
+    EXPECT_FALSE(pf->imports.empty());
+}

@@ -6,7 +6,10 @@
 
 namespace axon {
 
-enum class Language { TypeScript, JavaScript, Python, Rust, Go, CSharp, PHP, Dart, Java, Bash, Cpp, Kotlin, Vue, Lua, Nix };
+enum class Language {
+    TypeScript, JavaScript, Python, Rust, Go, CSharp, PHP, Dart, Java, Bash,
+    Cpp, Kotlin, Vue, Lua, Nix, Ruby, Swift, Scala
+};
 
 std::optional<Language> language_from_extension(const std::string& ext);
 std::string language_name(Language lang);
