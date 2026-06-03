@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-06-03
+
+### Fixed
+
+- Windows `install.ps1` now parses under Windows PowerShell 5.1: the script is ASCII-only, so the host no longer corrupts em-dash/box-drawing characters by reading it as Windows-1252 and breaking the parser.
+- Removed an unused `jq` dependency check from the Windows installer; the PowerShell hooks use the native `ConvertFrom-Json`.
+- `install.ps1` resolves `axon.exe` with a layout-aware root (release-tarball vs source-tree) plus a PATH fallback, and honors `CLAUDE_CONFIG_DIR` when installing the global hooks.
+- `settings.json` hook paths are no longer double-escaped, and every hook is invoked with `-NoProfile`.
+- Generated PowerShell hooks emit the modern `hookSpecificOutput` envelope, matching the Unix hooks.
+- The Windows installer checks `$LASTEXITCODE` after indexing and fails loudly instead of printing a false `Indexed` when `axon.exe` cannot start (for example when the Visual C++ 2015-2022 Redistributable is missing), with a guided, CI-safe prompt to install it.
+
+### Changed
+
+- Release CI validates the Windows package from an isolated copy of `bin\` with a minimal PATH, so a package missing any bundled runtime DLL (`llama`/`ggml*`/`duckdb`) fails the build instead of shipping broken.
+
 ## [1.2.1] — 2026-05-24
 
 ### Fixed
