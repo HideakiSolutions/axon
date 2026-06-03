@@ -171,19 +171,38 @@ if (-not $env:AXON_EMBEDDING_MODEL -and -not (Test-Path $ModelPath)) {
 }
 
 # -- 6. Index the project ------------------------------------------------------
-if (Test-Path $AxonBin) {
-    # Proactive, non-blocking: the bundled axon.exe links the VC++ 2015-2022
-    # runtime (vcruntime140.dll). Warn early if the redistributable is absent,
-    # but still attempt indexing -- the reactive $LASTEXITCODE check below is
-    # the source of truth (registry detection can miss valid installs).
-    $vcInstalled = $false
+function Test-VCRedist {
+    # VC++ 2015-2022 x64 runtime presence via the canonical registry key.
+    # Never throws; $false is advisory (registry detection can miss valid installs).
     try {
-        $vcKey = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
-        $vcInstalled = ((Get-ItemProperty -Path $vcKey -ErrorAction Stop).Installed -eq 1)
-    } catch { }
-    if (-not $vcInstalled) {
-        Write-Host "[axon] WARN: Visual C++ 2015-2022 Redistributable (x64) not detected."
-        Write-Host "[axon]   axon.exe may fail to start. Install: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        $k = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+        return ((Get-ItemProperty -Path $k -ErrorAction Stop).Installed -eq 1)
+    } catch { return $false }
+}
+
+$VcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+if (Test-Path $AxonBin) {
+    # The bundled axon.exe links the VC++ 2015-2022 runtime (vcruntime140.dll);
+    # without it the process cannot start. Guide the user interactively, but in a
+    # non-interactive run (CI/pipe) only warn and let the reactive $LASTEXITCODE
+    # check below fail loudly. AXON_SKIP_VCREDIST=1 bypasses the check.
+    if ($env:AXON_SKIP_VCREDIST -ne "1" -and -not (Test-VCRedist)) {
+        $interactive = $false
+        try { $interactive = -not [System.Console]::IsInputRedirected } catch { $interactive = $false }
+        if ($interactive) {
+            Write-Host "[axon] Visual C++ 2015-2022 Redistributable (x64) not detected."
+            Write-Host "[axon] axon.exe needs it to run. Opening the download page: $VcRedistUrl"
+            try { Start-Process $VcRedistUrl | Out-Null } catch { }
+            while (-not (Test-VCRedist)) {
+                $ans = Read-Host "[axon] Install it, then press Enter to re-check (or type S to skip)"
+                if ($ans -match '^[Ss]') { break }
+            }
+            if (Test-VCRedist) { Write-Host "[axon] v VC++ Redistributable detected." }
+        } else {
+            Write-Host "[axon] WARN: Visual C++ 2015-2022 Redistributable (x64) not detected."
+            Write-Host "[axon]   axon.exe may fail to start. Install: $VcRedistUrl"
+        }
     }
 
     Write-Host "[axon] Indexing project (this may take a moment)..."
@@ -192,8 +211,9 @@ if (Test-Path $AxonBin) {
     if ($indexExit -ne 0) {
         Write-Host "[axon] ERROR: axon.exe index failed (exit $indexExit)."
         if ($indexExit -eq -1073741515 -or $indexExit -eq -1073741511 -or $indexExit -eq 53) {
-            Write-Host "[axon]   STATUS_DLL_NOT_FOUND -- missing Visual C++ 2015-2022 Redistributable (x64):"
-            Write-Host "[axon]   https://aka.ms/vs/17/release/vc_redist.x64.exe"
+            Write-Host "[axon]   STATUS_DLL_NOT_FOUND -- install the Visual C++ 2015-2022 Redistributable (x64):"
+            Write-Host "[axon]   $VcRedistUrl"
+            Write-Host "[axon]   then re-run this installer."
         }
         exit $indexExit
     }
