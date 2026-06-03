@@ -163,12 +163,26 @@ jobs:
           Copy-Item "scripts\install.ps1"                 "$stage\install.ps1"
           $stage | Out-File -Encoding ascii .stage-name
 
-      - name: Validate staged package runs (Windows)
+      - name: Validate staged package is self-contained (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $stage = Get-Content .stage-name -Raw | ForEach-Object { $_.Trim() }
-          & "$stage\bin\axon.exe" --version
+          $stage = (Get-Content .stage-name -Raw).Trim()
+          # Run axon.exe from an isolated copy of bin\ with a minimal PATH so its
+          # DLLs can only resolve from bin\ itself. A package missing any runtime
+          # DLL (including the transitive llama -> ggml chain) fails here instead
+          # of shipping broken. System32 stays reachable so the VC++ runtime
+          # (a documented user prerequisite, not bundled) still resolves.
+          $probe = Join-Path $env:RUNNER_TEMP "axon-probe"
+          if (Test-Path $probe) { Remove-Item $probe -Recurse -Force }
+          New-Item -ItemType Directory -Force $probe | Out-Null
+          Copy-Item "$stage\bin\*" $probe -Recurse -Force
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & "$probe\axon.exe" --version
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "[release] axon.exe is not self-contained (exit $LASTEXITCODE) -- a runtime DLL is missing from the staged bin folder"
+              exit 1
+          }
 
       - name: Archive + checksum (Unix)
         if: runner.os != 'Windows'
