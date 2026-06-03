@@ -172,8 +172,31 @@ if (-not $env:AXON_EMBEDDING_MODEL -and -not (Test-Path $ModelPath)) {
 
 # -- 6. Index the project ------------------------------------------------------
 if (Test-Path $AxonBin) {
+    # Proactive, non-blocking: the bundled axon.exe links the VC++ 2015-2022
+    # runtime (vcruntime140.dll). Warn early if the redistributable is absent,
+    # but still attempt indexing -- the reactive $LASTEXITCODE check below is
+    # the source of truth (registry detection can miss valid installs).
+    $vcInstalled = $false
+    try {
+        $vcKey = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+        $vcInstalled = ((Get-ItemProperty -Path $vcKey -ErrorAction Stop).Installed -eq 1)
+    } catch { }
+    if (-not $vcInstalled) {
+        Write-Host "[axon] WARN: Visual C++ 2015-2022 Redistributable (x64) not detected."
+        Write-Host "[axon]   axon.exe may fail to start. Install: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    }
+
     Write-Host "[axon] Indexing project (this may take a moment)..."
     & $AxonBin index $Project
+    $indexExit = $LASTEXITCODE
+    if ($indexExit -ne 0) {
+        Write-Host "[axon] ERROR: axon.exe index failed (exit $indexExit)."
+        if ($indexExit -eq -1073741515 -or $indexExit -eq -1073741511 -or $indexExit -eq 53) {
+            Write-Host "[axon]   STATUS_DLL_NOT_FOUND -- missing Visual C++ 2015-2022 Redistributable (x64):"
+            Write-Host "[axon]   https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        }
+        exit $indexExit
+    }
     Write-Host "[axon] v Indexed"
 } else {
     Write-Host "[axon] WARN: binary not found at $AxonBin -- index manually with: axon index $Project"
