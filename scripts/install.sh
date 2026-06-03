@@ -206,14 +206,14 @@ DEFAULT_MODEL_NAME="nomic-embed-text-v1.5.Q4_K_M.gguf"
 DEFAULT_MODEL_URL="${AXON_EMBEDDING_MODEL_URL:-https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/$DEFAULT_MODEL_NAME}"
 
 if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME" ]; then
-  do_download=0
-  if [ "${AXON_DOWNLOAD_MODEL:-}" = "1" ]; then
-    do_download=1
-  elif [ "${AXON_DOWNLOAD_MODEL:-}" = "0" ]; then
+  do_download=1
+  if [ "${AXON_DOWNLOAD_MODEL:-}" = "0" ]; then
     do_download=0
+  elif [ "${AXON_DOWNLOAD_MODEL:-}" = "1" ]; then
+    do_download=1
   elif [ -t 0 ]; then
-    read -r -p "[axon] Download embedding model (~150 MiB) to $MODEL_DIR? [y/N] " yn
-    [[ "$yn" =~ ^[Yy] ]] && do_download=1
+    read -r -p "[axon] Download embedding model (~150 MiB) to $MODEL_DIR? [Y/n] " yn
+    [[ "$yn" =~ ^[Nn] ]] && do_download=0
   fi
   if [ "$do_download" = 1 ]; then
     mkdir -p "$MODEL_DIR"
@@ -234,7 +234,7 @@ if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME"
     fi
     echo "[axon] ✓ Model: $MODEL_DIR/$DEFAULT_MODEL_NAME"
   else
-    echo "[axon] (skipped model download — set AXON_EMBEDDING_MODEL=<path> or AXON_DOWNLOAD_MODEL=1 later)"
+    echo "[axon] (skipped model download — set AXON_DOWNLOAD_MODEL=1 or AXON_EMBEDDING_MODEL=<path> to enable later)"
   fi
 fi
 
@@ -247,5 +247,26 @@ else
   echo "[axon] WARN: binary not found at $AXON_BIN — index manually with: axon index $PROJECT"
 fi
 
+# 7. Register the MCP server with Claude Code (out-of-the-box usability)
+AXON_BIN_ABS="$(realpath "$AXON_BIN" 2>/dev/null || echo "$AXON_BIN")"
+AXON_LIB_ABS="$(realpath "$AXON_LIB" 2>/dev/null || echo "$AXON_LIB")"
+MODEL_ABS=""
+if [ -n "${AXON_EMBEDDING_MODEL:-}" ]; then MODEL_ABS="$AXON_EMBEDDING_MODEL"
+elif [ -f "$MODEL_DIR/$DEFAULT_MODEL_NAME" ]; then MODEL_ABS="$MODEL_DIR/$DEFAULT_MODEL_NAME"; fi
+MCP_JSON=$(jq -n --arg cmd "$AXON_BIN_ABS" --arg lib "$AXON_LIB_ABS" --arg model "$MODEL_ABS" \
+  '{command:$cmd, args:["serve"], env:({LD_LIBRARY_PATH:$lib} + (if $model != "" then {AXON_EMBEDDING_MODEL:$model} else {} end))}')
+if command -v claude >/dev/null 2>&1; then
+  claude mcp remove axon -s user >/dev/null 2>&1 || true
+  if claude mcp add-json axon "$MCP_JSON" -s user >/dev/null 2>&1; then
+    echo "[axon] ✓ MCP server registered with Claude Code (user scope)"
+  else
+    echo "[axon] WARN: could not auto-register the MCP server. Add this to ~/.claude.json:"
+    echo "$MCP_JSON" | jq '{mcpServers:{axon:.}}'
+  fi
+else
+  echo "[axon] Claude CLI not on PATH. Add this to ~/.claude.json to enable axon in Claude Code:"
+  echo "$MCP_JSON" | jq '{mcpServers:{axon:.}}'
+fi
+
 echo ""
-echo "[axon] Install complete. Restart Claude Code to activate the hooks."
+echo "[axon] Install complete. MCP server registered. Restart Claude Code to activate the hooks."

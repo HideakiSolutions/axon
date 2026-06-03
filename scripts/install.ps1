@@ -153,12 +153,14 @@ $ModelUrl   = if ($env:AXON_EMBEDDING_MODEL_URL) { $env:AXON_EMBEDDING_MODEL_URL
               else { "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/$ModelName" }
 
 if (-not $env:AXON_EMBEDDING_MODEL -and -not (Test-Path $ModelPath)) {
-    $download = $false
-    if ($env:AXON_DOWNLOAD_MODEL -eq "1") {
+    $download = $true
+    if ($env:AXON_DOWNLOAD_MODEL -eq "0") {
+        $download = $false
+    } elseif ($env:AXON_DOWNLOAD_MODEL -eq "1") {
         $download = $true
-    } elseif ($env:AXON_DOWNLOAD_MODEL -ne "0") {
-        $ans = Read-Host "[axon] Download embedding model (~150 MiB) to $ModelDir? [y/N]"
-        if ($ans -match '^[Yy]') { $download = $true }
+    } else {
+        $ans = Read-Host "[axon] Download embedding model (~150 MiB) to $ModelDir? [Y/n]"
+        if ($ans -match '^[Nn]') { $download = $false }
     }
     if ($download) {
         New-Item -ItemType Directory -Force $ModelDir | Out-Null
@@ -166,7 +168,7 @@ if (-not $env:AXON_EMBEDDING_MODEL -and -not (Test-Path $ModelPath)) {
         Invoke-WebRequest -Uri $ModelUrl -OutFile $ModelPath -UseBasicParsing
         Write-Host "[axon] v Model: $ModelPath"
     } else {
-        Write-Host "[axon] (skipped model -- set AXON_EMBEDDING_MODEL=<path> or AXON_DOWNLOAD_MODEL=1 later)"
+        Write-Host "[axon] (skipped model -- set AXON_DOWNLOAD_MODEL=1 or AXON_EMBEDDING_MODEL=<path> to enable later)"
     }
 }
 
@@ -222,5 +224,25 @@ if (Test-Path $AxonBin) {
     Write-Host "[axon] WARN: binary not found at $AxonBin -- index manually with: axon index $Project"
 }
 
+# Register the MCP server with Claude Code (out-of-the-box usability)
+$modelForMcp = if ($env:AXON_EMBEDDING_MODEL) { $env:AXON_EMBEDDING_MODEL } elseif (Test-Path $ModelPath) { $ModelPath } else { "" }
+$mcpObj = @{ command = $AxonBin; args = @("serve") }
+if ($modelForMcp) { $mcpObj["env"] = @{ AXON_EMBEDDING_MODEL = $modelForMcp } }
+$mcpJson = $mcpObj | ConvertTo-Json -Depth 5 -Compress
+$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+if ($claudeCmd) {
+    & claude mcp remove axon -s user 2>$null | Out-Null
+    & claude mcp add-json axon $mcpJson -s user 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[axon] v MCP server registered with Claude Code (user scope)"
+    } else {
+        Write-Host "[axon] WARN: could not auto-register the MCP server. Add to ~/.claude.json manually:"
+        (@{ mcpServers = @{ axon = $mcpObj } } | ConvertTo-Json -Depth 6) | Write-Host
+    }
+} else {
+    Write-Host "[axon] Claude CLI not on PATH. Add this to ~/.claude.json to enable axon in Claude Code:"
+    (@{ mcpServers = @{ axon = $mcpObj } } | ConvertTo-Json -Depth 6) | Write-Host
+}
+
 Write-Host ""
-Write-Host "[axon] Install complete. Restart Claude Code to activate the hooks."
+Write-Host "[axon] Install complete. MCP server registered. Restart Claude Code to activate the hooks."
