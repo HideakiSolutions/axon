@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] — 2026-06-03
+
+### Added
+- `install.sh`/`install.ps1` register the `axon` MCP server with Claude Code automatically (`claude mcp add-json ... --scope user`), with a copy-paste fallback when the Claude CLI is not on PATH.
+
+### Changed
+- The embedding model is downloaded by default during install (opt out with `AXON_DOWNLOAD_MODEL=0`), so semantic search (`get_context_capsule`) works out of the box.
+- Release packages bundle a user-facing `README.md` (extract -> run installer) instead of the developer README.
+- Release publishes version-less asset aliases (`axon-<os>-x64.<ext>`) so `releases/latest/download/...` always resolves to the newest build.
+
 ## [1.2.2] — 2026-06-03
 
 ### Fixed

@@ -132,7 +132,8 @@ jobs:
               done
             done
           fi
-          cp README.md LICENSE CHANGELOG.md "${stage}/"
+          cp scripts/README.package.md "${stage}/README.md"
+          cp LICENSE CHANGELOG.md "${stage}/"
           cp scripts/install.sh "${stage}/install.sh"
           cp -r scripts/hooks "${stage}/hooks"
           cp -r scripts/templates "${stage}/templates"
@@ -159,7 +160,8 @@ jobs:
               ForEach-Object {
                   Copy-Item $_.FullName "$stage\bin\" -Force
               }
-          Copy-Item "README.md","LICENSE","CHANGELOG.md"  "$stage\"
+          Copy-Item "scripts\README.package.md" "$stage\README.md"
+          Copy-Item "LICENSE","CHANGELOG.md"  "$stage\"
           Copy-Item "scripts\install.ps1"                 "$stage\install.ps1"
           $stage | Out-File -Encoding ascii .stage-name
 
@@ -190,6 +192,8 @@ jobs:
           stage="$(cat .stage-name)"
           tar czf "${stage}.tar.gz" "${stage}"
           shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+          cp "${stage}.tar.gz" "axon-${{ matrix.target }}.tar.gz"
+          shasum -a 256 "axon-${{ matrix.target }}.tar.gz" > "axon-${{ matrix.target }}.tar.gz.sha256"
           if [ -f editors/vscode/*.vsix ]; then
             cp editors/vscode/*.vsix .
             shasum -a 256 *.vsix > axon-vscode.vsix.sha256
@@ -203,6 +207,10 @@ jobs:
           Compress-Archive -Path "$stage" -DestinationPath "$stage.zip"
           $hash = (Get-FileHash "$stage.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $stage.zip" | Out-File -Encoding ascii "$stage.zip.sha256"
+          $alias = "axon-${{ matrix.target }}.zip"
+          Copy-Item "$stage.zip" $alias
+          $aliasHash = (Get-FileHash $alias -Algorithm SHA256).Hash.ToLower()
+          "$aliasHash  $alias" | Out-File -Encoding ascii "$alias.sha256"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -211,8 +219,12 @@ jobs:
           path: |
             axon-*-${{ matrix.target }}.tar.gz
             axon-*-${{ matrix.target }}.tar.gz.sha256
+            axon-${{ matrix.target }}.tar.gz
+            axon-${{ matrix.target }}.tar.gz.sha256
             axon-*-${{ matrix.target }}.zip
             axon-*-${{ matrix.target }}.zip.sha256
+            axon-${{ matrix.target }}.zip
+            axon-${{ matrix.target }}.zip.sha256
             *.vsix
             *.vsix.sha256
 
