@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.4] — 2026-06-04
+
+### Fixed
+- `axon index <path>` / `axon init <path>` now anchor to the directory you pass instead of walking up to an ancestor that happens to contain a project marker (`.git`, `package.json`, `CMakeLists.txt`, ...). Previously, indexing a non-git folder under such an ancestor indexed the ancestor.
+- Silence llama.cpp/ggml INFO/WARN log chatter on stderr during embedding (the repeated "cannot decode batches with this context" note); real errors still print.
+
+### Changed
+- Installer prompts/README now state the embedding model is ~80 MB (was mislabeled ~150 MiB).
+
 ## [1.2.3] — 2026-06-03
 
 ### Added

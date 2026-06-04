@@ -159,7 +159,7 @@ if (-not $env:AXON_EMBEDDING_MODEL -and -not (Test-Path $ModelPath)) {
     } elseif ($env:AXON_DOWNLOAD_MODEL -eq "1") {
         $download = $true
     } else {
-        $ans = Read-Host "[axon] Download embedding model (~150 MiB) to $ModelDir? [Y/n]"
+        $ans = Read-Host "[axon] Download embedding model (~80 MiB) to $ModelDir? [Y/n]"
         if ($ans -match '^[Nn]') { $download = $false }
     }
     if ($download) {
