@@ -20,7 +20,7 @@ That is all. The installer:
 - installs the Claude Code hooks (Grep/Glob guard, build guard, auto-index, write-through);
 - writes `<project>/.claude/settings.json`;
 - indexes your project (creates `<project>/.axon/`);
-- downloads the embedding model (~150 MB, enables semantic search) - opt out with `AXON_DOWNLOAD_MODEL=0`;
+- downloads the embedding model (~80 MB, enables semantic search) - opt out with `AXON_DOWNLOAD_MODEL=0`;
 - registers the `axon` MCP server with Claude Code (`claude mcp add-json axon ... --scope user`).
 
 When it finishes, **restart Claude Code** to activate the hooks and the MCP server.
@@ -64,7 +64,7 @@ compilar nada - basta extrair e rodar o instalador.
 ```
 
 O instalador instala os hooks, escreve o `settings.json`, indexa o projeto, baixa
-o modelo de embeddings (~150 MB; opt-out `AXON_DOWNLOAD_MODEL=0`) e registra o
+o modelo de embeddings (~80 MB; opt-out `AXON_DOWNLOAD_MODEL=0`) e registra o
 servidor MCP no Claude Code. Ao terminar, **reinicie o Claude Code**.
 
 **Requisitos:** Linux/macOS precisa de `jq`, `git` e `curl`/`wget`; Windows precisa

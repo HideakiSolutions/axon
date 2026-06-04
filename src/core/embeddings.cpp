@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 
@@ -11,6 +12,13 @@ namespace axon {
 
 EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
     llama_backend_init();
+
+    // Silence llama.cpp/ggml INFO/WARN chatter on stderr (e.g. the repeated
+    // "cannot decode batches with this context" note during embedding). Keep
+    // real errors visible.
+    llama_log_set([](ggml_log_level level, const char* text, void* /*ud*/) {
+        if (level >= GGML_LOG_LEVEL_ERROR && text) fputs(text, stderr);
+    }, nullptr);
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = 0;

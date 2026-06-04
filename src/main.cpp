@@ -61,9 +61,20 @@ Usage:
 }
 
 static axon::Config load_config(const std::string& path_arg = "") {
-    fs::path start = path_arg.empty() ? fs::current_path() : fs::path(path_arg);
-    auto root = axon::find_project_root(start);
-    if (!root) root = start;  // fallback: use given path as root
+    std::optional<fs::path> root;
+    if (path_arg.empty()) {
+        // No-arg: run from cwd, walk up to a project marker (unchanged).
+        fs::path start = fs::current_path();
+        root = axon::find_project_root(start);
+        if (!root) root = start;
+    } else {
+        // Explicit path: that directory IS the root. Do NOT walk up — the
+        // upward marker search is only meaningful for the no-arg case. Without
+        // this, indexing a non-git dir whose ancestor happens to have a
+        // ROOT_MARKER (stray package.json/CMakeLists.txt, e.g. under /tmp)
+        // would index the ancestor instead of the dir the user asked for.
+        root = fs::weakly_canonical(fs::path(path_arg));
+    }
     return axon::make_config(*root);
 }
 

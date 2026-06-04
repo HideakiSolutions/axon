@@ -212,7 +212,7 @@ if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME"
   elif [ "${AXON_DOWNLOAD_MODEL:-}" = "1" ]; then
     do_download=1
   elif [ -t 0 ]; then
-    read -r -p "[axon] Download embedding model (~150 MiB) to $MODEL_DIR? [Y/n] " yn
+    read -r -p "[axon] Download embedding model (~80 MiB) to $MODEL_DIR? [Y/n] " yn
     [[ "$yn" =~ ^[Nn] ]] && do_download=0
   fi
   if [ "$do_download" = 1 ]; then
