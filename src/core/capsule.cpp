@@ -1,4 +1,5 @@
 #include "capsule.hpp"
+#include "compress.hpp"
 #include "skeleton.hpp"
 #include "dialogue.hpp"
 #include <blake3.h>
@@ -183,7 +184,8 @@ static ContextCapsule assemble_symbol_mode(
     Database& db,
     const DependencyGraph& graph,
     const fs::path& project_root,
-    int token_budget)
+    int token_budget,
+    CapsuleCompression compression)
 {
     ContextCapsule capsule;
     capsule.query       = query;
@@ -222,6 +224,15 @@ static ContextCapsule assemble_symbol_mode(
     const int pivot_per_symbol_cap   = std::max(150, token_budget / 16);
     const int support_per_symbol_cap = std::max(40, token_budget / 80);
 
+    // Query the file language once per render_file call when Body compression is
+    // enabled (avoids N+1 queries inside the per-symbol loop).
+    auto query_file_lang = [&](int64_t fid) -> std::optional<Language> {
+        auto lr = db.conn().Query(
+            "SELECT language FROM files WHERE id = " + std::to_string(fid));
+        if (lr->HasError() || lr->RowCount() == 0) return std::nullopt;
+        return lang_from_string(lr->GetValue(0, 0).ToString());
+    };
+
     auto render_file = [&](int64_t fid, const std::vector<SymbolRow>& syms,
                            int file_token_cap, int per_symbol_cap) -> CapsuleFile {
         CapsuleFile cf;
@@ -231,6 +242,11 @@ static ContextCapsule assemble_symbol_mode(
 
         auto abs = project_root / cf.path;
         std::string content = read_file(abs);
+
+        // Fetch language once per file when Body compression is on.
+        std::optional<Language> file_lang;
+        if (compression == CapsuleCompression::Body)
+            file_lang = query_file_lang(fid);
 
         std::ostringstream body;
         body << "// file: " << cf.path << "\n";
@@ -257,10 +273,14 @@ static ContextCapsule assemble_symbol_mode(
                 slice = extract_lines(content, s.start_line, s.end_line);
                 int slice_tokens = estimate_tokens(slice);
                 if (slice_tokens > body_budget) {
-                    // Truncate body and add ellipsis marker
-                    int max_chars = body_budget * 4;
-                    if ((int)slice.size() > max_chars) slice = slice.substr(0, max_chars);
-                    slice += "\n// … (truncated, body too large for budget)\n";
+                    // Site 1: compress_body when flag is on; blind substr otherwise.
+                    if (compression == CapsuleCompression::Body) {
+                        slice = compress_body(slice, file_lang, body_budget);
+                    } else {
+                        int max_chars = body_budget * 4;
+                        if ((int)slice.size() > max_chars) slice = slice.substr(0, max_chars);
+                        slice += "\n// … (truncated, body too large for budget)\n";
+                    }
                 }
             }
             body << entry.str() << slice;
@@ -306,7 +326,8 @@ ContextCapsule assemble_capsule(
     const DependencyGraph& graph,
     const fs::path& project_root,
     int token_budget,
-    int dialogue_budget)
+    int dialogue_budget,
+    CapsuleCompression compression)
 {
     // 1. Select pivots — preserves WHICH symbol matched (if query-driven)
     std::vector<PivotMatch> pivot_matches;
@@ -331,7 +352,8 @@ ContextCapsule assemble_capsule(
     // BFS via symbol_incoming kicks in only if symbol-level edges are populated;
     // otherwise depth-0 (pivot symbols only) still beats whole-file rendering.
     if (!pivot_matches.empty()) {
-        auto cap = assemble_symbol_mode(query, pivot_matches, db, graph, project_root, token_budget);
+        auto cap = assemble_symbol_mode(query, pivot_matches, db, graph, project_root,
+                                        token_budget, compression);
         // Augment with file-level support if symbol BFS produced little context
         if (cap.token_estimate < token_budget / 4 && graph.symbol_incoming.empty()) {
             // Fall back to file-level BFS for support — pivots stay symbol-rendered

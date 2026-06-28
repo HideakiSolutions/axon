@@ -46,6 +46,12 @@ endfunction()
 
 add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp)
 
+# Compress tests — pure function, no DuckDB or llama.cpp required.
+add_axon_test(test_compress
+    unit/test_compress.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
+)
+
 # Dialogue Layer tests require DuckDB (cannot use the parser-only axon_parser_objs target).
 add_executable(test_dialogue unit/test_dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
@@ -72,6 +78,7 @@ add_executable(test_objectives unit/test_objectives.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
     ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
     ${CMAKE_SOURCE_DIR}/src/core/git.cpp

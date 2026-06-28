@@ -69,6 +69,12 @@ ProjectConfig load_project_config(const fs::path& axon_dir) {
             try { pcfg.token_budget = std::stoi(val); } catch (...) {}
         } else if (key == "telemetry") {
             pcfg.telemetry = (val == "true");
+        } else if (key == "capsule_compression") {
+            // Remove surrounding quotes if present
+            if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
+                val = val.substr(1, val.size() - 2);
+            if (val == "off" || val == "body")
+                pcfg.capsule_compression = val;
         }
         // Unrecognized keys: ignored silently
     }

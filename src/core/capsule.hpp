@@ -2,6 +2,7 @@
 #include "db.hpp"
 #include "graph.hpp"
 #include "embeddings.hpp"
+#include "compress.hpp"
 #include "../parser/parser.hpp"
 #include <string>
 #include <vector>
@@ -46,7 +47,8 @@ ContextCapsule assemble_capsule(
     const DependencyGraph&       graph,
     const std::filesystem::path& project_root,
     int token_budget    = 8000,
-    int dialogue_budget = 0);   // 0 = disabled; >0 = pull anchored turns into capsule
+    int dialogue_budget = 0,    // 0 = disabled; >0 = pull anchored turns into capsule
+    CapsuleCompression  compression = CapsuleCompression::Off);  // Balde A opt-in
 
 // ── Cache primitives (W2.T01) ───────────────────────────────────────────────
 // Cache key = BLAKE3(query + "|" + token_budget + "|" + project_epoch),

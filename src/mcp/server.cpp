@@ -4,6 +4,7 @@
 #include "../core/registry.hpp"
 #include "../core/indexer.hpp"
 #include "../core/capsule.hpp"
+#include "../core/compress.hpp"
 #include "../core/skeleton.hpp"
 #include "../core/embeddings.hpp"
 #include "../core/rename.hpp"
@@ -43,13 +44,14 @@ static json tools_list() {
              {"paths",{{"type","array"},{"items",{{"type","string"}}}}},
              {"prune",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_context_capsule"},
-         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass. Set dialogue_budget>0 to include relevant conversation turns anchored to the pivot files."},
+         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass. Set dialogue_budget>0 to include relevant conversation turns anchored to the pivot files. Set compression=\"body\" to enable dense lossless-by-selection body compression (Balde A) instead of blind byte-truncation; default \"off\" is byte-identical to the previous behaviour."},
          {"inputSchema",{{"type","object"},{"properties",{
              {"query",{{"type","string"}}},
              {"pivot_files",{{"type","array"},{"items",{{"type","string"}}}}},
              {"token_budget",{{"type","integer"},{"default",8000}}},
              {"dialogue_budget",{{"type","integer"},{"default",0}}},
-             {"no_cache",{{"type","boolean"},{"default",false}}}}}}}},
+             {"no_cache",{{"type","boolean"},{"default",false}}},
+             {"compression",{{"type","string"},{"enum",{"off","body"}},{"description","\"off\" (default) = current behaviour; \"body\" = dense compression preserving declarations and control-flow, eliding the rest"}}}}}}}},
         {{"name","get_impact_graph"},
          {"description","Return files that depend on (or are depended on by) the given files."},
          {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
@@ -396,6 +398,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         if (args.contains("pivot_files"))
             for (const auto& p : args["pivot_files"]) pivots.push_back(p.get<std::string>());
 
+        // compression: caller arg wins; fall back to project config default.
+        std::string compression_str = args.value("compression",
+                                                 ctx.cfg.project_cfg.capsule_compression);
+        CapsuleCompression compression = compression_from_string(compression_str);
+
         // Cache lookup is keyed by (query, budget, project_epoch). Pivots are
         // intentionally NOT in the key — different pivot sets steer the
         // assembly but the same query/budget against the same epoch can
@@ -403,8 +410,12 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         // override pivots. When pivots are explicit, skip cache to avoid
         // returning a cache entry generated for the implicit-pivot path.
         // Dialogue budget also bypasses cache (turns change independently of code index).
+        // Body compression produces a different output than Off — bypass cache to
+        // avoid serving a non-compressed entry under a compressed request or vice versa.
         const std::string epoch = current_project_epoch(*ctx.db);
-        const bool eligible_for_cache = !no_cache && pivots.empty() && dialogue_budget == 0;
+        const bool eligible_for_cache = !no_cache && pivots.empty()
+                                        && dialogue_budget == 0
+                                        && compression == CapsuleCompression::Off;
         std::string cache_key;
         if (eligible_for_cache) {
             cache_key = compute_capsule_cache_key(query, budget, epoch);
@@ -434,7 +445,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model,
                                         ctx.graph, ctx.cfg.project_root, budget,
-                                        dialogue_budget);
+                                        dialogue_budget, compression);
 
         if (eligible_for_cache) {
             capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
