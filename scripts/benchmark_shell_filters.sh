@@ -28,6 +28,23 @@ estimate_tokens() {
   echo $(((bytes + 3) / 4))
 }
 
+now_ms() {
+  local value
+  value="$(date +%s%3N 2>/dev/null || true)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "$value"
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import time
+print(int(time.time() * 1000))
+PY
+    return
+  fi
+  echo "$(($(date +%s) * 1000))"
+}
+
 make_controlled_diff() {
   local file="$1"
   {
@@ -128,14 +145,25 @@ make_controlled_log() {
   echo "Jul 01 10:55:01 host app[500]: FATAL unable to open artifact store" >> "$file"
 }
 
+ensure_trace_min_tokens() {
+  local file="$1" min_tokens="$2" generator="$3"
+  local tokens=0
+  if [[ -s "$file" ]]; then
+    tokens="$(estimate_tokens "$file")"
+  fi
+  if [[ ! -s "$file" || "$tokens" -lt "$min_tokens" ]]; then
+    "$generator" "$file"
+  fi
+}
+
 prepare_traces() {
   diff_raw="$tmpdir/diff.raw"
   git diff -- . ':!third_party' ':!build' > "$diff_raw" || true
-  [[ -s "$diff_raw" ]] || make_controlled_diff "$diff_raw"
+  ensure_trace_min_tokens "$diff_raw" 1000 make_controlled_diff
 
   grep_raw="$tmpdir/grep.raw"
   rg -n "filter|compression|telemetry|artifact" src tests docs README.md > "$grep_raw" || true
-  [[ -s "$grep_raw" ]] || make_controlled_grep "$grep_raw"
+  ensure_trace_min_tokens "$grep_raw" 1000 make_controlled_grep
 
   json_raw="$tmpdir/json.raw"
   if [[ -f editors/vscode/package-lock.json ]]; then
@@ -143,6 +171,7 @@ prepare_traces() {
   else
     make_controlled_json "$json_raw"
   fi
+  ensure_trace_min_tokens "$json_raw" 1000 make_controlled_json
 
   tsc_raw="$tmpdir/tsc.raw"
   if [[ -f "${HOME:-}/.local/share/rtk/tee/1782438637_tsc.log" ]]; then
@@ -150,6 +179,7 @@ prepare_traces() {
   else
     make_controlled_tsc "$tsc_raw"
   fi
+  ensure_trace_min_tokens "$tsc_raw" 1000 make_controlled_tsc
 
   test_raw="$tmpdir/test.raw"
   if [[ -f "${HOME:-}/.local/share/rtk/tee/1782865275_test.log" ]]; then
@@ -157,12 +187,13 @@ prepare_traces() {
   else
     make_controlled_test "$test_raw"
   fi
+  ensure_trace_min_tokens "$test_raw" 1000 make_controlled_test
 
   package_raw="$tmpdir/package.raw"
   if [[ -d editors/vscode && "$(command -v npm || true)" ]]; then
     npm --prefix editors/vscode install --dry-run --ignore-scripts > "$package_raw" 2>&1 || true
   fi
-  [[ -s "$package_raw" ]] || make_controlled_package "$package_raw"
+  ensure_trace_min_tokens "$package_raw" 250 make_controlled_package
 
   lint_raw="$tmpdir/lint.raw"
   if command -v ruff >/dev/null 2>&1; then
@@ -170,11 +201,11 @@ prepare_traces() {
     for i in $(seq 1 80); do echo "import os  # unused $i" >> "$lint_fixture_path"; done
     ruff check --output-format=concise "$lint_fixture_path" > "$lint_raw" 2>&1 || true
   fi
-  [[ -s "$lint_raw" ]] || make_controlled_lint "$lint_raw"
+  ensure_trace_min_tokens "$lint_raw" 500 make_controlled_lint
 
   log_raw="$tmpdir/log.raw"
   journalctl -n 200 --no-pager > "$log_raw" 2>/dev/null || true
-  [[ -s "$log_raw" ]] || make_controlled_log "$log_raw"
+  ensure_trace_min_tokens "$log_raw" 500 make_controlled_log
 }
 
 run_rtk() {
@@ -223,9 +254,9 @@ run_case() {
   local axon_out="$case_dir/axon.txt"
   local axon_metrics="$case_dir/axon.metrics.json"
   local start end elapsed_ms
-  start="$(date +%s%3N)"
+  start="$(now_ms)"
   "$axon_bin" filter "$command" --budget="$budget" --metrics=json < "$raw" > "$axon_out" 2> "$axon_metrics"
-  end="$(date +%s%3N)"
+  end="$(now_ms)"
   elapsed_ms=$((end - start))
 
   local input_tokens output_tokens saved changed recoverable artifact_id
