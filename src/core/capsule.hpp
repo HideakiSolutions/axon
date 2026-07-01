@@ -12,6 +12,8 @@ namespace axon {
 
 struct CapsuleFile {
     std::string path;
+    std::string source_ref;
+    std::string expand_command;
     std::string content;
     bool        is_skeleton   = false;
     int         token_estimate = 0;
@@ -33,6 +35,10 @@ struct ContextCapsule {
     std::vector<DialogueTurn> related_turns;   // populated when dialogue_budget > 0
     int                      token_estimate = 0;
     int                      total_files    = 0;
+    int                      compression_input_tokens  = 0;
+    int                      compression_output_tokens = 0;
+    int                      compression_tokens_saved  = 0;
+    std::vector<std::string> ccr_artifact_ids;
 };
 
 inline int estimate_tokens(const std::string& s) {

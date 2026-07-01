@@ -22,7 +22,7 @@ Axon is a single C++20 binary with three serving modes: **stdio MCP** (JSON-RPC 
 | **DB** | DuckDB connection + schema + migrations | `src/core/db.*` |
 | **Config** | Project root detection via `.git` walk-up | `src/core/config.*` |
 | **Dialogue** | Threads/sessions/turns/anchors/digests + auto-anchor + ADF | `src/core/dialogue.*` |
-| **MCP Server** | stdio JSON-RPC 2.0 loop + 26 tool handlers | `src/mcp/server.*` |
+| **MCP Server** | stdio JSON-RPC 2.0 loop + 27 tool handlers | `src/mcp/server.*` |
 | **HTTP Server** | Browser graph explorer, REST API, and multi-repo graph aggregation | `src/mcp/http_server.*` |
 | **LSP Server** | Language Server Protocol stdio loop for workspace/document symbols, definitions, and references | `src/lsp/server.*` |
 | **Protocol** | `make_response` / `make_error` / `make_tool_result` | `src/mcp/protocol.hpp` |

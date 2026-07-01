@@ -1,4 +1,5 @@
 #include "capsule.hpp"
+#include "ccr.hpp"
 #include "compress.hpp"
 #include "skeleton.hpp"
 #include "dialogue.hpp"
@@ -148,6 +149,25 @@ struct SymbolRow {
     std::string docstring;
 };
 
+static std::string capsule_expand_command(const std::string& path, bool is_skeleton) {
+    std::string quoted_path = nlohmann::json(path).dump();
+    if (is_skeleton)
+        return "get_context_capsule {\"pivot_files\":[" + quoted_path + "],\"no_cache\":true}";
+    return "get_skeleton {\"files\":[" + quoted_path + "]}";
+}
+
+static std::string source_ref_for_symbols(const std::string& path,
+                                          const std::vector<SymbolRow>& syms) {
+    if (syms.empty()) return path;
+    int start = syms.front().start_line;
+    int end = syms.front().end_line;
+    for (const auto& s : syms) {
+        start = std::min(start, s.start_line);
+        end = std::max(end, s.end_line);
+    }
+    return path + ":" + std::to_string(start) + "-" + std::to_string(end);
+}
+
 static std::vector<SymbolRow> hydrate_symbols(Database& db, const std::vector<int64_t>& ids) {
     std::vector<SymbolRow> out;
     if (ids.empty()) return out;
@@ -233,12 +253,18 @@ static ContextCapsule assemble_symbol_mode(
         return lang_from_string(lr->GetValue(0, 0).ToString());
     };
 
+    int compression_input_tokens = 0;
+    int compression_output_tokens = 0;
+    std::vector<std::string> ccr_artifact_ids;
+
     auto render_file = [&](int64_t fid, const std::vector<SymbolRow>& syms,
                            int file_token_cap, int per_symbol_cap) -> CapsuleFile {
         CapsuleFile cf;
         auto path_it = graph.id_to_path.find(fid);
         if (path_it == graph.id_to_path.end()) return cf;
         cf.path = path_it->second;
+        cf.source_ref = source_ref_for_symbols(cf.path, syms);
+        cf.expand_command = capsule_expand_command(cf.path, false);
 
         auto abs = project_root / cf.path;
         std::string content = read_file(abs);
@@ -275,7 +301,28 @@ static ContextCapsule assemble_symbol_mode(
                 if (slice_tokens > body_budget) {
                     // Site 1: compress_body when flag is on; blind substr otherwise.
                     if (compression == CapsuleCompression::Body) {
-                        slice = compress_body(slice, file_lang, body_budget);
+                        std::string original_slice = slice;
+                        int before_tokens = estimate_tokens(slice);
+                        std::string compressed = compress_body(slice, file_lang, body_budget);
+                        int compressed_tokens = estimate_tokens(compressed);
+                        if (compressed_tokens < before_tokens) {
+                            std::string source_ref = cf.path + ":" +
+                                std::to_string(s.start_line) + "-" + std::to_string(s.end_line);
+                            std::string artifact_id = ccr_store_artifact(
+                                db, "capsule_body", source_ref, original_slice, before_tokens);
+                            std::string recoverable = artifact_id.empty()
+                                ? std::string{}
+                                : ccr_marker(artifact_id, before_tokens) + compressed;
+                            int recoverable_tokens = estimate_tokens(recoverable);
+                            if (!artifact_id.empty() && recoverable_tokens < before_tokens) {
+                                slice = std::move(recoverable);
+                                compression_output_tokens += recoverable_tokens;
+                                ccr_artifact_ids.push_back(std::move(artifact_id));
+                                compression_input_tokens += before_tokens;
+                            } else {
+                                slice = std::move(original_slice);
+                            }
+                        }
                     } else {
                         int max_chars = body_budget * 4;
                         if ((int)slice.size() > max_chars) slice = slice.substr(0, max_chars);
@@ -315,6 +362,11 @@ static ContextCapsule assemble_symbol_mode(
         capsule.support_files.push_back(std::move(cf));
     }
     capsule.token_estimate = tokens_used;
+    capsule.compression_input_tokens = compression_input_tokens;
+    capsule.compression_output_tokens = compression_output_tokens;
+    capsule.compression_tokens_saved =
+        std::max(0, compression_input_tokens - compression_output_tokens);
+    capsule.ccr_artifact_ids = std::move(ccr_artifact_ids);
     return capsule;
 }
 
@@ -377,6 +429,8 @@ ContextCapsule assemble_capsule(
                                         : content.substr(0, std::min(content.size(), size_t(300)));
                 CapsuleFile cf;
                 cf.path = node.path;
+                cf.source_ref = node.path;
+                cf.expand_command = capsule_expand_command(node.path, true);
                 cf.content = skel;
                 cf.is_skeleton = true;
                 cf.token_estimate = estimate_tokens(skel);
@@ -437,6 +491,8 @@ ContextCapsule assemble_capsule(
 
         CapsuleFile cf;
         cf.path           = node.path;
+        cf.source_ref     = node.path;
+        cf.expand_command = capsule_expand_command(node.path, !use_full);
         cf.content        = body;
         cf.is_skeleton    = !use_full;
         cf.token_estimate = estimate_tokens(body);
@@ -463,6 +519,8 @@ ContextCapsule assemble_capsule(
 
         CapsuleFile cf;
         cf.path           = node.path;
+        cf.source_ref     = node.path;
+        cf.expand_command = capsule_expand_command(node.path, true);
         cf.content        = skeleton;
         cf.is_skeleton    = true;
         cf.token_estimate = estimate_tokens(skeleton);
@@ -518,6 +576,8 @@ std::string blake3_hex(const std::string& in) {
 nlohmann::json capsule_file_to_json(const CapsuleFile& cf) {
     return nlohmann::json{
         {"path",           cf.path},
+        {"source_ref",     cf.source_ref},
+        {"expand_command", cf.expand_command},
         {"content",        cf.content},
         {"is_skeleton",    cf.is_skeleton},
         {"token_estimate", cf.token_estimate},
@@ -527,9 +587,15 @@ nlohmann::json capsule_file_to_json(const CapsuleFile& cf) {
 CapsuleFile capsule_file_from_json(const nlohmann::json& j) {
     CapsuleFile cf;
     cf.path           = j.value("path", "");
+    cf.source_ref     = j.value("source_ref", cf.path);
     cf.content        = j.value("content", "");
     cf.is_skeleton    = j.value("is_skeleton", true);
+    cf.expand_command = j.value("expand_command",
+                                capsule_expand_command(cf.path, cf.is_skeleton));
     cf.token_estimate = j.value("token_estimate", 0);
+    if (cf.source_ref.empty()) cf.source_ref = cf.path;
+    if (cf.expand_command.empty())
+        cf.expand_command = capsule_expand_command(cf.path, cf.is_skeleton);
     return cf;
 }
 
@@ -569,6 +635,12 @@ std::optional<ContextCapsule> capsule_cache_lookup(Database& db,
         cap.query          = j.value("query", "");
         cap.token_estimate = j.value("token_estimate", 0);
         cap.total_files    = j.value("total_files", 0);
+        cap.compression_input_tokens = j.value("compression_input_tokens", 0);
+        cap.compression_output_tokens = j.value("compression_output_tokens", 0);
+        cap.compression_tokens_saved = j.value("compression_tokens_saved", 0);
+        for (const auto& id : j.value("ccr_artifact_ids", nlohmann::json::array())) {
+            cap.ccr_artifact_ids.push_back(id.get<std::string>());
+        }
         for (const auto& pf : j.value("pivot_files", nlohmann::json::array())) {
             cap.pivot_files.push_back(capsule_file_from_json(pf));
         }
@@ -593,6 +665,10 @@ void capsule_cache_insert(Database& db,
         j["query"]          = capsule.query;
         j["token_estimate"] = capsule.token_estimate;
         j["total_files"]    = capsule.total_files;
+        j["compression_input_tokens"] = capsule.compression_input_tokens;
+        j["compression_output_tokens"] = capsule.compression_output_tokens;
+        j["compression_tokens_saved"] = capsule.compression_tokens_saved;
+        j["ccr_artifact_ids"] = capsule.ccr_artifact_ids;
         j["pivot_files"]    = nlohmann::json::array();
         j["support_files"]  = nlohmann::json::array();
         for (const auto& f : capsule.pivot_files)   j["pivot_files"].push_back(capsule_file_to_json(f));

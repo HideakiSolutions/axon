@@ -16,6 +16,7 @@ struct TelemetryEvent {
     int64_t baseline_tokens_estimated = 0;
     int64_t tokens_saved = 0;
     bool cache_hit = false;
+    std::string layer;
 };
 
 bool telemetry_enabled(const Config& cfg);

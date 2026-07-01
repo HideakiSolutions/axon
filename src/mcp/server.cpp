@@ -4,6 +4,7 @@
 #include "../core/registry.hpp"
 #include "../core/indexer.hpp"
 #include "../core/capsule.hpp"
+#include "../core/ccr.hpp"
 #include "../core/compress.hpp"
 #include "../core/skeleton.hpp"
 #include "../core/embeddings.hpp"
@@ -44,14 +45,14 @@ static json tools_list() {
              {"paths",{{"type","array"},{"items",{{"type","string"}}}}},
              {"prune",{{"type","boolean"},{"default",false}}}}}}}},
         {{"name","get_context_capsule"},
-         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass. Set dialogue_budget>0 to include relevant conversation turns anchored to the pivot files. Set compression=\"body\" to enable dense lossless-by-selection body compression (Balde A) instead of blind byte-truncation; default \"off\" is byte-identical to the previous behaviour."},
+         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass. Set dialogue_budget>0 to include relevant conversation turns anchored to the pivot files. Set compression=\"body\" to classify oversized bodies before lossy compression, pass through unsafe inputs, validate token savings, and report compression counters; default \"off\" is byte-identical to the previous behaviour."},
          {"inputSchema",{{"type","object"},{"properties",{
              {"query",{{"type","string"}}},
              {"pivot_files",{{"type","array"},{"items",{{"type","string"}}}}},
              {"token_budget",{{"type","integer"},{"default",8000}}},
              {"dialogue_budget",{{"type","integer"},{"default",0}}},
              {"no_cache",{{"type","boolean"},{"default",false}}},
-             {"compression",{{"type","string"},{"enum",{"off","body"}},{"description","\"off\" (default) = current behaviour; \"body\" = dense compression preserving declarations and control-flow, eliding the rest"}}}}}}}},
+             {"compression",{{"type","string"},{"enum",{"off","body"}},{"description","\"off\" (default) = current behaviour; \"body\" = type-aware compression preserving significant source lines and using safe passthrough when compression is unsafe or not beneficial"}}}}}}}},
         {{"name","get_impact_graph"},
          {"description","Return files that depend on (or are depended on by) the given files."},
          {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
@@ -164,7 +165,11 @@ static json tools_list() {
              {"query",{{"type","string"}}},
              {"file_paths",{{"type","array"},{"items",{{"type","string"}}}}},
              {"limit",{{"type","integer"},{"default",5}}},
-             {"thread_id",{{"type","integer"}}}}}}}}
+             {"thread_id",{{"type","integer"}}}}}}}},
+        {{"name","artifact_retrieve"},
+         {"description","Retrieve the original content for an Axon CCR artifact emitted by lossy compression."},
+         {"inputSchema",{{"type","object"},{"required",{"artifact_id"}},{"properties",{
+             {"artifact_id",{{"type","string"}}}}}}}}
     })}};
 }
 
@@ -422,10 +427,14 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             if (auto hit = capsule_cache_lookup(*ctx.db, cache_key, epoch)) {
                 json pf = json::array();
                 for (const auto& f : hit->pivot_files)
-                    pf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+                    pf.push_back({{"path",f.path},{"source_ref",f.source_ref},
+                                  {"expand_command",f.expand_command},
+                                  {"content",f.content},{"tokens",f.token_estimate}});
                 json sf = json::array();
                 for (const auto& f : hit->support_files)
-                    sf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+                    sf.push_back({{"path",f.path},{"source_ref",f.source_ref},
+                                  {"expand_command",f.expand_command},
+                                  {"content",f.content},{"tokens",f.token_estimate}});
                 return make_tool_result({
                     {"query", hit->query},
                     {"pivot_files", pf},
@@ -433,6 +442,12 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                     {"related_turns", json::array()},
                     {"token_estimate", hit->token_estimate},
                     {"total_files_indexed", hit->total_files},
+                    {"compression", {
+                        {"input_tokens", hit->compression_input_tokens},
+                        {"output_tokens", hit->compression_output_tokens},
+                        {"tokens_saved", hit->compression_tokens_saved}
+                    }},
+                    {"ccr_artifact_ids", hit->ccr_artifact_ids},
                     {"cache", "hit"}
                 });
             }
@@ -450,13 +465,27 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         if (eligible_for_cache) {
             capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
         }
+        if (capsule.compression_tokens_saved > 0) {
+            axon::record_telemetry(ctx.cfg, ctx.db.get(), {
+                "get_context_capsule.compression", "mcp", 0,
+                capsule.compression_output_tokens,
+                capsule.compression_input_tokens,
+                capsule.compression_tokens_saved,
+                false,
+                "compression"
+            });
+        }
 
         json pf = json::array();
         for (const auto& f : capsule.pivot_files)
-            pf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+            pf.push_back({{"path",f.path},{"source_ref",f.source_ref},
+                          {"expand_command",f.expand_command},
+                          {"content",f.content},{"tokens",f.token_estimate}});
         json sf = json::array();
         for (const auto& f : capsule.support_files)
-            sf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+            sf.push_back({{"path",f.path},{"source_ref",f.source_ref},
+                          {"expand_command",f.expand_command},
+                          {"content",f.content},{"tokens",f.token_estimate}});
         json rt = json::array();
         for (const auto& t : capsule.related_turns)
             rt.push_back({{"role",t.role},{"content",t.content},
@@ -470,6 +499,12 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"related_turns", rt},
             {"token_estimate", capsule.token_estimate},
             {"total_files_indexed", capsule.total_files},
+            {"compression", {
+                {"input_tokens", capsule.compression_input_tokens},
+                {"output_tokens", capsule.compression_output_tokens},
+                {"tokens_saved", capsule.compression_tokens_saved}
+            }},
+            {"ccr_artifact_ids", capsule.ccr_artifact_ids},
             {"cache", "miss"}
         });
     }
@@ -1313,6 +1348,25 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         return make_tool_result(result);
     }
 
+    if (name == "artifact_retrieve") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        std::string artifact_id = args.value("artifact_id", "");
+        if (artifact_id.empty())
+            return make_tool_result({{"error","artifact_id is required"}}, true);
+
+        auto artifact = ccr_retrieve_artifact(*ctx.db, artifact_id);
+        if (!artifact)
+            return make_tool_result({{"error","artifact not found"},{"artifact_id",artifact_id}}, true);
+
+        return make_tool_result({
+            {"artifact_id", artifact->artifact_id},
+            {"kind", artifact->kind},
+            {"source_ref", artifact->source_ref},
+            {"content", artifact->content},
+            {"token_estimate", artifact->token_estimate}
+        });
+    }
+
     return make_tool_result({{"error", "Unknown tool: " + name}}, true);
 }
 
@@ -1471,7 +1525,7 @@ void run_stdio(ServerContext& ctx) {
             bool cache_hit = body.find("\\\"cache\\\": \\\"hit\\\"") != std::string::npos ||
                              body.find("\"cache\":\"hit\"") != std::string::npos;
             axon::record_telemetry(ctx.cfg, ctx.db.get(), {
-                tool_name, "mcp", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit
+                tool_name, "mcp", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""
             });
         } else {
             response = make_error(id, METHOD_NOT_FOUND, "Method not found: " + method);

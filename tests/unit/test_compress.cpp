@@ -27,6 +27,46 @@ TEST(CompressionFromString, UnknownDefaultsOff) {
     EXPECT_EQ(axon::compression_from_string("unknown"), axon::CapsuleCompression::Off);
 }
 
+// ── classify_output: type-aware routing before lossy compression ─────────────
+
+TEST(ClassifyOutput, LanguageHintMeansSourceCode) {
+    std::string text = "plain words without obvious syntax\n";
+    EXPECT_EQ(axon::classify_output(text, axon::Language::Python),
+              axon::OutputKind::SourceCode);
+}
+
+TEST(ClassifyOutput, DetectsCoreTextShapes) {
+    EXPECT_EQ(axon::classify_output("{\"ok\":true}\n"), axon::OutputKind::Json);
+
+    std::string diff =
+        "diff --git a/a.cpp b/a.cpp\n"
+        "--- a/a.cpp\n"
+        "+++ b/a.cpp\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n";
+    EXPECT_EQ(axon::classify_output(diff), axon::OutputKind::Diff);
+
+    std::string log =
+        "2026-06-30T10:00:00Z INFO boot\n"
+        "2026-06-30T10:00:01Z WARN slow path\n";
+    EXPECT_EQ(axon::classify_output(log), axon::OutputKind::Log);
+
+    std::string md =
+        "# Title\n"
+        "## Section\n"
+        "body\n";
+    EXPECT_EQ(axon::classify_output(md), axon::OutputKind::Markdown);
+}
+
+TEST(ClassifyOutput, DetectsBinaryUnsafeStreams) {
+    std::string blob = "abc";
+    blob.push_back('\0');
+    blob += "def";
+    EXPECT_EQ(axon::classify_output(blob), axon::OutputKind::Binary);
+    EXPECT_EQ(axon::output_kind_to_string(axon::OutputKind::Binary), "binary");
+}
+
 // ── compress_body: small input passthrough ────────────────────────────────────
 
 TEST(CompressBody, SmallInputReturnedUnchanged) {
@@ -133,6 +173,28 @@ TEST(CompressBody, BinaryLikeBlobDoesNotThrow) {
         std::string r = axon::compress_body(blob, std::nullopt, 30);
         EXPECT_FALSE(r.empty());
     });
+}
+
+TEST(CompressBody, BinaryLikeBlobPassesThroughUnchanged) {
+    std::string blob = "prefix";
+    blob.push_back('\0');
+    blob += std::string(1200, 'x');
+    std::string r = axon::compress_body(blob, std::nullopt, 30);
+    EXPECT_EQ(r, blob) << "Unsafe byte streams must pass through without silent loss";
+}
+
+TEST(CompressBody, ImpossibleBudgetPassesThroughUnchanged) {
+    std::string src = make_large_cpp_function();
+    std::string r = axon::compress_body(src, axon::Language::Cpp, 0);
+    EXPECT_EQ(r, src);
+}
+
+TEST(CompressBody, LossyCompressionMustSaveTokens) {
+    std::string src = make_large_cpp_function();
+    std::string r = axon::compress_body(src, axon::Language::Cpp, 80);
+    if (r != src) {
+        EXPECT_LT(est_tokens(r), est_tokens(src));
+    }
 }
 
 TEST(CompressBody, EmptyInputReturnedEmpty) {

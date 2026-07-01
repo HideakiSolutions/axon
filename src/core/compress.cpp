@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstring>
 #include <cctype>
+#include <algorithm>
 
 namespace axon {
 
@@ -15,6 +16,132 @@ static inline int est_tokens(const std::string& s) {
 CapsuleCompression compression_from_string(const std::string& s) {
     if (s == "body") return CapsuleCompression::Body;
     return CapsuleCompression::Off;
+}
+
+std::string output_kind_to_string(OutputKind kind) {
+    switch (kind) {
+        case OutputKind::SourceCode: return "source_code";
+        case OutputKind::Json:       return "json";
+        case OutputKind::Diff:       return "diff";
+        case OutputKind::Log:        return "log";
+        case OutputKind::Markdown:   return "markdown";
+        case OutputKind::PlainText:  return "plain_text";
+        case OutputKind::Binary:     return "binary";
+    }
+    return "plain_text";
+}
+
+static std::string trim_copy(const std::string& s) {
+    size_t start = 0;
+    while (start < s.size() && std::isspace((unsigned char)s[start])) ++start;
+    size_t end = s.size();
+    while (end > start && std::isspace((unsigned char)s[end - 1])) --end;
+    return s.substr(start, end - start);
+}
+
+static std::vector<std::string> split_lines_keep_newline(const std::string& source) {
+    std::vector<std::string> lines;
+    lines.reserve(64);
+    size_t pos = 0;
+    while (pos < source.size()) {
+        size_t nl = source.find('\n', pos);
+        if (nl == std::string::npos) {
+            lines.push_back(source.substr(pos));
+            break;
+        }
+        lines.push_back(source.substr(pos, nl - pos + 1));
+        pos = nl + 1;
+    }
+    return lines;
+}
+
+static bool has_word_ci(const std::string& line, const char* word) {
+    std::string lower;
+    lower.reserve(line.size());
+    for (char c : line) lower += (char)std::tolower((unsigned char)c);
+    return lower.find(word) != std::string::npos;
+}
+
+static bool looks_like_timestamped_log(const std::string& line) {
+    if (line.size() >= 19 &&
+        std::isdigit((unsigned char)line[0]) &&
+        std::isdigit((unsigned char)line[1]) &&
+        std::isdigit((unsigned char)line[2]) &&
+        std::isdigit((unsigned char)line[3]) &&
+        line[4] == '-' && line[7] == '-' &&
+        (line[10] == 'T' || line[10] == ' ')) {
+        return true;
+    }
+    return line.size() >= 8 &&
+           std::isdigit((unsigned char)line[0]) &&
+           std::isdigit((unsigned char)line[1]) &&
+           line[2] == ':' &&
+           std::isdigit((unsigned char)line[3]) &&
+           std::isdigit((unsigned char)line[4]) &&
+           line[5] == ':';
+}
+
+OutputKind classify_output(const std::string& source,
+                           std::optional<Language> lang) {
+    if (source.empty()) return OutputKind::PlainText;
+    if (lang.has_value()) return OutputKind::SourceCode;
+
+    int control = 0;
+    int sampled = 0;
+    const int limit = std::min<int>((int)source.size(), 4096);
+    for (int i = 0; i < limit; ++i) {
+        unsigned char c = (unsigned char)source[(size_t)i];
+        if (c == '\0') return OutputKind::Binary;
+        if (c < 0x20 && c != '\n' && c != '\r' && c != '\t' && c != '\x1b')
+            ++control;
+        ++sampled;
+    }
+    if (sampled > 0 && control * 100 / sampled > 5) return OutputKind::Binary;
+
+    std::string trimmed = trim_copy(source);
+    if (!trimmed.empty()) {
+        char first = trimmed.front();
+        char last = trimmed.back();
+        if ((first == '{' && last == '}') || (first == '[' && last == ']'))
+            return OutputKind::Json;
+    }
+
+    auto lines = split_lines_keep_newline(source);
+    int diff_markers = 0;
+    int log_markers = 0;
+    int markdown_markers = 0;
+    int code_markers = 0;
+    int inspected = 0;
+    for (const auto& line : lines) {
+        if (inspected++ >= 80) break;
+        std::string t = trim_copy(line);
+        if (t.rfind("diff --git ", 0) == 0 || t.rfind("@@ ", 0) == 0 ||
+            t.rfind("+++", 0) == 0 || t.rfind("---", 0) == 0) {
+            ++diff_markers;
+        }
+        if (looks_like_timestamped_log(t) || has_word_ci(t, " error") ||
+            has_word_ci(t, "[error]") || has_word_ci(t, " warn") ||
+            has_word_ci(t, "[warn]") || has_word_ci(t, " info") ||
+            has_word_ci(t, "[info]")) {
+            ++log_markers;
+        }
+        if (t.rfind("# ", 0) == 0 || t.rfind("## ", 0) == 0 ||
+            t.rfind("```", 0) == 0 || t.rfind("- ", 0) == 0) {
+            ++markdown_markers;
+        }
+        if (t.rfind("def ", 0) == 0 || t.rfind("class ", 0) == 0 ||
+            t.rfind("function ", 0) == 0 || t.rfind("import ", 0) == 0 ||
+            t.rfind("#include ", 0) == 0 || t.find(") {") != std::string::npos ||
+            t.find(" => ") != std::string::npos || t.find("return ") != std::string::npos) {
+            ++code_markers;
+        }
+    }
+
+    if (diff_markers >= 2) return OutputKind::Diff;
+    if (log_markers >= 2) return OutputKind::Log;
+    if (code_markers >= 1) return OutputKind::SourceCode;
+    if (markdown_markers >= 2) return OutputKind::Markdown;
+    return OutputKind::PlainText;
 }
 
 // Replace invalid UTF-8 sequences with '?' — mirrors capsule.cpp's sanitize_utf8.
@@ -72,34 +199,9 @@ static bool is_significant_line(const std::string& line) {
     return false;
 }
 
-std::string compress_body(const std::string& source,
-                          std::optional<Language> /*lang*/,
-                          int token_budget) try {
-    // Step 1: already within budget — return unchanged (byte-identical fast path).
-    if (est_tokens(source) <= token_budget) return source;
+static std::string compress_source_lines(const std::vector<std::string>& lines) {
+    if (lines.empty()) return {};
 
-    // Split into lines, keeping the '\n' terminator attached to each line so
-    // re-joining is a simple concatenation.
-    std::vector<std::string> lines;
-    lines.reserve(64);
-    {
-        size_t pos = 0;
-        while (pos < source.size()) {
-            size_t nl = source.find('\n', pos);
-            if (nl == std::string::npos) {
-                lines.push_back(source.substr(pos));
-                break;
-            }
-            lines.push_back(source.substr(pos, nl - pos + 1));
-            pos = nl + 1;
-        }
-    }
-    if (lines.empty()) return source;
-
-    // Step 2: classify each line as kept or elided.
-    // Always keep: header block = lines up to (and including) the first line that
-    // ends with '{' or ':' (opening brace / Python-style colon), capped at
-    // HEADER_CEIL lines so a file that opens with a long docblock doesn't balloon.
     const int HEADER_CEIL = 8;
     bool header_done = false;
     std::vector<bool> keep(lines.size(), false);
@@ -107,7 +209,6 @@ std::string compress_body(const std::string& source,
     for (size_t i = 0; i < lines.size(); ++i) {
         if (!header_done) {
             keep[i] = true;
-            // Scan backwards past whitespace to find the last non-whitespace char.
             const std::string& l = lines[i];
             for (auto it = l.rbegin(); it != l.rend(); ++it) {
                 char ch = *it;
@@ -121,10 +222,8 @@ std::string compress_body(const std::string& source,
         if (is_significant_line(lines[i])) keep[i] = true;
     }
 
-    // Step 3: assemble output; collapse consecutive elided lines into one marker.
     std::string result;
-    result.reserve(source.size() / 2);
-
+    result.reserve(1024);
     size_t i = 0;
     while (i < lines.size()) {
         if (keep[i]) {
@@ -136,9 +235,118 @@ std::string compress_body(const std::string& source,
             size_t elided = i - run_start;
             result += "// … (" + std::to_string(elided) + " lines elided)\n";
         }
-        // Stop adding once we've reached the budget to avoid unnecessary work.
-        if (est_tokens(result) >= token_budget) break;
     }
+    return result;
+}
+
+static std::string compress_log_lines(const std::vector<std::string>& lines) {
+    std::string result;
+    size_t omitted = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        bool edge = i < 4 || i + 4 >= lines.size();
+        bool important = has_word_ci(lines[i], "error") ||
+                         has_word_ci(lines[i], "warn") ||
+                         has_word_ci(lines[i], "fatal") ||
+                         has_word_ci(lines[i], "exception") ||
+                         has_word_ci(lines[i], "failed");
+        if (edge || important) {
+            if (omitted > 0) {
+                result += "// … (" + std::to_string(omitted) + " log lines elided)\n";
+                omitted = 0;
+            }
+            result += lines[i];
+        } else {
+            ++omitted;
+        }
+    }
+    if (omitted > 0)
+        result += "// … (" + std::to_string(omitted) + " log lines elided)\n";
+    return result;
+}
+
+static std::string compress_diff_or_markdown_lines(const std::vector<std::string>& lines,
+                                                   bool diff) {
+    std::string result;
+    size_t omitted = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const auto& line = lines[i];
+        std::string t = trim_copy(line);
+        bool keep = i < 8 || i + 8 >= lines.size();
+        if (diff) {
+            keep = keep || t.rfind("diff --git ", 0) == 0 ||
+                   t.rfind("@@ ", 0) == 0 ||
+                   t.rfind("+++", 0) == 0 ||
+                   t.rfind("---", 0) == 0 ||
+                   t.rfind("+", 0) == 0 ||
+                   t.rfind("-", 0) == 0;
+        } else {
+            keep = keep || t.rfind("#", 0) == 0 ||
+                   t.rfind("```", 0) == 0;
+        }
+        if (keep) {
+            if (omitted > 0) {
+                result += "// … (" + std::to_string(omitted) + " lines elided)\n";
+                omitted = 0;
+            }
+            result += line;
+        } else {
+            ++omitted;
+        }
+    }
+    if (omitted > 0)
+        result += "// … (" + std::to_string(omitted) + " lines elided)\n";
+    return result;
+}
+
+static std::string compress_plain_text_lines(const std::vector<std::string>& lines) {
+    std::string result;
+    for (size_t i = 0; i < lines.size() && i < 20; ++i) result += lines[i];
+    if (lines.size() > 40) {
+        result += "// … (" + std::to_string(lines.size() - 40) + " lines elided)\n";
+        for (size_t i = lines.size() - 20; i < lines.size(); ++i) result += lines[i];
+    } else if (lines.size() > 20) {
+        result += "// … (" + std::to_string(lines.size() - 20) + " lines elided)\n";
+    }
+    return result;
+}
+
+std::string compress_body(const std::string& source,
+                          std::optional<Language> lang,
+                          int token_budget) try {
+    if (token_budget <= 0) return source;
+
+    // Step 1: already within budget — return unchanged (byte-identical fast path).
+    const int original_tokens = est_tokens(source);
+    if (original_tokens <= token_budget) return source;
+
+    OutputKind kind = classify_output(source, lang);
+    if (kind == OutputKind::Binary) return source;
+
+    auto lines = split_lines_keep_newline(source);
+    if (lines.empty()) return source;
+
+    std::string result;
+    switch (kind) {
+        case OutputKind::SourceCode:
+            result = compress_source_lines(lines);
+            break;
+        case OutputKind::Log:
+            result = compress_log_lines(lines);
+            break;
+        case OutputKind::Diff:
+            result = compress_diff_or_markdown_lines(lines, true);
+            break;
+        case OutputKind::Markdown:
+            result = compress_diff_or_markdown_lines(lines, false);
+            break;
+        case OutputKind::Json:
+        case OutputKind::PlainText:
+            result = compress_plain_text_lines(lines);
+            break;
+        case OutputKind::Binary:
+            return source;
+    }
+    if (result.empty()) return source;
 
     // Step 4: hard byte-clamp if still over budget (e.g. a single huge kept line).
     if (est_tokens(result) > token_budget) {
@@ -146,18 +354,12 @@ std::string compress_body(const std::string& source,
         if (result.size() > max_bytes) result.resize(max_bytes);
     }
 
-    return sanitize_utf8_local(result);
+    result = sanitize_utf8_local(result);
+    if (est_tokens(result) >= original_tokens) return source;
+    return result;
 
 } catch (...) {
-    // Invariant #3: never throws. Fall back to a sanitized head-slice.
-    try {
-        std::string safe = sanitize_utf8_local(source);
-        size_t max_bytes = (size_t)std::max(token_budget, 1) * 4;
-        if (safe.size() > max_bytes) safe.resize(max_bytes);
-        return safe;
-    } catch (...) {
-        return {};
-    }
+    return source;
 }
 
 } // namespace axon

@@ -1,6 +1,6 @@
 # Axon Context Engine
 
-Este projeto está indexado pelo axon. Toda exploração de código roteia por MCP tools do axon — Grep/Glob estão bloqueados por hook. Garantia: 76-98% menos tokens sem perda de qualidade.
+Este projeto está indexado pelo axon. Toda exploração de código roteia por MCP tools do axon; Grep/Glob e shell output bruto ruidoso são bloqueados por hook. Garantia: 76-98% menos tokens sem perda de qualidade.
 
 ## Linguagens suportadas (13)
 
@@ -74,6 +74,36 @@ Escape (casos justificados, ex: primeira build em máquina ociosa):
 AXON_ALLOW_HIGH_PARALLELISM=1 make -j8
 ```
 
+## Shell output — sempre filtrado
+
+Hook PreToolUse `axon-shell-guard.sh` bloqueia comandos Bash conhecidos por despejar muito texto sem métrica/CCR:
+
+- busca: `rg`, `grep`, `ack`, `ag`
+- diffs: `git diff` completo
+- leituras brutas de source/docs: `cat`, `sed`, `awk`, `nl`
+- testes/build diagnostics: `pytest`, `vitest`, `ctest`, `gtest`, `tsc`
+- lint/package/logs: `eslint`, `ruff`, `prettier`, `npm install`, `journalctl`, `docker logs`, `kubectl logs`
+
+Use MCP para contexto de código:
+```text
+get_context_capsule(query="...", pivot_files=[...], token_budget=...)
+get_skeleton(files=[...])
+```
+
+Use filtros Axon quando precisar rodar o comando:
+```bash
+git diff -- src | axon filter diff --budget=600 --metrics=json
+rg -n "symbol" src | axon filter grep --budget=600 --metrics=json
+pytest tests 2>&1 | axon filter test --budget=700 --metrics=json
+tsc --noEmit 2>&1 | axon filter tsc --budget=500 --metrics=json
+journalctl -n 500 2>&1 | axon filter log --budget=700 --metrics=json
+```
+
+Escape para casos intencionais e pequenos:
+```bash
+AXON_ALLOW_RAW_SHELL=1 sed -n '1,80p' file.cpp
+```
+
 ## Por que
 
-Grep/Glob bloqueados por hook — contexto pré-indexado + grafo de impacto elimina buscas redundantes. Build-guard protege host de paralelismo agressivo. Write-through sincroniza filesystem ↔ índice sem ação manual do agente.
+Grep/Glob e shell bruto ruidoso são bloqueados por hook — contexto pré-indexado, filtros com orçamento, métricas e CCR eliminam buscas redundantes e outputs irreversíveis. Build-guard protege host de paralelismo agressivo. Write-through sincroniza filesystem ↔ índice sem ação manual do agente.

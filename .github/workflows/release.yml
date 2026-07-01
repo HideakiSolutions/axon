@@ -42,11 +42,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build patchelf
+          sudo apt-get install -y cmake build-essential ninja-build patchelf jq ripgrep
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake ninja
+        run: brew install cmake ninja ripgrep
 
       - name: Stage libduckdb.dylib (macOS)
         if: runner.os == 'macOS'
@@ -77,6 +77,14 @@ jobs:
 
       - name: Build
         run: cmake --build build --target axon -j 2
+
+      - name: Build release verification tests
+        if: runner.os == 'Linux'
+        run: cmake --build build -j 2
+
+      - name: Run context optimization release gate
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build --output-on-failure
 
       - name: Build VS Code extension
         if: runner.os == 'Linux'

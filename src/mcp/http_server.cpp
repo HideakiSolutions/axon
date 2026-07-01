@@ -2,6 +2,7 @@
 #include "../core/git.hpp"
 #include "../core/registry.hpp"
 #include "../core/capsule.hpp"
+#include "../core/ccr.hpp"
 #include "../core/dialogue.hpp"
 #include "../core/telemetry.hpp"
 #include <nlohmann/json.hpp>
@@ -659,18 +660,39 @@ static std::string handle_request(const std::string& method, const std::string& 
         json pivot_files = json::array();
         for (const auto& f : capsule.pivot_files)
             pivot_files.push_back({{"path", f.path}, {"content", f.content},
+                                   {"source_ref", f.source_ref},
+                                   {"expand_command", f.expand_command},
                                    {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
 
         json support_files = json::array();
         for (const auto& f : capsule.support_files)
             support_files.push_back({{"path", f.path}, {"content", f.content},
+                                     {"source_ref", f.source_ref},
+                                     {"expand_command", f.expand_command},
                                      {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
 
         return json{{"capsule", {{"query",          capsule.query},
                                  {"pivot_files",    pivot_files},
                                  {"support_files",  support_files},
                                  {"token_estimate", capsule.token_estimate},
+                                 {"compression", {{"input_tokens", capsule.compression_input_tokens},
+                                                  {"output_tokens", capsule.compression_output_tokens},
+                                                  {"tokens_saved", capsule.compression_tokens_saved}}},
+                                 {"ccr_artifact_ids", capsule.ccr_artifact_ids},
                                  {"total_files",    capsule.total_files}}}}.dump();
+    }
+
+    // GET /api/artifact/<artifact_id>
+    if (method == "GET" && path.rfind("/api/artifact/", 0) == 0) {
+        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        std::string artifact_id = url_decode(path.substr(std::string("/api/artifact/").size()));
+        auto artifact = axon::ccr_retrieve_artifact(*ctx.db, artifact_id);
+        if (!artifact) return json{{"error","artifact not found"},{"artifact_id",artifact_id}}.dump();
+        return json{{"artifact", {{"artifact_id", artifact->artifact_id},
+                                  {"kind", artifact->kind},
+                                  {"source_ref", artifact->source_ref},
+                                  {"content", artifact->content},
+                                  {"token_estimate", artifact->token_estimate}}}}.dump();
     }
 
     // ── Dialogue Layer HTTP endpoints ─────────────────────────────────────────
@@ -794,7 +816,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
                     std::chrono::steady_clock::now() - start).count();
                 int64_t tokens = static_cast<int64_t>(response_body.size() / 4);
                 axon::record_telemetry(ctx.cfg, ctx.db.get(), {
-                    path, "http", latency_ms, tokens, tokens * 4, tokens * 3, false
+                    path, "http", latency_ms, tokens, tokens * 4, tokens * 3, false, ""
                 });
             }
             std::string content_type = (path == "/" || path == "/index.html") ? "text/html" : "application/json";

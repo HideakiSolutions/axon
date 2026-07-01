@@ -9,8 +9,9 @@
 #   2. ~/.claude/hooks/axon-auto-index.sh  — hook UserPromptSubmit (sweep horário de deletados)
 #   3. ~/.claude/hooks/axon-post-edit.sh   — hook PostToolUse (write-through síncrono após Write/Edit)
 #   4. ~/.claude/hooks/axon-build-guard.sh — hook PreToolUse (bloqueia make/ninja com -j alto)
-#   5. <project>/.claude/CLAUDE.md         — instruções de uso do axon
-#   6. <project>/.claude/settings.json     — registra hooks para Grep, Glob, Bash (build), UserPromptSubmit, PostToolUse
+#   5. ~/.claude/hooks/axon-shell-guard.sh — hook PreToolUse (bloqueia shell output bruto ruidoso)
+#   6. <project>/.claude/CLAUDE.md         — instruções de uso do axon
+#   7. <project>/.claude/settings.json     — registra hooks para Grep, Glob, Bash, UserPromptSubmit, PostToolUse
 
 set -euo pipefail
 
@@ -113,6 +114,10 @@ cp "$SCRIPTS_DIR/hooks/axon-build-guard.sh" "$HOOKS_DIR/axon-build-guard.sh"
 chmod +x "$HOOKS_DIR/axon-build-guard.sh"
 echo "[axon] ✓ Hook build-guard: $HOOKS_DIR/axon-build-guard.sh"
 
+cp "$SCRIPTS_DIR/hooks/axon-shell-guard.sh" "$HOOKS_DIR/axon-shell-guard.sh"
+chmod +x "$HOOKS_DIR/axon-shell-guard.sh"
+echo "[axon] ✓ Hook shell-guard: $HOOKS_DIR/axon-shell-guard.sh"
+
 # 2. Criar diretório .claude do projeto
 mkdir -p "$CLAUDE_DIR"
 
@@ -127,6 +132,7 @@ HOOK_CMD="bash $HOOKS_DIR/axon-guard.sh"
 AUTO_INDEX_CMD="bash $HOOKS_DIR/axon-auto-index.sh"
 POST_EDIT_CMD="bash $HOOKS_DIR/axon-post-edit.sh"
 BUILD_GUARD_CMD="bash $HOOKS_DIR/axon-build-guard.sh"
+SHELL_GUARD_CMD="bash $HOOKS_DIR/axon-shell-guard.sh"
 
 GREP_HOOK=$(jq -n --arg cmd "$HOOK_CMD" '{
   "matcher": "Grep",
@@ -139,6 +145,11 @@ GLOB_HOOK=$(jq -n --arg cmd "$HOOK_CMD" '{
 }')
 
 BUILD_GUARD_HOOK=$(jq -n --arg cmd "$BUILD_GUARD_CMD" '{
+  "matcher": "Bash",
+  "hooks": [{"type": "command", "command": $cmd, "timeout": 5}]
+}')
+
+SHELL_GUARD_HOOK=$(jq -n --arg cmd "$SHELL_GUARD_CMD" '{
   "matcher": "Bash",
   "hooks": [{"type": "command", "command": $cmd, "timeout": 5}]
 }')
@@ -158,9 +169,10 @@ if [ ! -f "$SETTINGS" ]; then
     --argjson grep "$GREP_HOOK" \
     --argjson glob "$GLOB_HOOK" \
     --argjson buildguard "$BUILD_GUARD_HOOK" \
+    --argjson shellguard "$SHELL_GUARD_HOOK" \
     --argjson autoindex "$AUTO_INDEX_HOOK" \
     --argjson postedit "$POST_EDIT_HOOK" \
-    '{"hooks": {"PreToolUse": [$grep, $glob, $buildguard], "UserPromptSubmit": [$autoindex], "PostToolUse": [$postedit]}}' > "$SETTINGS"
+    '{"hooks": {"PreToolUse": [$grep, $glob, $buildguard, $shellguard], "UserPromptSubmit": [$autoindex], "PostToolUse": [$postedit]}}' > "$SETTINGS"
 else
   # Merge: adiciona entradas axon evitando duplicatas
   EXISTING=$(cat "$SETTINGS")
@@ -168,6 +180,7 @@ else
     --argjson grep "$GREP_HOOK" \
     --argjson glob "$GLOB_HOOK" \
     --argjson buildguard "$BUILD_GUARD_HOOK" \
+    --argjson shellguard "$SHELL_GUARD_HOOK" \
     --argjson autoindex "$AUTO_INDEX_HOOK" \
     --argjson postedit "$POST_EDIT_HOOK" \
     '
@@ -176,9 +189,10 @@ else
         [.[] | select(
           .matcher != "Grep" and
           .matcher != "Glob" and
-          (.hooks[0].command | contains("axon-build-guard") | not)
+          (.hooks[0].command | contains("axon-build-guard") | not) and
+          (.hooks[0].command | contains("axon-shell-guard") | not)
         )] +
-        [$grep, $glob, $buildguard]
+        [$grep, $glob, $buildguard, $shellguard]
       ) |
       .hooks.UserPromptSubmit //= [] |
       .hooks.UserPromptSubmit |= (

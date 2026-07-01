@@ -35,12 +35,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build ccache jq
+          sudo apt-get install -y cmake build-essential ninja-build ccache jq ripgrep
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja ccache jq
+          brew install cmake ninja ccache jq ripgrep
 
       - name: Stage libduckdb.dylib (macOS)
         # The vendored third_party/duckdb/lib/libduckdb.so is Linux ELF; for
@@ -76,7 +76,7 @@ jobs:
         run: cmake --build build --target axon -j 2
 
       - name: Build tests
-        run: cmake --build build --target test_parser_smoke test_dialogue test_objectives test_semantic -j 2
+        run: cmake --build build -j 2
 
       - name: Run unit tests
         # CTest aggregates every test registered via add_axon_test().

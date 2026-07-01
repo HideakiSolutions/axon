@@ -1,6 +1,6 @@
 # API Reference — axon MCP Tools
 
-All 26 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
+All 27 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ---
 
@@ -17,6 +17,21 @@ Token-efficient context: pivot files in full + support files skeletonized. Optio
 | `token_budget` | number | No | Max tokens for the capsule (default: 8000) |
 | `dialogue_budget` | number | No | Token budget for `related_turns[]` from dialogue history (default: 0 = disabled) |
 | `no_cache` | boolean | No | Bypass the query-hash cache and force a fresh assembly (default: false) |
+| `compression` | string | No | `off` or `body`; `body` classifies oversized payloads before lossy compression and only returns compressed output when it saves tokens |
+
+`compression="body"` classifies content as source code, JSON, diff, log, Markdown, plain text, or binary-like before applying any lossy reduction. Binary-like content and impossible budgets pass through unchanged. Responses include a `compression` object with `input_tokens`, `output_tokens`, and `tokens_saved`; nonzero body-compression savings are also recorded in the `compression` telemetry layer. Recoverable lossy slices include CCR markers in content and their IDs in `ccr_artifact_ids`; call `artifact_retrieve` with one of those IDs to recover the original slice.
+
+---
+
+### `artifact_retrieve`
+
+Retrieve the original content for an Axon CCR artifact emitted by lossy compression.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `artifact_id` | string | **Yes** | CCR artifact ID from a capsule response or `axon:ccr` marker |
+
+Returns `artifact_id`, `kind`, `source_ref`, `content`, and `token_estimate`.
 
 ---
 
@@ -307,12 +322,15 @@ When running `axon web` or `axon serve --http`:
 | `GET` | `/api/search?q=<query>` | Search: `{files[], symbols[]}` |
 | `GET` | `/api/observations?q=<text>&limit=N` | List observations (semantic search if embeddings enabled) |
 | `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule |
-| `GET` | `/api/metrics` | Request/token/cache/cost aggregates when telemetry is enabled; graph/cache summary otherwise |
+| `GET` | `/api/artifact/<artifact_id>` | Retrieve original content for a CCR artifact |
+| `GET` | `/api/metrics` | Request/token/cache/cost aggregates when telemetry is enabled, including per-layer savings; graph/cache summary otherwise |
 | `POST` | `/api/detect-changes` | Detect changed symbols/files (body: `{ref?}`) |
 | `GET` | `/api/threads` | List all threads |
 | `GET` | `/api/threads/:id/sessions` | List sessions for a thread |
 | `GET` | `/api/sessions/:id/turns` | List turns for a session |
 | `GET` | `/api/dialogue/search?q=<query>&limit=N` | Semantic search over turns |
+
+When telemetry is enabled, `/api/metrics` returns backward-compatible totals plus `layers`, keyed by `retrieval`, `shell_filtering`, `compression`, `cache`, `ccr`, and `unknown`. Each layer contains `requests`, `tokens_sent`, `tokens_saved`, `reduction_percent`, and `average_latency_ms`.
 
 ### `/api/graph` — file-mode node shape
 
@@ -351,13 +369,43 @@ When running `axon web` or `axon serve --http`:
   "capsule": {
     "query": "user authentication flow",
     "pivot_files": [
-      { "path": "src/auth/token.ts", "content": "...", "is_skeleton": false, "token_estimate": 720 }
+      {
+        "path": "src/auth/token.ts",
+        "source_ref": "src/auth/token.ts:12-80",
+        "expand_command": "get_skeleton {\"files\":[\"src/auth/token.ts\"]}",
+        "content": "...",
+        "is_skeleton": false,
+        "token_estimate": 720
+      }
     ],
     "support_files": [
-      { "path": "src/auth/middleware.ts", "content": "// === verifyToken (function) lines 12-34 ===\n...", "is_skeleton": false, "token_estimate": 180 }
+      {
+        "path": "src/auth/middleware.ts",
+        "source_ref": "src/auth/middleware.ts",
+        "expand_command": "get_context_capsule {\"pivot_files\":[\"src/auth/middleware.ts\"],\"no_cache\":true}",
+        "content": "// === verifyToken (function) lines 12-34 ===\n...",
+        "is_skeleton": true,
+        "token_estimate": 180
+      }
     ],
     "token_estimate": 1840,
+    "compression": { "input_tokens": 900, "output_tokens": 180, "tokens_saved": 720 },
+    "ccr_artifact_ids": ["ccr_..."],
     "total_files": 93
+  }
+}
+```
+
+### `/api/artifact/<artifact_id>` — response shape
+
+```json
+{
+  "artifact": {
+    "artifact_id": "ccr_...",
+    "kind": "capsule_body",
+    "source_ref": "src/auth/token.ts:12-80",
+    "content": "original uncompressed slice...",
+    "token_estimate": 900
   }
 }
 ```
@@ -391,6 +439,8 @@ When running `axon web` or `axon serve --http`:
 | `axon web --group=<name>` | Browser graph explorer over a named registry group |
 | `axon lsp` | Language Server Protocol stdio server for workspace symbols, document symbols, definitions, and references |
 | `axon watch [path] [--interval-ms=N] [--debounce-ms=N]` | Portable polling watcher for external edits; reindexes modified files and prunes deletions |
+| `axon artifact-retrieve <artifact_id>` | Print original content for a CCR artifact |
+| `axon filter <auto\|diff\|lint\|log\|grep\|json\|package\|test\|tsc\|text> [--budget=N] [--metrics=json]` | Filter stdin shell output with type-aware compression, CCR recovery markers, grep/rg grouping, log level/dedup summaries, JSON schema summaries, lint rule summaries, package-manager summaries, test failure summaries, TypeScript diagnostic grouping, safe passthrough, and optional JSON stderr metrics |
 | `axon status` | Show index summary for the current project |
 
 ### Project config (`.axon/config.toml`)
@@ -399,7 +449,9 @@ When running `axon web` or `axon serve --http`:
 granularity   = "symbol"   # "file" (default) | "symbol" — enables call graph extraction
 index_routes  = false      # enable HTTP route detection for route_map / api_impact
 fts_enabled   = true       # full-text search index over symbols
+token_budget  = 8000       # default capsule budget
 telemetry     = false      # opt-in local telemetry; env AXON_TELEMETRY overrides
+capsule_compression = "off" # "off" (default) | "body"
 ```
 
 ### Ignore patterns (`.axonignore`)

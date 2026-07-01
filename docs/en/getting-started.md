@@ -214,6 +214,7 @@ curl -s "http://localhost:7070/api/graph?mode=symbol" | jq '.edges | length'
 ## What's Next
 
 - [Architecture](architecture.md) — how axon works internally
-- [API Reference](api-reference.md) — all 26 MCP tools with parameters
+- [API Reference](api-reference.md) — all 27 MCP tools with parameters
+- [Axon-first context and shell filtering](axon-primary-rtk-optional.md) — keep RTK optional while Axon handles primary context and shell-output optimization
 - [FAQ](faq.md) — common questions
 - [Troubleshooting](troubleshooting.md) — build and runtime problems

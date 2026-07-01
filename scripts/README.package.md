@@ -17,7 +17,7 @@ compiler or to build anything - just extract and run the installer.
 
 That is all. The installer:
 
-- installs the Claude Code hooks (Grep/Glob guard, build guard, auto-index, write-through);
+- installs the Claude Code hooks (Grep/Glob guard, raw shell-output guard, build guard, auto-index, write-through);
 - writes `<project>/.claude/settings.json`;
 - indexes your project (creates `<project>/.axon/`);
 - downloads the embedding model (~80 MB, enables semantic search) - opt out with `AXON_DOWNLOAD_MODEL=0`;
@@ -42,6 +42,7 @@ claude mcp get axon         # confirms the MCP server is registered
 
 - **`jq: not found`** -> install `jq` and re-run the installer.
 - **MCP not registered** -> the installer printed an `mcpServers` block; paste it into `~/.claude.json`, or run the shown `claude mcp add-json` command.
+- **A Bash command is denied** -> pipe noisy output through `axon filter`, for example `pytest tests 2>&1 | axon filter test --budget=700 --metrics=json`. For intentional small raw output, prefix the command with `AXON_ALLOW_RAW_SHELL=1`.
 - **Semantic search says "Embedding model not loaded"** -> the model was not downloaded; re-run with `AXON_DOWNLOAD_MODEL=1 ./install.sh /path/to/your-project`.
 
 ---
@@ -63,9 +64,10 @@ compilar nada - basta extrair e rodar o instalador.
 .\install.ps1 C:\caminho\para\seu-projeto
 ```
 
-O instalador instala os hooks, escreve o `settings.json`, indexa o projeto, baixa
-o modelo de embeddings (~80 MB; opt-out `AXON_DOWNLOAD_MODEL=0`) e registra o
-servidor MCP no Claude Code. Ao terminar, **reinicie o Claude Code**.
+O instalador instala os hooks, incluindo bloqueio de Grep/Glob e de output Bash
+bruto ruidoso, escreve o `settings.json`, indexa o projeto, baixa o modelo de
+embeddings (~80 MB; opt-out `AXON_DOWNLOAD_MODEL=0`) e registra o servidor MCP
+no Claude Code. Ao terminar, **reinicie o Claude Code**.
 
 **Requisitos:** Linux/macOS precisa de `jq`, `git` e `curl`/`wget`; Windows precisa
 do VC++ 2015-2022 Redistributable (x64); e o CLI `claude` no PATH para o registro
