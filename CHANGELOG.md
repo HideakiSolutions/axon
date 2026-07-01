@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] — 2026-07-01
+
+### Added
+- Native `axon filter` command for diff, grep/rg, JSON, TypeScript diagnostics, tests, package manager output, lint output, logs, and generic text, with token budgets, JSON metrics, safe passthrough, and CCR recovery markers.
+- CCR artifact storage and retrieval through CLI, MCP, and HTTP so lossy capsule and shell summaries can recover exact originals.
+- Type-aware compression for large outputs and capsule bodies, including token-savings validation before accepting compressed output.
+- Per-layer telemetry for retrieval, shell filtering, compression, cache, CCR, and unknown savings.
+- Capsule traceability metadata with `source_ref`, `expand_command`, explicit budgets, and MCP schema smoke coverage.
+- Claude Code shell guard hook that routes noisy raw Bash output through Axon filters or explicit fallback.
+- Aggregate shell-filter benchmark runner comparing native Axon filters with RTK when available.
+
+### Changed
+- Build and release workflows now build every configured test target before CTest and run the context-optimization gate in Linux release jobs.
+- Documentation now positions Axon as the primary local-first context and shell-output optimization layer, with RTK as optional compatibility fallback.
+- Generated `axon init` config now includes documented token budget and capsule compression keys.
+
 ## [1.2.4] — 2026-06-04
 
 ### Fixed

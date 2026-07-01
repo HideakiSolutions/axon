@@ -2,7 +2,7 @@
   "name": "axon-vscode",
   "displayName": "Axon",
   "description": "Axon language server and web explorer integration.",
-  "version": "1.2.0",
+  "version": "1.2.5",
   "publisher": "hideakisolutions",
   "license": "MIT",
   "repository": {
@@ -30,7 +30,7 @@
     "compile": "npm run typecheck && npm run bundle",
     "watch": "npm run bundle -- --watch",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package --no-dependencies --out axon-vscode-1.2.0.vsix"
+    "package": "vsce package --no-dependencies --out axon-vscode-1.2.5.vsix"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
