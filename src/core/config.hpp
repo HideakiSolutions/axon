@@ -6,11 +6,12 @@
 namespace axon {
 
 struct ProjectConfig {
-    std::string granularity  = "file";  // "file" | "symbol"
-    bool        index_routes = false;
-    bool        fts_enabled  = true;
-    int         token_budget = 8000;    // default capsule token budget
-    bool        telemetry    = false;   // opt-in anonymous telemetry (W5.T06)
+    std::string granularity         = "file";  // "file" | "symbol"
+    bool        index_routes        = false;
+    bool        fts_enabled         = true;
+    int         token_budget        = 8000;    // default capsule token budget
+    bool        telemetry           = false;   // opt-in anonymous telemetry (W5.T06)
+    std::string capsule_compression = "off";   // "off" | "body" (Balde A opt-in)
 };
 
 struct Config {

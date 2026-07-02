@@ -2,6 +2,7 @@
 #include "db.hpp"
 #include "graph.hpp"
 #include "embeddings.hpp"
+#include "compress.hpp"
 #include "../parser/parser.hpp"
 #include <string>
 #include <vector>
@@ -11,6 +12,8 @@ namespace axon {
 
 struct CapsuleFile {
     std::string path;
+    std::string source_ref;
+    std::string expand_command;
     std::string content;
     bool        is_skeleton   = false;
     int         token_estimate = 0;
@@ -32,6 +35,10 @@ struct ContextCapsule {
     std::vector<DialogueTurn> related_turns;   // populated when dialogue_budget > 0
     int                      token_estimate = 0;
     int                      total_files    = 0;
+    int                      compression_input_tokens  = 0;
+    int                      compression_output_tokens = 0;
+    int                      compression_tokens_saved  = 0;
+    std::vector<std::string> ccr_artifact_ids;
 };
 
 inline int estimate_tokens(const std::string& s) {
@@ -46,7 +53,8 @@ ContextCapsule assemble_capsule(
     const DependencyGraph&       graph,
     const std::filesystem::path& project_root,
     int token_budget    = 8000,
-    int dialogue_budget = 0);   // 0 = disabled; >0 = pull anchored turns into capsule
+    int dialogue_budget = 0,    // 0 = disabled; >0 = pull anchored turns into capsule
+    CapsuleCompression  compression = CapsuleCompression::Off);  // Balde A opt-in
 
 // ── Cache primitives (W2.T01) ───────────────────────────────────────────────
 // Cache key = BLAKE3(query + "|" + token_budget + "|" + project_epoch),

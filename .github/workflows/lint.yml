@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Run ShellCheck
-        run: shellcheck scripts/install.sh scripts/hooks/*.sh
+        run: find scripts -name "*.sh" -print0 | xargs -0 shellcheck
 
   clang-format:
     name: clang-format

@@ -115,6 +115,43 @@ TEST_F(ObjTest, TokenBudgetDoesNotExceedForSmallContent) {
     EXPECT_LT(tokens, (int)large_content.size());    // tokens < raw bytes
 }
 
+TEST_F(ObjTest, CapsuleFileTraceabilitySurvivesCacheRoundTrip) {
+    axon::ContextCapsule capsule;
+    capsule.query = "auth token";
+    capsule.token_estimate = 42;
+    capsule.total_files = 2;
+
+    axon::CapsuleFile pivot;
+    pivot.path = "src/auth/token.ts";
+    pivot.source_ref = "src/auth/token.ts:10-40";
+    pivot.expand_command = "get_skeleton {\"files\":[\"src/auth/token.ts\"]}";
+    pivot.content = "export function token() {}\n";
+    pivot.is_skeleton = false;
+    pivot.token_estimate = axon::estimate_tokens(pivot.content);
+    capsule.pivot_files.push_back(pivot);
+
+    axon::CapsuleFile support;
+    support.path = "src/auth/session.ts";
+    support.source_ref = "src/auth/session.ts";
+    support.expand_command =
+        "get_context_capsule {\"pivot_files\":[\"src/auth/session.ts\"],\"no_cache\":true}";
+    support.content = "export function session();\n";
+    support.is_skeleton = true;
+    support.token_estimate = axon::estimate_tokens(support.content);
+    capsule.support_files.push_back(support);
+
+    axon::capsule_cache_insert(*db, "trace-key", "epoch-1", capsule);
+    auto hit = axon::capsule_cache_lookup(*db, "trace-key", "epoch-1");
+    ASSERT_TRUE(hit.has_value());
+    ASSERT_EQ(hit->pivot_files.size(), 1u);
+    ASSERT_EQ(hit->support_files.size(), 1u);
+
+    EXPECT_EQ(hit->pivot_files[0].source_ref, "src/auth/token.ts:10-40");
+    EXPECT_NE(hit->pivot_files[0].expand_command.find("get_skeleton"), std::string::npos);
+    EXPECT_EQ(hit->support_files[0].source_ref, "src/auth/session.ts");
+    EXPECT_NE(hit->support_files[0].expand_command.find("get_context_capsule"), std::string::npos);
+}
+
 // ── Pending embed tracking: turns sem modelo → embedding IS NULL ──────────────
 
 TEST_F(ObjTest, TurnsAddedWithoutModelHaveNullEmbedding) {

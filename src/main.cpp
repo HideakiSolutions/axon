@@ -5,7 +5,9 @@
 #include "core/graph.hpp"
 #include "core/skeleton.hpp"
 #include "core/capsule.hpp"
+#include "core/ccr.hpp"
 #include "core/embeddings.hpp"
+#include "core/shell_filter.hpp"
 #include "core/telemetry.hpp"
 #include "mcp/server.hpp"
 #include "mcp/http_server.hpp"
@@ -18,9 +20,11 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;
 
@@ -33,6 +37,10 @@ static void stop_watch(int) {
 static int64_t elapsed_ms(std::chrono::steady_clock::time_point start) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start).count();
+}
+
+static int estimate_tokens_cli(const std::string& s) {
+    return static_cast<int>((s.size() + 3) / 4);
 }
 
 static void print_usage() {
@@ -52,6 +60,9 @@ Usage:
   axon watch [path] [--interval-ms=1000] [--debounce-ms=500]
                                         Poll for external edits and incrementally reindex
   axon capsule <query> [--no-cache]     Print context capsule for a query
+  axon artifact-retrieve <artifact_id>   Retrieve original CCR artifact content
+  axon filter <kind> [--budget=N] [--metrics=json]
+                                        Filter stdin output (auto|diff|lint|log|grep|json|package|test|tsc|text)
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
   axon help                             Show this help
@@ -153,6 +164,10 @@ int main(int argc, char* argv[]) {
              "index_routes = false\n\n"
              "# Enable full-text search index for symbol name lookup (BM25)\n"
              "fts_enabled = true\n\n"
+             "# Default token budget for CLI capsules and config-backed MCP calls.\n"
+             "token_budget = 8000\n\n"
+             "# Capsule body compression: \"off\" (default) or \"body\".\n"
+             "capsule_compression = \"off\"\n\n"
              "# Opt-in local telemetry. Can also be enabled with AXON_TELEMETRY=1.\n"
              "telemetry = false\n";
         std::cout << "Created " << config_path << "\n";
@@ -206,7 +221,7 @@ int main(int argc, char* argv[]) {
         }
         axon::record_telemetry(cfg, db.get(), {
             "index", "cli", elapsed_ms(start),
-            stats.symbols_found * 12, stats.files_indexed * 500, 0, false
+            stats.symbols_found * 12, stats.files_indexed * 500, 0, false, "indexing"
         });
         return 0;
     }
@@ -249,7 +264,7 @@ int main(int argc, char* argv[]) {
         std::cout << "\n";
         axon::record_telemetry(cfg, db.get(), {
             "index-paths", "cli", elapsed_ms(start),
-            stats.symbols_found * 12, stats.files_indexed * 500, 0, false
+            stats.symbols_found * 12, stats.files_indexed * 500, 0, false, "indexing"
         });
         return 0;
     }
@@ -342,7 +357,7 @@ int main(int argc, char* argv[]) {
             std::cout.flush();
             axon::record_telemetry(cfg, db.get(), {
                 "watch", "cli", elapsed_ms(start),
-                stats.symbols_found * 12, stats.files_indexed * 500, 0, false
+                stats.symbols_found * 12, stats.files_indexed * 500, 0, false, "indexing"
             });
             seen = snapshot();
         }
@@ -422,6 +437,7 @@ int main(int argc, char* argv[]) {
                 std::cout << "  \"token_estimate\": " << hit->token_estimate << ",\n";
                 std::cout << "  \"pivot_files\": " << hit->pivot_files.size() << ",\n";
                 std::cout << "  \"support_files\": " << hit->support_files.size() << ",\n";
+                std::cout << "  \"compression_tokens_saved\": " << hit->compression_tokens_saved << ",\n";
                 std::cout << "  \"cache\": \"hit\"\n";
                 std::cout << "}\n";
                 for (const auto& f : hit->pivot_files)
@@ -430,7 +446,7 @@ int main(int argc, char* argv[]) {
                     std::cerr << "  [support] " << f.path << " (" << f.token_estimate << " tok)\n";
                 axon::record_telemetry(cfg, db.get(), {
                     "capsule", "cli", elapsed_ms(start),
-                    hit->token_estimate, hit->token_estimate * 4, hit->token_estimate * 3, true
+                    hit->token_estimate, hit->token_estimate * 4, hit->token_estimate * 3, true, "cache"
                 });
                 return 0;
             }
@@ -446,17 +462,29 @@ int main(int argc, char* argv[]) {
         }
         axon::EmbeddingModel& model = *model_opt;
 
+        auto compression = axon::compression_from_string(cfg.project_cfg.capsule_compression);
         auto capsule = axon::assemble_capsule(query, {}, *db, model, graph, cfg.project_root,
-                                              cfg.project_cfg.token_budget);
+                                              cfg.project_cfg.token_budget, 0, compression);
         if (!no_cache) {
             axon::capsule_cache_insert(*db, cache_key, epoch, capsule);
+        }
+        if (capsule.compression_tokens_saved > 0) {
+            axon::record_telemetry(cfg, db.get(), {
+                "capsule.compression", "cli", 0,
+                capsule.compression_output_tokens,
+                capsule.compression_input_tokens,
+                capsule.compression_tokens_saved,
+                false,
+                "compression"
+            });
         }
 
         std::cout << "{\n";
         std::cout << "  \"query\": \"" << query << "\",\n";
         std::cout << "  \"token_estimate\": " << capsule.token_estimate << ",\n";
         std::cout << "  \"pivot_files\": " << capsule.pivot_files.size() << ",\n";
-        std::cout << "  \"support_files\": " << capsule.support_files.size() << "\n";
+        std::cout << "  \"support_files\": " << capsule.support_files.size() << ",\n";
+        std::cout << "  \"compression_tokens_saved\": " << capsule.compression_tokens_saved << "\n";
         std::cout << "}\n";
 
         for (const auto& f : capsule.pivot_files)
@@ -465,8 +493,170 @@ int main(int argc, char* argv[]) {
             std::cerr << "  [support] " << f.path << " (" << f.token_estimate << " tok)\n";
         axon::record_telemetry(cfg, db.get(), {
             "capsule", "cli", elapsed_ms(start),
-            capsule.token_estimate, capsule.token_estimate * 4, capsule.token_estimate * 3, false
+            capsule.token_estimate, capsule.token_estimate * 4, capsule.token_estimate * 3, false, "retrieval"
         });
+        return 0;
+    }
+
+    // ── axon artifact-retrieve <artifact_id> ───────────────────────────────
+    if (cmd == "artifact-retrieve") {
+        if (argc < 3) {
+            std::cerr << "Usage: axon artifact-retrieve <artifact_id>\n";
+            return 1;
+        }
+        auto cfg = load_config();
+        if (!fs::exists(cfg.db_path)) {
+            std::cerr << "No index found. Run `axon index` first.\n";
+            return 1;
+        }
+        auto db = open_database_or_report(cfg.db_path);
+        if (!db) return 1;
+
+        auto artifact = axon::ccr_retrieve_artifact(*db, argv[2]);
+        if (!artifact) {
+            std::cerr << "Artifact not found: " << argv[2] << "\n";
+            return 1;
+        }
+        std::cout << artifact->content;
+        return 0;
+    }
+
+    // ── axon filter <kind> [--budget=N] ───────────────────────────────────
+    if (cmd == "filter") {
+        std::string kind = argc > 2 ? argv[2] : "auto";
+        int budget = 800;
+        bool json_metrics = false;
+        for (int i = 3; i < argc; i++) {
+            std::string a = argv[i];
+            if (a.rfind("--budget=", 0) == 0) {
+                try { budget = std::stoi(a.substr(9)); } catch (...) { budget = 800; }
+            } else if (a == "--metrics=json" || a == "--json-metrics") {
+                json_metrics = true;
+            }
+        }
+
+        std::ostringstream ss;
+        ss << std::cin.rdbuf();
+        std::string input = ss.str();
+
+        auto start = std::chrono::steady_clock::now();
+        auto filtered = axon::filter_shell_output(kind, input, budget);
+        std::string ccr_artifact_id;
+        if (filtered.changed) {
+            auto cfg = load_config();
+            auto db = open_database_or_report(cfg.db_path);
+            if (db) {
+                auto make_recoverable = [&](const axon::ShellFilterResult& candidate) {
+                    return axon::ccr_make_recoverable_output(
+                        *db,
+                        "shell_filter",
+                        "filter." + candidate.command + ":stdin",
+                        input,
+                        candidate.output,
+                        candidate.input_tokens);
+                };
+
+                auto recoverable = make_recoverable(filtered);
+                if (recoverable.recoverable &&
+                    recoverable.output_tokens > budget &&
+                    !recoverable.artifact_id.empty()) {
+                    int marker_tokens = estimate_tokens_cli(
+                        axon::ccr_marker(recoverable.artifact_id, filtered.input_tokens));
+                    int adjusted_budget = budget - marker_tokens;
+                    if (adjusted_budget > 0 && adjusted_budget < budget) {
+                        auto tighter = axon::filter_shell_output(kind, input, adjusted_budget);
+                        if (tighter.changed) {
+                            auto tighter_recoverable = make_recoverable(tighter);
+                            if (tighter_recoverable.recoverable)
+                                recoverable = std::move(tighter_recoverable);
+                        }
+                    }
+                }
+
+                if (recoverable.recoverable && recoverable.output_tokens <= budget) {
+                    filtered.output = std::move(recoverable.output);
+                    filtered.output_tokens = static_cast<int>(recoverable.output_tokens);
+                    filtered.tokens_saved = static_cast<int>(recoverable.tokens_saved);
+                    ccr_artifact_id = std::move(recoverable.artifact_id);
+                } else {
+                    filtered.output = input;
+                    filtered.output_tokens = filtered.input_tokens;
+                    filtered.tokens_saved = 0;
+                    filtered.changed = false;
+                }
+            } else {
+                filtered.output = input;
+                filtered.output_tokens = filtered.input_tokens;
+                filtered.tokens_saved = 0;
+                filtered.changed = false;
+            }
+        }
+        std::cout << filtered.output;
+        int64_t filter_latency_ms = elapsed_ms(start);
+        if (json_metrics) {
+            nlohmann::json metrics = {
+                {"type", "axon_filter_metrics"},
+                {"command", filtered.command},
+                {"kind", axon::output_kind_to_string(filtered.kind)},
+                {"budget", budget},
+                {"input_tokens", filtered.input_tokens},
+                {"output_tokens", filtered.output_tokens},
+                {"tokens_saved", filtered.tokens_saved},
+                {"changed", filtered.changed},
+                {"layer", "shell_filtering"},
+                {"latency_ms", filter_latency_ms}
+            };
+            if (!ccr_artifact_id.empty()) {
+                metrics["ccr_artifact_id"] = ccr_artifact_id;
+                metrics["recoverable"] = true;
+            } else {
+                metrics["recoverable"] = false;
+            }
+            std::cerr << metrics.dump() << "\n";
+        } else {
+            std::cerr << "[axon filter] kind=" << axon::output_kind_to_string(filtered.kind)
+                      << " input_tokens=" << filtered.input_tokens
+                      << " output_tokens=" << filtered.output_tokens
+                      << " saved=" << filtered.tokens_saved
+                      << " changed=" << (filtered.changed ? "true" : "false");
+            if (!ccr_artifact_id.empty())
+                std::cerr << " ccr_artifact_id=" << ccr_artifact_id;
+            std::cerr << "\n";
+        }
+
+        if (const char* telemetry_env = std::getenv("AXON_TELEMETRY")) {
+            std::string enabled = telemetry_env;
+            if (enabled == "1" || enabled == "true" || enabled == "yes" || enabled == "on") {
+                auto cfg = load_config();
+                if (fs::exists(cfg.db_path)) {
+                    auto db = open_database_or_report(cfg.db_path);
+                    if (db) {
+                        axon::record_telemetry(cfg, db.get(), {
+                            "filter." + filtered.command,
+                            "shell",
+                            filter_latency_ms,
+                            filtered.output_tokens,
+                            filtered.input_tokens,
+                            filtered.tokens_saved,
+                            false,
+                            "shell_filtering"
+                        });
+                        if (!ccr_artifact_id.empty()) {
+                            axon::record_telemetry(cfg, db.get(), {
+                                "filter.ccr_store",
+                                "shell",
+                                0,
+                                0,
+                                0,
+                                0,
+                                false,
+                                "ccr"
+                            });
+                        }
+                    }
+                }
+            }
+        }
         return 0;
     }
 

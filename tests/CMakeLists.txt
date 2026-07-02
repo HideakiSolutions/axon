@@ -46,6 +46,55 @@ endfunction()
 
 add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp)
 
+# Compress tests — pure function, no DuckDB or llama.cpp required.
+add_axon_test(test_compress
+    unit/test_compress.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
+)
+
+add_axon_test(test_shell_filter
+    unit/test_shell_filter.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/shell_filter.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
+)
+target_include_directories(test_shell_filter PRIVATE
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+)
+
+# CCR artifact tests require DuckDB and BLAKE3.
+add_executable(test_ccr unit/test_ccr.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
+)
+target_include_directories(test_ccr PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+)
+target_link_libraries(test_ccr PRIVATE
+    duckdb_lib
+    blake3_lib
+    GTest::gtest_main
+)
+add_test(NAME test_ccr COMMAND test_ccr)
+
+# Telemetry aggregation tests require DuckDB, but not llama.cpp.
+add_executable(test_telemetry unit/test_telemetry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/telemetry.cpp
+)
+target_include_directories(test_telemetry PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+)
+target_link_libraries(test_telemetry PRIVATE
+    duckdb_lib
+    GTest::gtest_main
+)
+add_test(NAME test_telemetry COMMAND test_telemetry)
+
 # Dialogue Layer tests require DuckDB (cannot use the parser-only axon_parser_objs target).
 add_executable(test_dialogue unit/test_dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
@@ -72,6 +121,9 @@ add_executable(test_objectives unit/test_objectives.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/shell_filter.cpp
     ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
     ${CMAKE_SOURCE_DIR}/src/core/git.cpp
@@ -115,3 +167,28 @@ target_link_libraries(test_semantic PRIVATE
     GTest::gtest_main
 )
 add_test(NAME test_semantic COMMAND test_semantic)
+
+add_test(
+    NAME test_cli_filter_json_metrics
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_cli_filter_json_metrics.sh $<TARGET_FILE:axon>
+)
+
+add_test(
+    NAME test_mcp_capsule_schema
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_mcp_capsule_schema.sh $<TARGET_FILE:axon>
+)
+
+add_test(
+    NAME test_docs_freshness
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_docs_freshness.sh
+)
+
+add_test(
+    NAME test_shell_guard_hook
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_shell_guard_hook.sh
+)
+
+add_test(
+    NAME test_shell_filter_aggregate_benchmark
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_shell_filter_aggregate_benchmark.sh $<TARGET_FILE:axon>
+)

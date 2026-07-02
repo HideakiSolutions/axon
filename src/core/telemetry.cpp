@@ -44,6 +44,71 @@ double safe_double(duckdb::MaterializedQueryResult& res, int col) {
     return v.GetValue<double>();
 }
 
+bool is_known_layer(const std::string& layer) {
+    return layer == "retrieval" ||
+           layer == "shell_filtering" ||
+           layer == "compression" ||
+           layer == "cache" ||
+           layer == "ccr" ||
+           layer == "indexing" ||
+           layer == "unknown";
+}
+
+std::string infer_layer(const TelemetryEvent& event) {
+    if (is_known_layer(event.layer)) return event.layer;
+    if (event.cache_hit) return "cache";
+    if (event.type.find("compress") != std::string::npos ||
+        event.type.find("compression") != std::string::npos) {
+        return "compression";
+    }
+    if (event.origin == "shell" ||
+        event.type.find("shell") != std::string::npos ||
+        event.type.find("filter") != std::string::npos) {
+        return "shell_filtering";
+    }
+    if (event.type == "index" ||
+        event.type == "index-paths" ||
+        event.type == "watch") {
+        return "indexing";
+    }
+    if (event.type == "artifact_retrieve" ||
+        event.type == "artifact-retrieve" ||
+        event.type.find("ccr") != std::string::npos) {
+        return "ccr";
+    }
+    if (event.type == "capsule" ||
+        event.type == "get_context_capsule" ||
+        event.type == "get_skeleton" ||
+        event.type == "get_overview" ||
+        event.type == "get_impact_graph" ||
+        event.type == "get_callers" ||
+        event.type == "get_tests_for" ||
+        event.type == "search_memory" ||
+        event.type == "turn_search" ||
+        event.type == "dialogue_context" ||
+        event.type.rfind("/api/capsule", 0) == 0 ||
+        event.type.rfind("/api/search", 0) == 0 ||
+        event.type.rfind("/api/overview", 0) == 0 ||
+        event.type.rfind("/api/graph", 0) == 0) {
+        return "retrieval";
+    }
+    return "unknown";
+}
+
+json empty_layer_metrics() {
+    json layers = json::object();
+    for (const auto* layer : {"retrieval", "shell_filtering", "compression", "cache", "ccr", "unknown"}) {
+        layers[layer] = {
+            {"requests", 0},
+            {"tokens_sent", 0},
+            {"tokens_saved", 0},
+            {"reduction_percent", 0.0},
+            {"average_latency_ms", 0.0}
+        };
+    }
+    return layers;
+}
+
 void try_post_http(const std::string& endpoint, const std::string& payload) {
     if (endpoint.rfind("http://", 0) != 0) return;
     std::string rest = endpoint.substr(7);
@@ -117,6 +182,7 @@ double cost_per_m_input_usd() {
 void record_telemetry(const Config& cfg, Database* db, const TelemetryEvent& event) {
     if (!telemetry_enabled(cfg) || db == nullptr) return;
     try {
+        std::string layer = infer_layer(event);
         int64_t baseline = event.baseline_tokens_estimated;
         int64_t saved = event.tokens_saved;
         if (baseline <= 0 && event.tokens_estimated > 0)
@@ -126,8 +192,8 @@ void record_telemetry(const Config& cfg, Database* db, const TelemetryEvent& eve
 
         db->conn().Query(
             "INSERT INTO telemetry_events "
-            "(id, type, origin, latency_ms, tokens_estimated, baseline_tokens_estimated, tokens_saved, cache_hit, created_at) "
-            "VALUES (nextval('seq_id'), '" + sq(event.type) + "', '" + sq(event.origin) + "', " +
+            "(id, type, origin, layer, latency_ms, tokens_estimated, baseline_tokens_estimated, tokens_saved, cache_hit, created_at) "
+            "VALUES (nextval('seq_id'), '" + sq(event.type) + "', '" + sq(event.origin) + "', '" + sq(layer) + "', " +
             std::to_string(event.latency_ms) + ", " + std::to_string(event.tokens_estimated) + ", " +
             std::to_string(baseline) + ", " + std::to_string(saved) + ", " +
             std::string(event.cache_hit ? "true" : "false") + ", now())");
@@ -136,6 +202,7 @@ void record_telemetry(const Config& cfg, Database* db, const TelemetryEvent& eve
             json payload = {
                 {"type", event.type},
                 {"origin", event.origin},
+                {"layer", layer},
                 {"latency_ms", event.latency_ms},
                 {"tokens_estimated", event.tokens_estimated},
                 {"baseline_tokens_estimated", baseline},
@@ -156,7 +223,8 @@ json metrics_json(const Config& cfg, Database* db) {
         {"reduction_percent", 0.0},
         {"average_latency_ms", 0.0},
         {"cache_hit_rate", 0.0},
-        {"estimated_cost_usd", 0.0}
+        {"estimated_cost_usd", 0.0},
+        {"layers", empty_layer_metrics()}
     };
 
     if (!db) return out;
@@ -182,6 +250,28 @@ json metrics_json(const Config& cfg, Database* db) {
                 out["average_latency_ms"] = avg_latency;
                 out["cache_hit_rate"] = requests > 0 ? (static_cast<double>(hits) / requests) : 0.0;
                 out["estimated_cost_usd"] = (tokens / 1000000.0) * cost_per_m_input_usd();
+            }
+            auto by_layer = db->conn().Query(
+                "SELECT layer, COUNT(*), COALESCE(SUM(tokens_estimated),0), "
+                "COALESCE(SUM(tokens_saved),0), COALESCE(AVG(latency_ms),0) "
+                "FROM telemetry_events GROUP BY layer");
+            if (!by_layer->HasError()) {
+                for (duckdb::idx_t i = 0; i < by_layer->RowCount(); ++i) {
+                    std::string layer = by_layer->GetValue(0, i).ToString();
+                    if (!is_known_layer(layer)) layer = "unknown";
+                    int64_t requests = by_layer->GetValue<int64_t>(1, i);
+                    int64_t tokens = by_layer->GetValue<int64_t>(2, i);
+                    int64_t saved = by_layer->GetValue<int64_t>(3, i);
+                    double avg_latency = by_layer->GetValue<double>(4, i);
+                    double denom = static_cast<double>(tokens + saved);
+                    out["layers"][layer] = {
+                        {"requests", requests},
+                        {"tokens_sent", tokens},
+                        {"tokens_saved", saved},
+                        {"reduction_percent", denom > 0.0 ? (100.0 * saved / denom) : 0.0},
+                        {"average_latency_ms", avg_latency}
+                    };
+                }
             }
         } else {
             auto counts = db->conn().Query(

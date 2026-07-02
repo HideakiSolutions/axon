@@ -123,6 +123,7 @@ void Database::run_migrations() {
          "  id                         BIGINT PRIMARY KEY,"
          "  type                       VARCHAR NOT NULL,"
          "  origin                     VARCHAR NOT NULL,"
+         "  layer                      VARCHAR NOT NULL DEFAULT 'unknown',"
          "  created_at                 TIMESTAMP NOT NULL DEFAULT now(),"
          "  latency_ms                 BIGINT NOT NULL DEFAULT 0,"
          "  tokens_estimated           BIGINT NOT NULL DEFAULT 0,"
@@ -130,7 +131,20 @@ void Database::run_migrations() {
          "  tokens_saved               BIGINT NOT NULL DEFAULT 0,"
          "  cache_hit                  BOOLEAN NOT NULL DEFAULT false"
          ")");
+    try { exec("ALTER TABLE telemetry_events ADD COLUMN layer VARCHAR NOT NULL DEFAULT 'unknown'"); } catch (...) {}
     try { exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_created ON telemetry_events(created_at)"); } catch (...) {}
+    try { exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_layer ON telemetry_events(layer)"); } catch (...) {}
+
+    exec("CREATE TABLE IF NOT EXISTS ccr_artifacts ("
+         "  artifact_id     VARCHAR PRIMARY KEY,"
+         "  kind            VARCHAR NOT NULL,"
+         "  source_ref      VARCHAR NOT NULL,"
+         "  content         VARCHAR NOT NULL,"
+         "  token_estimate  BIGINT NOT NULL DEFAULT 0,"
+         "  created_at      TIMESTAMP NOT NULL DEFAULT now()"
+         ")");
+    try { exec("CREATE INDEX IF NOT EXISTS idx_ccr_artifacts_created ON ccr_artifacts(created_at)"); } catch (...) {}
+    try { exec("CREATE INDEX IF NOT EXISTS idx_ccr_artifacts_source ON ccr_artifacts(source_ref)"); } catch (...) {}
 
     // ── Dialogue Layer ────────────────────────────────────────────────────────
     // Structured conversation memory: Thread → Session → Turn, with automatic

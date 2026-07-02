@@ -9,8 +9,9 @@
       2. %USERPROFILE%\.claude\hooks\axon-auto-index.ps1  -- UserPromptSubmit hook (hourly sync)
       3. %USERPROFILE%\.claude\hooks\axon-post-edit.ps1   -- PostToolUse hook (write-through)
       4. %USERPROFILE%\.claude\hooks\axon-build-guard.ps1 -- PreToolUse hook (blocks high -j builds)
-      5. <project>\.claude\CLAUDE.md                      -- axon workflow guide
-      6. <project>\.claude\settings.json                  -- registers hooks for Claude Code
+      5. %USERPROFILE%\.claude\hooks\axon-shell-guard.ps1 -- PreToolUse hook (blocks noisy raw shell output)
+      6. <project>\.claude\CLAUDE.md                      -- axon workflow guide
+      7. <project>\.claude\settings.json                  -- registers hooks for Claude Code
 
 .PARAMETER ProjectPath
     Path to the project to configure. Defaults to current directory.
@@ -113,6 +114,55 @@ if ($tool -eq "Bash") {
 '@ | Set-Content -Path (Join-Path $HooksDir "axon-build-guard.ps1") -Encoding UTF8
 Write-Host "[axon] v Hook build-guard: $HooksDir\axon-build-guard.ps1"
 
+# axon-shell-guard.ps1 -- blocks known noisy raw Bash output in indexed projects
+@'
+# axon-shell-guard: PreToolUse hook -- route noisy shell output through Axon filters
+$input_json = $input | ConvertFrom-Json
+$tool = $input_json.tool_name
+if ($tool -ne "Bash") { exit 0 }
+
+$index = Join-Path (Get-Location) ".axon\index.duckdb"
+if (-not (Test-Path $index)) { exit 0 }
+
+$cmd = [string]$input_json.tool_input.command
+if (-not $cmd) { exit 0 }
+if ($env:AXON_ALLOW_RAW_SHELL -eq "1" -or $cmd -match '(^|[\s;&|])AXON_ALLOW_RAW_SHELL=1(\s|$)') { exit 0 }
+if ($cmd -match '(^|[\s;&|])axon\s+filter(\s|$)' -or $cmd -match '(^|[\s;&|])rtk(\s|$)') { exit 0 }
+if ($cmd -match '(^|\s)1?>\s*[^&]') { exit 0 }
+
+function Deny($family, $suggestion) {
+    $reason = "[axon] Raw Bash output for '$family' bypasses Axon metrics, CCR recovery, and token budgets. Use: $suggestion. Escape for intentional raw output: AXON_ALLOW_RAW_SHELL=1 <command>."
+    @{ hookSpecificOutput = @{ hookEventName = "PreToolUse"; permissionDecision = "deny"; permissionDecisionReason = $reason } } | ConvertTo-Json -Depth 5
+    exit 0
+}
+
+if ($cmd -match '(^|[\s;&|()`])git\s+diff([\s;&|`)]|$)' -and $cmd -notmatch '(^|\s)--(stat|name-only|name-status|quiet|check)(\s|$)') {
+    Deny "diff" "git diff ... | axon filter diff --budget=600 --metrics=json"
+}
+if ($cmd -match '(^|[\s;&|()`])(rg|grep|ack|ag)([\s;&|`)]|$)') {
+    Deny "grep" "get_context_capsule(query=...) for code search, or <search command> | axon filter grep --budget=600 --metrics=json"
+}
+if ($cmd -match '(^|[\s;&|()`])(cat|sed|awk|nl)([\s;&|`)]|$)' -and $cmd -match '\.(c|cc|cpp|cxx|h|hh|hpp|ts|tsx|js|jsx|py|rs|go|java|cs|php|dart|kt|kts|vue|lua|nix|rb|swift|scala|sh|bash|json|md)([\s;&|`)]|$)') {
+    Deny "raw-file-read" "get_skeleton(files=[...]) or get_context_capsule(query=..., pivot_files=[...]) before raw reads"
+}
+if ($cmd -match '(^|[\s;&|()`])(pytest|vitest|ctest|gtest|cargo\s+test|go\s+test|npm\s+test|pnpm\s+test|yarn\s+test|bun\s+test|mvn\s+test|gradle\s+test)([\s;&|`)]|$)') {
+    Deny "test" "<test command> 2>&1 | axon filter test --budget=700 --metrics=json"
+}
+if ($cmd -match '(^|[\s;&|()`])(tsc|vue-tsc)([\s;&|`)]|$)') {
+    Deny "tsc" "<tsc command> 2>&1 | axon filter tsc --budget=500 --metrics=json"
+}
+if ($cmd -match '(^|[\s;&|()`])(eslint|ruff|prettier|flake8|mypy|pylint|clippy)([\s;&|`)]|$)' -or $cmd -match '(^|[\s;&|()`])cargo\s+clippy([\s;&|`)]|$)') {
+    Deny "lint" "<lint command> 2>&1 | axon filter lint --budget=500 --metrics=json"
+}
+if ($cmd -match '(^|[\s;&|()`])(npm\s+(install|ci)|pnpm\s+install|yarn\s+install|bun\s+install)([\s;&|`)]|$)') {
+    Deny "package" "<package command> 2>&1 | axon filter package --budget=350 --metrics=json"
+}
+if ($cmd -match '(^|[\s;&|()`])(journalctl|docker\s+logs|kubectl\s+logs)([\s;&|`)]|$)' -or $cmd -match '(^|[\s;&|()`])tail\s+(-f|-n\s+[0-9]{3,})') {
+    Deny "log" "<log command> 2>&1 | axon filter log --budget=700 --metrics=json"
+}
+'@ | Set-Content -Path (Join-Path $HooksDir "axon-shell-guard.ps1") -Encoding UTF8
+Write-Host "[axon] v Hook shell-guard: $HooksDir\axon-shell-guard.ps1"
+
 # -- 2. Create .claude directory in project ------------------------------------
 New-Item -ItemType Directory -Force $ClaudeDir | Out-Null
 
@@ -132,6 +182,7 @@ $settings = @{
             @{ matcher = "Grep"; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-guard.ps1`"" }) }
             @{ matcher = "Glob"; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-guard.ps1`"" }) }
             @{ matcher = "Bash"; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-build-guard.ps1`""; timeout = 5 }) }
+            @{ matcher = "Bash"; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-shell-guard.ps1`""; timeout = 5 }) }
         )
         UserPromptSubmit = @(
             @{ matcher = ""; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-auto-index.ps1`""; timeout = 5 }) }

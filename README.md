@@ -5,7 +5,7 @@
 [![Lint](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)](CMakeLists.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-blue)](https://docs.anthropic.com/claude-code)
-[![MCP](https://img.shields.io/badge/MCP-26%20tools-8b5cf6)](src/mcp/server.cpp)
+[![MCP](https://img.shields.io/badge/MCP-27%20tools-8b5cf6)](src/mcp/server.cpp)
 
 <p align="center">
   <picture>
@@ -24,7 +24,7 @@
 - [What this does, in plain English](#what-this-does-in-plain-english)
 - [How it works](#how-it-works)
 - [Token reduction](#token-reduction)
-- [MCP Tools (26)](#mcp-tools-26)
+- [MCP Tools (27)](#mcp-tools-27)
 - [Dialogue Layer](#dialogue-layer)
 - [HTTP Mode & Axon Web](#http-mode--axon-web)
 - [Multi-repo Registry](#multi-repo-registry)
@@ -48,11 +48,13 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 24 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 25 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
 Axon also ships a native **Web mode** (`axon web`) with a browser graph explorer at `/` plus the same REST API previously exposed by `axon serve --http`.
+
+For agent setups that previously used RTK for shell-output reduction, see [Axon-first context and shell filtering](docs/en/axon-primary-rtk-optional.md). Axon is the primary path for context capsules, skeletons, shell filters, metrics, and CCR recovery; RTK can remain installed as an optional compatibility fallback.
 
 ## What this does, in plain English
 
@@ -115,6 +117,8 @@ Measured on real projects:
 | mcp-factory | Python | 22,480 | 1,389 | **93%** |
 | event-platform | Python | 42,546 | 2,353 | **94%** |
 
+Compression safety: `get_context_capsule` can enable `compression="body"` for oversized symbol bodies. Before lossy compression, Axon classifies the payload as source code, JSON, diff, log, Markdown, plain text, or binary-like data. Binary-like streams and impossible budgets pass through unchanged, compressed output is accepted only when the final token estimate is lower than the original, and lossy capsule body slices get CCR artifact IDs for exact recovery through `artifact_retrieve`. Structured capsule file entries include `source_ref` and `expand_command` so agents can trace and expand context through Axon tools before falling back to raw file reads.
+
 At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M input tokens):
 
 | | Without axon | With axon | Savings |
@@ -125,11 +129,11 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 
 ---
 
-## MCP Tools (26)
+## MCP Tools (27)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?`, `no_cache?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns |
+| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?`, `no_cache?`, `compression?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns; `compression="body"` enables type-aware lossy body compression |
 | `get_overview` | `limit?` | Top files by coupling + top symbols — ideal for onboarding |
 | `get_impact_graph` | `files[]` | Which files depend on the given files (bidirectional BFS) |
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
@@ -155,6 +159,7 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `thread_get` | `thread_id` | List sessions within a thread with digest summaries |
 | `anchor_link` | `turn_id`, `file_id?`, `symbol_id?`, `kind?` | Manually link a turn to a file or symbol |
 | `dialogue_context` | `query`, `file_paths?[]`, `limit?`, `thread_id?` | Past turns related to files or semantic query |
+| `artifact_retrieve` | `artifact_id` | Retrieve original content for a CCR artifact emitted by lossy compression |
 
 ### Agentic workflow coverage
 
@@ -284,6 +289,7 @@ axon web --port=7070 --group=backend
 | `GET` | `/api/search?q=` | Full-text + semantic search |
 | `GET` | `/api/observations?q=&limit=` | List or semantic-search saved observations |
 | `GET` | `/api/capsule?q=&budget=&pivots=` | Assemble token-budget context capsule |
+| `GET` | `/api/artifact/:id` | Retrieve original content for a CCR artifact |
 | `GET` | `/api/metrics` | Telemetry aggregates when enabled; graph/cache metrics otherwise |
 | `GET` | `/api/threads` | List all conversation threads |
 | `GET` | `/api/threads/:id/sessions` | Sessions belonging to a thread |
@@ -292,7 +298,9 @@ axon web --port=7070 --group=backend
 
 The built-in page renders the indexed graph directly from `/api/graph`. The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend can still consume the same API for the richer Sigma.js + Graphology experience.
 
-Telemetry is local and off by default. Enable it with `AXON_TELEMETRY=1` or `telemetry = true` in `.axon/config.toml`; events are stored in DuckDB and exposed through `/api/metrics`. Remote POST is attempted only when `AXON_TELEMETRY_ENDPOINT` is set, and failures are ignored.
+Telemetry is local and off by default. Enable it with `AXON_TELEMETRY=1` or `telemetry = true` in `.axon/config.toml`; events are stored in DuckDB and exposed through `/api/metrics`. Totals remain backward-compatible, and `layers` separates savings for `retrieval`, `shell_filtering`, `compression`, `cache`, `ccr`, and `unknown`. Remote POST is attempted only when `AXON_TELEMETRY_ENDPOINT` is set, and failures are ignored.
+
+Shell output filtering starts with `axon filter <auto|diff|lint|log|grep|json|package|test|tsc|text> [--budget=N] [--metrics=json]`, which reads stdin, classifies output before compression, and passes through unchanged when filtering is unsafe or does not save tokens. `grep`/`rg`-style output is grouped by file with per-file omissions and long-line truncation, `log` output counts levels, deduplicates repeated messages, and keeps important/error edge lines, JSON output is parsed into a schema/shape summary that strips raw values, `lint` output groups diagnostics by file and rule, `package` output collapses repeated npm/pnpm/yarn install operations while keeping errors and summaries, `test` output keeps failure blocks and final summaries, and `tsc`/TypeScript compiler diagnostics are grouped by file and diagnostic code. Lossy shell summaries are emitted with an `axon:ccr` marker and `ccr_artifact_id` stderr field; use `axon artifact-retrieve <id>` to recover the exact original stdin. Default metrics are human-readable on stderr; pass `--metrics=json` for machine-readable command metrics. When `AXON_TELEMETRY=1` and a project DB exists, savings are recorded in the `shell_filtering` layer.
 
 ### Watch mode
 
@@ -381,7 +389,7 @@ brew tap HideakiSolutions/axon
 brew install axon
 ```
 
-After installation, wire axon into a Claude Code project (installs hooks + injects the workflow guide):
+After installation, wire axon into a Claude Code project (installs Grep/Glob, raw shell-output, build, auto-index, and write-through hooks + injects the workflow guide):
 
 ```bash
 axon-setup /path/to/your-project
@@ -551,7 +559,7 @@ src/
 ├── parser/
 │   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (18 langs)
 └── mcp/
-    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 26 MCP tool handlers
+    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 27 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
@@ -600,6 +608,7 @@ edges        (id, from_file, to_file, from_symbol, to_symbol, kind)  -- kind: im
 observations (id, content, file_path, embedding FLOAT[768], created_at)
 routes       (id, method, path, handler_file, framework, file_id)
 capsule_cache (query_hash, epoch, payload, created_at)
+ccr_artifacts (artifact_id, kind, source_ref, content, token_estimate, created_at)
 
 -- Dialogue Layer
 threads      (id, name, kind, created_at)                              -- kind: project | person | topic
@@ -638,7 +647,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| 26 MCP tools | ✅ Done | Code context + dialogue layer tools |
+| 27 MCP tools | ✅ Done | Code context + dialogue layer + CCR artifact retrieval tools |
 | HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
 | Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |

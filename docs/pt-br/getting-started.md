@@ -157,5 +157,6 @@ Isso ativa o BFS granular em `get_context_capsule` — pivôs expandem para seus
 
 - [Arquitetura](architecture.md)
 - [Referência de API](api-reference.md)
+- [Axon como camada primaria e RTK opcional](axon-primary-rtk-optional.md)
 - [FAQ](faq.md)
 - [Solução de Problemas](troubleshooting.md)
