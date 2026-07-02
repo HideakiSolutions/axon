@@ -2,6 +2,13 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <cstdlib>
+#ifdef _WIN32
+#  include <process.h>
+#  define axon_getpid _getpid
+#else
+#  include <unistd.h>
+#  define axon_getpid getpid
+#endif
 
 namespace axon {
 
@@ -69,10 +76,12 @@ void save_registry(const RegistryData& reg) {
     }
 
     // Write-to-temp + rename so concurrent readers never see a half-written
-    // registry (multiple serves upsert owner info independently).
+    // registry (multiple serves upsert owner info independently). The temp
+    // name is pid-unique so two processes saving at once cannot interleave
+    // writes into the same temp file.
     auto path = registry_path();
     auto tmp  = path;
-    tmp += ".new";
+    tmp += ".new." + std::to_string(axon_getpid());
     {
         std::ofstream f(tmp);
         f << j.dump(2) << "\n";

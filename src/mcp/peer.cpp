@@ -57,6 +57,29 @@ bool pid_alive(long long pid) {
 #endif
 }
 
+// send() can short-write on large payloads, and writing to a peer-closed
+// socket raises SIGPIPE — fatal for a stdio serve that never installed a
+// handler. Loop until done and suppress the signal per-call.
+static bool send_all(int fd, const char* data, size_t len) {
+#if defined(MSG_NOSIGNAL)
+    constexpr int flags = MSG_NOSIGNAL;
+#else
+    constexpr int flags = 0;
+#endif
+#if defined(SO_NOSIGPIPE)
+    int no_sigpipe = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE,
+               reinterpret_cast<const char*>(&no_sigpipe), sizeof(no_sigpipe));
+#endif
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, data + sent, len - sent, flags);
+        if (n <= 0) return false;
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
+
 static std::string generate_token() {
     std::random_device rd;
     std::ostringstream oss;
@@ -110,7 +133,7 @@ static void send_http_response(int fd, int status, const std::string& body) {
         << "Connection: close\r\n\r\n"
         << body;
     std::string response = oss.str();
-    send(fd, response.c_str(), response.size(), 0);
+    send_all(fd, response.c_str(), response.size());
 }
 
 static std::string header_value(const std::string& request, const std::string& name) {
@@ -281,7 +304,7 @@ static std::optional<std::string> http_post_local(int port, const std::string& p
         << "Connection: close\r\n\r\n"
         << body;
     std::string request = oss.str();
-    if (send(fd, request.c_str(), request.size(), 0) < 0) {
+    if (!send_all(fd, request.c_str(), request.size())) {
         error = "send failed";
         close(fd);
         return std::nullopt;
