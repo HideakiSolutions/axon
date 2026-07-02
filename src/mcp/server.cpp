@@ -1,5 +1,6 @@
 #include "server.hpp"
 #include "protocol.hpp"
+#include "peer.hpp"
 #include "version.hpp"
 #include "../core/registry.hpp"
 #include "../core/indexer.hpp"
@@ -281,6 +282,9 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
                 // already return an explicit error when it is unavailable.
             }
         }
+        // We now hold the DuckDB write lock: publish ourselves so latecomer
+        // serves can proxy their tool calls here instead of failing.
+        register_self_as_owner(ctx, ctx.peer_port);
         return true;
     } catch (const std::exception& e) {
         ctx.db.reset();
@@ -305,6 +309,17 @@ static json db_unavailable_result(const ServerContext& ctx) {
 
 static json handle_tool(const std::string& name, const json& args, ServerContext& ctx) {
     ensure_db_open(ctx, name == "run_pipeline");
+
+    // Another axon process holds the DuckDB write lock (typically a second
+    // Claude/Codex session or `axon web` in the same project). Forward the
+    // call to it over localhost instead of failing; if the owner is gone,
+    // fall through — the next ensure_db_open attempt will take the lock.
+    if (!ctx.db_ready() && is_database_lock_error(ctx.db_error)) {
+        std::string proxy_error;
+        if (auto proxied = proxy_tool_call(ctx, name, args, proxy_error))
+            return *proxied;
+        ctx.db_error += " (proxy attempt failed: " + proxy_error + ")";
+    }
 
     // Order matters: sync first (full walk detects mv/rm/new-file side-effects),
     // then drain pending-writes (re-resolves edges for files that already have
@@ -1480,7 +1495,18 @@ static void write_stdio_response(const json& response, bool framed) {
     std::cout.flush();
 }
 
+json call_tool(const std::string& name, const json& args, ServerContext& ctx) {
+    std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
+    return handle_tool(name, args, ctx);
+}
+
 void run_stdio(ServerContext& ctx) {
+    // Peer listener first, so ctx.peer_port is set before any owner
+    // registration. If the DB was already opened at startup we own the lock
+    // now; otherwise ensure_db_open registers us when it later succeeds.
+    if (start_peer_listener(ctx) && ctx.db_ready())
+        register_self_as_owner(ctx, ctx.peer_port);
+
     StdioEnvelope env;
     while (read_stdio_envelope(std::cin, env)) {
         if (!env.ok) {
@@ -1512,6 +1538,9 @@ void run_stdio(ServerContext& ctx) {
             std::string tool_name = params.value("name", "");
             json targs = params.value("arguments", json::object());
             auto start = std::chrono::steady_clock::now();
+            // One lock scope for the tool call AND its telemetry write, so
+            // the peer listener thread never touches ctx.db concurrently.
+            std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
             try {
                 response = make_response(id, handle_tool(tool_name, targs, ctx));
             } catch (const std::exception& e) {
@@ -1533,6 +1562,9 @@ void run_stdio(ServerContext& ctx) {
 
         write_stdio_response(response, env.framed);
     }
+
+    unregister_self_as_owner(ctx);
+    stop_peer_listener();
 }
 
 } // namespace axon::mcp

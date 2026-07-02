@@ -481,11 +481,15 @@ args = ["serve"]
 LD_LIBRARY_PATH = "/path/to/axon/third_party/duckdb/lib"
 ```
 
-If you switch from Claude to Codex while Claude is still open in the same
-project, both clients may try to start `axon serve` against the same
-`.axon/index.duckdb`. Axon now completes the MCP handshake even when that
-database is locked; DB-backed tools will return a clear lock error until the
-older server exits. To inspect active servers:
+If two clients (a second Claude session, Codex, `axon web`) run `axon serve`
+against the same `.axon/index.duckdb`, DuckDB only grants the write lock to
+one of them. Axon handles this transparently: the process holding the lock
+registers itself as the repo's owner (pid, localhost port, and an auth token
+in `~/.axon/registry.json`), and any latecomer serve forwards its tool calls
+to the owner over `127.0.0.1`. When the owner exits, the latecomer takes the
+lock on its next tool call and promotes itself to owner. You should only see
+a lock error if the proxy path is also unavailable (e.g. the owner is an
+older axon binary without a peer listener). To inspect active servers:
 
 ```bash
 pgrep -af 'axon.*serve'
