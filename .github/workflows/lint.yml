@@ -16,7 +16,7 @@ jobs:
     name: ShellCheck (scripts/)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run ShellCheck
         run: find scripts -name "*.sh" -print0 | xargs -0 shellcheck
 
@@ -24,7 +24,7 @@ jobs:
     name: clang-format
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format-15
       - name: Check formatting
