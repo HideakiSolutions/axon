@@ -97,17 +97,20 @@ Files are inserted in pass 1 so that edge FKs (`from_file`, `to_file`) are alway
 **5. Read-only mode for secondary repos**
 When aggregating multi-repo graphs, secondary DBs are opened in `READ_ONLY` mode to prevent lock conflicts with the primary repo's MCP server, which may be running concurrently.
 
-**6. Symbol-mode capsule with file-mode fallback**
+**6. Peer-proxy between concurrent serves**
+DuckDB grants the write lock to one process. Rather than making every other serve fail, the lock holder runs a token-gated peer listener on `127.0.0.1` (ephemeral port, published with its pid in `~/.axon/registry.json`) and latecomer serves forward tool calls to it. When the owner exits, the next tool call on a latecomer opens the DB directly and takes over ownership. Trade-off: one extra thread per serve and a localhost HTTP hop for proxied calls, in exchange for concurrent sessions never hitting lock errors.
+
+**7. Symbol-mode capsule with file-mode fallback**
 When `symbol_incoming` has data, `assemble_capsule` extracts only the matched symbol bodies — pivots get full bodies (cap `budget/16`), callers get signature + 2-3 lines (cap `budget/80`). When no symbol-level edges exist, the function falls back to file-level BFS with skeletonized support. Trade-off: dual rendering paths to maintain, but the capsule degrades gracefully on repos without `granularity = "symbol"` enabled.
 
-**7. Caller resolution by line containment**
+**8. Caller resolution by line containment**
 The parser emits one `CallSite{caller, callee, line}` per `call_expression` AST node, then a post-pass picks the smallest enclosing symbol whose line range contains each call. This is cross-language and avoids per-grammar callstack walking. Trade-off: module-level calls are dropped (no enclosing symbol), and overloaded callees can resolve ambiguously.
 
 ## Constraints & Trade-offs
 
 | Constraint | Impact |
 |-----------|--------|
-| DuckDB single-writer | Multi-repo aggregation opens secondaries in READ_ONLY |
+| DuckDB single-writer | Multi-repo aggregation opens secondaries in READ_ONLY; concurrent serves on one repo proxy tool calls to the lock holder |
 | llama.cpp CPU inference | Embedding 50k symbols takes ~60s on first index; incremental reindex is fast |
 | tree-sitter 18 grammars | First build ~10–12 min; ccache makes subsequent builds ~3 min |
 | Callee resolution by name | `resolve_calls` matches callees by simple name lookup (no type inference) — overloaded callees may resolve to the wrong overload |

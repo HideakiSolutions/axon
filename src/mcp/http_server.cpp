@@ -1,4 +1,5 @@
 #include "http_server.hpp"
+#include "peer.hpp"
 #include "../core/git.hpp"
 #include "../core/registry.hpp"
 #include "../core/capsule.hpp"
@@ -786,6 +787,12 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
     std::cout << "Axon Web listening on http://" << cfg.host << ":" << cfg.port << "\n";
     std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  /api/detect-changes  /api/observations  /api/capsule\n";
 
+    // Same peer-proxy mechanism as stdio serves: a localhost listener that
+    // executes tool calls for latecomer serves while this process holds the
+    // DuckDB write lock (always on 127.0.0.1 even when --host is public).
+    if (start_peer_listener(ctx) && ctx.db_ready())
+        register_self_as_owner(ctx, ctx.peer_port);
+
     while (g_running) {
         fd_set fds;
         FD_ZERO(&fds);
@@ -806,6 +813,9 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
 
             std::string response_body;
             auto start = std::chrono::steady_clock::now();
+            // Serialize against the peer listener thread, which may be
+            // executing a proxied tool call on the same ctx right now.
+            std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
             if (method == "OPTIONS") {
                 response_body = "";
             } else {
@@ -824,6 +834,9 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
         }
         close(client_fd);
     }
+
+    unregister_self_as_owner(ctx);
+    stop_peer_listener();
 
     close(server_fd);
 #ifdef _WIN32

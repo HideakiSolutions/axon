@@ -133,9 +133,16 @@ cat ~/.axon/registry.json
 
 ### DuckDB "database is locked" error
 
-**Symptom:** `axon serve` fails with a DuckDB lock error.
+**Symptom:** DB-backed MCP tools return a lock error.
 
 **Cause:** Another `axon` process has the DB open in write mode.
+
+Since the peer-proxy mechanism landed, this should be rare: the serve holding
+the lock registers itself in `~/.axon/registry.json` (`owner_pid`,
+`owner_port`, `owner_token`) and latecomer serves automatically forward tool
+calls to it over localhost. A persistent lock error means the proxy path
+failed — usually because the lock holder is an older axon binary without a
+peer listener, or a non-serve process (e.g. a stuck `axon index`).
 
 **Fix:**
 ```bash
