@@ -14,7 +14,7 @@ concurrency:
 jobs:
   shellcheck:
     name: ShellCheck (scripts/)
-    runs-on: ubuntu-22.04
+    runs-on: hideaki-k3s
     steps:
       - uses: actions/checkout@v7
       - name: Run ShellCheck
@@ -22,7 +22,7 @@ jobs:
 
   clang-format:
     name: clang-format
-    runs-on: ubuntu-22.04
+    runs-on: hideaki-k3s
     steps:
       - uses: actions/checkout@v7
       - name: Install clang-format

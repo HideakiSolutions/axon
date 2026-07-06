@@ -9,7 +9,7 @@ on:
 jobs:
   shellcheck:
     name: ShellCheck
-    runs-on: ubuntu-latest
+    runs-on: hideaki-k3s
     steps:
       - uses: actions/checkout@v7
       - name: Install ShellCheck
