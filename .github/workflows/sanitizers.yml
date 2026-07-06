@@ -24,7 +24,7 @@ concurrency:
 jobs:
   sanitize:
     name: ${{ matrix.sanitizer }} (ubuntu-22.04)
-    runs-on: ubuntu-22.04
+    runs-on: hideaki-k3s
     strategy:
       fail-fast: false
       matrix:
