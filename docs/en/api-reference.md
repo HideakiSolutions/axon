@@ -326,8 +326,8 @@ When running `axon web` or `axon serve --http`:
 | `GET` | `/api/symbol/<name>` | Symbol detail: `{name, kind, file, line, signature, caller_files}` |
 | `GET` | `/api/search?q=<query>` | Search: `{files[], symbols[]}` |
 | `GET` | `/api/observations?q=<text>&limit=N` | List observations (semantic search if embeddings enabled) |
-| `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule |
-| `GET` | `/api/artifact/<artifact_id>` | Retrieve original content for a CCR artifact |
+| `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule — `400` when `q` is missing, `503` when the DB or the embedding model is not ready |
+| `GET` | `/api/artifact/<artifact_id>` | Retrieve original content for a CCR artifact — `404` when unknown, `503` when the DB is not ready |
 | `GET` | `/api/metrics` | Request/token/cache/cost aggregates when telemetry is enabled, including per-layer savings; graph/cache summary otherwise |
 | `POST` | `/api/detect-changes` | Detect changed symbols/files (body: `{ref?}`) |
 | `GET` | `/api/threads` | List all threads |
@@ -422,6 +422,7 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 | `LD_LIBRARY_PATH` | — | Only needed for source-tree runs if the binary cannot find DuckDB; release packages set RPATH/RUNPATH |
 | `AXON_EMBEDDING_MODEL` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
+| `AXON_HOME` | `~/.axon` | Directory holding the multi-repo `registry.json`; tests and sandboxes point it at a scratch dir so runs never touch the real registry |
 | `AXON_TELEMETRY` | off | Opt into local telemetry with `1`, `true`, `yes`, or `on` |
 | `AXON_TELEMETRY_ENDPOINT` | — | Optional HTTP endpoint for best-effort remote telemetry POSTs |
 | `AXON_COST_PER_M_INPUT_USD` | `3.0` | Cost basis for `/api/metrics` estimated input cost |
@@ -447,6 +448,7 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 | `axon artifact-retrieve <artifact_id>` | Print original content for a CCR artifact (looks up the DuckDB index, then the `.axon/ccr/` file sidecar, then the lock-holding peer process) |
 | `axon filter <auto\|diff\|lint\|log\|grep\|json\|package\|test\|tsc\|text> [--budget=N] [--metrics=json]` | Filter stdin shell output with type-aware compression, CCR recovery markers, grep/rg grouping, log level/dedup summaries, JSON schema summaries, lint rule summaries, package-manager summaries, test failure summaries, TypeScript diagnostic grouping, safe passthrough, and optional JSON stderr metrics; when another process holds the index lock, artifacts are stored in the `.axon/ccr/` file sidecar so output stays recoverable |
 | `axon status` | Show index summary for the current project |
+| `axon registry prune` | Drop registry entries whose repo root no longer exists (entries with a live owner process are kept); group memberships of pruned repos are cleaned up |
 
 ### Project config (`.axon/config.toml`)
 

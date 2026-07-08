@@ -147,6 +147,53 @@ target_link_libraries(test_objectives PRIVATE
 )
 add_test(NAME test_objectives COMMAND test_objectives)
 
+# Registry tests — pure filesystem + JSON, no DuckDB/llama.cpp. Runs entirely
+# under an isolated AXON_HOME.
+add_executable(test_registry unit/test_registry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/registry.cpp
+)
+target_include_directories(test_registry PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+)
+target_link_libraries(test_registry PRIVATE
+    GTest::gtest_main
+)
+add_test(NAME test_registry COMMAND test_registry)
+
+# Capsule budget tests — drive assemble_capsule end-to-end; require the real
+# GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
+add_executable(test_capsule_budget unit/test_capsule_budget.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/shell_filter.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/git.cpp
+)
+target_include_directories(test_capsule_budget PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
+)
+target_link_libraries(test_capsule_budget PRIVATE
+    tree_sitter_lib
+    ts_typescript ts_javascript ts_python ts_rust ts_go
+    ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
+    ts_lua ts_nix ts_ruby ts_swift ts_scala
+    blake3_lib
+    duckdb_lib
+    llama
+    ggml
+    GTest::gtest_main
+)
+add_test(NAME test_capsule_budget COMMAND test_capsule_budget)
+
 # Semantic tests — require a real GGUF model; auto-skip via GTEST_SKIP unless
 # AXON_EMBEDDING_MODEL points at the model explicitly.
 add_executable(test_semantic unit/test_semantic.cpp
@@ -181,6 +228,11 @@ add_test(
 add_test(
     NAME test_cpp_header_impl
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_cpp_header_impl.sh $<TARGET_FILE:axon>
+)
+
+add_test(
+    NAME test_http_status_codes
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_http_status_codes.sh $<TARGET_FILE:axon>
 )
 
 add_test(

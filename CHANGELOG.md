@@ -5,6 +5,16 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.9] — 2026-07-08
+
+### Fixed
+- Capsule token budget could be exceeded by up to ~46% at scale: in symbol mode with no symbol-level edges, the file-level support augmentation appended each support skeleton without checking it fit the remaining budget, so one signature-heavy file (e.g. a 44 KB generated `types.ts` whose skeleton barely compresses) blew straight through the cap (observed live: `budget=8000` → 11,693-token capsule on a 6,613-symbol repo). Oversized skeletons are now skipped and smaller candidates keep filling the gap; regression-tested with a fixture whose support skeleton alone exceeds the whole budget.
+- The HTTP API answered `200 OK` for every `/api/capsule` failure with an ambiguous `{"error": "q parameter required and DB must be ready"}` body, so clients could not tell success from failure without parsing the body. Now: `400` for a missing `q`, `503` for DB-not-ready and model-not-loaded (with distinct messages), `404`/`503` for `/api/artifact/<id>` unknown-artifact/DB-not-ready.
+
+### Added
+- `AXON_HOME` environment variable: overrides the `~/.axon` directory that holds the multi-repo `registry.json`. Test suites and sandboxes point it at a scratch dir — previously every e2e run permanently registered its `/tmp` fixtures in the user's real registry (observed: 140 dead entries out of 174 accumulated on a dev machine). The e2e and MCP smoke suites now run hermetically under it.
+- `axon registry prune`: removes registry entries whose repo root no longer exists (entries whose registered owner process is still alive are kept), and drops group memberships of pruned repos.
+
 ## [1.2.8] — 2026-07-08
 
 ### Changed
