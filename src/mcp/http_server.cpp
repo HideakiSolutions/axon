@@ -1,5 +1,6 @@
 #include "http_server.hpp"
 #include "peer.hpp"
+#include "version.hpp"
 #include "../core/git.hpp"
 #include "../core/registry.hpp"
 #include "../core/capsule.hpp"
@@ -734,7 +735,7 @@ static std::string handle_request(const std::string& method, const std::string& 
         const bool eligible_for_cache = explicit_pivots.empty();
         std::string cache_key;
         if (eligible_for_cache) {
-            cache_key = axon::compute_capsule_cache_key(q, budget, epoch);
+            cache_key = axon::compute_capsule_cache_key(q, budget, epoch, axon::VERSION);
             if (auto hit = axon::capsule_cache_lookup(*ctx.db, cache_key, epoch))
                 return capsule_to_json(*hit, "hit");
         }

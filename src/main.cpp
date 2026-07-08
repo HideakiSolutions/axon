@@ -453,8 +453,8 @@ int main(int argc, char* argv[]) {
         // a fresh assemble after parser/grammar changes that would otherwise
         // be served from a stale entry.
         const std::string epoch = axon::current_project_epoch(*db);
-        const std::string cache_key =
-            axon::compute_capsule_cache_key(query, cfg.project_cfg.token_budget, epoch);
+        const std::string cache_key = axon::compute_capsule_cache_key(
+            query, cfg.project_cfg.token_budget, epoch, axon::VERSION);
         if (!no_cache) {
             if (auto hit = axon::capsule_cache_lookup(*db, cache_key, epoch)) {
                 std::cout << "{\n";

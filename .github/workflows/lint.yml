@@ -13,12 +13,18 @@ concurrency:
 
 jobs:
   shellcheck:
-    name: ShellCheck (scripts/)
+    # Single ShellCheck gate (the duplicate job in ci.yml was removed; this
+    # name matches the required status check on main).
+    name: ShellCheck
     runs-on: hideaki-k3s
     steps:
       - uses: actions/checkout@v7
       - name: Run ShellCheck
-        run: find scripts -name "*.sh" -print0 | xargs -0 shellcheck
+        # scripts/ gates at default severity; tests/ (smoke + e2e harnesses,
+        # added later with pre-existing style infos) gates at warning+.
+        run: |
+          find scripts -name "*.sh" -print0 | xargs -0 shellcheck
+          find tests -name "*.sh" -print0 | xargs -0 shellcheck --severity=warning
 
   clang-format:
     name: clang-format

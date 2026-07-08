@@ -34,6 +34,16 @@ std::string output_kind_to_string(OutputKind kind) {
         return "plain_text";
     case OutputKind::Binary:
         return "binary";
+    case OutputKind::Grep:
+        return "grep";
+    case OutputKind::Tsc:
+        return "tsc";
+    case OutputKind::Test:
+        return "test";
+    case OutputKind::Package:
+        return "package";
+    case OutputKind::Lint:
+        return "lint";
     }
     return "plain_text";
 }
@@ -351,6 +361,13 @@ std::string compress_body(const std::string& source, std::optional<Language> lan
         break;
     case OutputKind::Json:
     case OutputKind::PlainText:
+    // Forced filter kinds never come out of classify_output, but keep the
+    // switch total: treat them like plain text if they ever land here.
+    case OutputKind::Grep:
+    case OutputKind::Tsc:
+    case OutputKind::Test:
+    case OutputKind::Package:
+    case OutputKind::Lint:
         result = compress_plain_text_lines(lines);
         break;
     case OutputKind::Binary:

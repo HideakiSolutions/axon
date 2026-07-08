@@ -259,8 +259,14 @@ if (Test-Path $AxonBin) {
     }
 
     Write-Host "[axon] Indexing project (this may take a moment)..."
+    # Native stderr under 'Stop' becomes a terminating error in Windows
+    # PowerShell 5.1 before $LASTEXITCODE is ever checked (killing the
+    # STATUS_DLL_NOT_FOUND guidance below). Relax just for this call.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $AxonBin index $Project
     $indexExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
     if ($indexExit -ne 0) {
         Write-Host "[axon] ERROR: axon.exe index failed (exit $indexExit)."
         if ($indexExit -eq -1073741515 -or $indexExit -eq -1073741511 -or $indexExit -eq 53) {
@@ -282,9 +288,15 @@ if ($modelForMcp) { $mcpObj["env"] = @{ AXON_EMBEDDING_MODEL = $modelForMcp } }
 $mcpJson = $mcpObj | ConvertTo-Json -Depth 5 -Compress
 $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
 if ($claudeCmd) {
+    # 2>$null forces stderr through PowerShell's error stream — under 'Stop'
+    # (PS 5.1) any stderr line from the claude CLI would terminate the script.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & claude mcp remove axon -s user 2>$null | Out-Null
     & claude mcp add-json axon $mcpJson -s user 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $mcpExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($mcpExit -eq 0) {
         Write-Host "[axon] v MCP server registered with Claude Code (user scope)"
     } else {
         Write-Host "[axon] WARN: could not auto-register the MCP server. Add to ~/.claude.json manually:"

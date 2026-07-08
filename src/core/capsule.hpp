@@ -62,9 +62,11 @@ assemble_capsule(const std::string& query,
 // Snapshot the current index epoch. Returns "0" when no files indexed yet.
 std::string current_project_epoch(Database& db);
 
-// BLAKE3-hash the cache key inputs. Pure function, no DB access.
+// BLAKE3-hash the cache key inputs. Pure function, no DB access. `version`
+// (axon::VERSION at call sites) keys entries to the binary that assembled
+// them, so an upgrade never serves capsules shaped by old assembly logic.
 std::string compute_capsule_cache_key(const std::string& query, int token_budget,
-                                      const std::string& epoch);
+                                      const std::string& epoch, const std::string& version);
 
 // Look up a cached capsule. Returns nullopt on miss or epoch mismatch.
 std::optional<ContextCapsule> capsule_cache_lookup(Database& db, const std::string& key,
