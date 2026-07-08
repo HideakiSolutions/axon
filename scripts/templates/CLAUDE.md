@@ -104,6 +104,14 @@ Escape para casos intencionais e pequenos:
 AXON_ALLOW_RAW_SHELL=1 sed -n '1,80p' file.cpp
 ```
 
+## Subagentes (Agent tool)
+
+Subagentes não herdam a descoberta de tools da sessão principal — apenas a lista de nomes deferred. Contrato para qualquer prompt de Agent neste projeto:
+
+1. **Embuta a instrução de descoberta no prompt**: "exploração de código via `mcp__axon__*` — carregue os schemas com ToolSearch (`select:mcp__axon__get_context_capsule,mcp__axon__get_skeleton,...`) antes do primeiro uso; comece por `get_overview` (repo desconhecido) ou `get_context_capsule(query)`".
+2. **Fallback sem MCP** (harness externo, cron, CI): a CLI `axon` no PATH cobre o essencial — `axon capsule "<query>"`, `axon skeleton <file>`, `<cmd> | axon filter <kind> --budget=N`. Mesmo índice, mesma economia.
+3. **Os hooks valem para subagentes**: Grep/Glob e shell bruto ruidoso são bloqueados também no contexto deles — a mensagem de bloqueio ensina a rota certa, mas embutir o contrato no prompt evita o desvio.
+
 ## Por que
 
 Grep/Glob e shell bruto ruidoso são bloqueados por hook — contexto pré-indexado, filtros com orçamento, métricas e CCR eliminam buscas redundantes e outputs irreversíveis. Build-guard protege host de paralelismo agressivo. Write-through sincroniza filesystem ↔ índice sem ação manual do agente.
