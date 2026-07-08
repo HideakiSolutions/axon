@@ -9,24 +9,24 @@
 
 // Grammar declarations (C linkage)
 extern "C" {
-    TSLanguage* tree_sitter_typescript();
-    TSLanguage* tree_sitter_javascript();
-    TSLanguage* tree_sitter_python();
-    TSLanguage* tree_sitter_rust();
-    TSLanguage* tree_sitter_go();
-    TSLanguage* tree_sitter_c_sharp();
-    TSLanguage* tree_sitter_php();
-    TSLanguage* tree_sitter_dart();
-    TSLanguage* tree_sitter_java();
-    TSLanguage* tree_sitter_bash();
-    TSLanguage* tree_sitter_cpp();
-    TSLanguage* tree_sitter_kotlin();
-    TSLanguage* tree_sitter_vue();
-    TSLanguage* tree_sitter_lua();
-    TSLanguage* tree_sitter_nix();
-    TSLanguage* tree_sitter_ruby();
-    TSLanguage* tree_sitter_swift();
-    TSLanguage* tree_sitter_scala();
+TSLanguage* tree_sitter_typescript();
+TSLanguage* tree_sitter_javascript();
+TSLanguage* tree_sitter_python();
+TSLanguage* tree_sitter_rust();
+TSLanguage* tree_sitter_go();
+TSLanguage* tree_sitter_c_sharp();
+TSLanguage* tree_sitter_php();
+TSLanguage* tree_sitter_dart();
+TSLanguage* tree_sitter_java();
+TSLanguage* tree_sitter_bash();
+TSLanguage* tree_sitter_cpp();
+TSLanguage* tree_sitter_kotlin();
+TSLanguage* tree_sitter_vue();
+TSLanguage* tree_sitter_lua();
+TSLanguage* tree_sitter_nix();
+TSLanguage* tree_sitter_ruby();
+TSLanguage* tree_sitter_swift();
+TSLanguage* tree_sitter_scala();
 }
 
 namespace axon {
@@ -42,7 +42,8 @@ std::optional<Language> language_from_extension(const std::string& ext) {
     if (ext == "dart") return Language::Dart;
     if (ext == "java") return Language::Java;
     if (ext == "sh" || ext == "bash") return Language::Bash;
-    if (ext == "cpp" || ext == "cxx" || ext == "cc" || ext == "hpp" || ext == "hxx" || ext == "h") return Language::Cpp;
+    if (ext == "cpp" || ext == "cxx" || ext == "cc" || ext == "hpp" || ext == "hxx" || ext == "h")
+        return Language::Cpp;
     if (ext == "kt" || ext == "kts") return Language::Kotlin;
     if (ext == "vue") return Language::Vue;
     if (ext == "lua") return Language::Lua;
@@ -55,24 +56,42 @@ std::optional<Language> language_from_extension(const std::string& ext) {
 
 std::string language_name(Language lang) {
     switch (lang) {
-        case Language::TypeScript:  return "typescript";
-        case Language::JavaScript:  return "javascript";
-        case Language::Python:      return "python";
-        case Language::Rust:        return "rust";
-        case Language::Go:          return "go";
-        case Language::CSharp:      return "csharp";
-        case Language::PHP:         return "php";
-        case Language::Dart:        return "dart";
-        case Language::Java:        return "java";
-        case Language::Bash:        return "bash";
-        case Language::Cpp:         return "cpp";
-        case Language::Kotlin:      return "kotlin";
-        case Language::Vue:         return "vue";
-        case Language::Lua:         return "lua";
-        case Language::Nix:         return "nix";
-        case Language::Ruby:        return "ruby";
-        case Language::Swift:       return "swift";
-        case Language::Scala:       return "scala";
+    case Language::TypeScript:
+        return "typescript";
+    case Language::JavaScript:
+        return "javascript";
+    case Language::Python:
+        return "python";
+    case Language::Rust:
+        return "rust";
+    case Language::Go:
+        return "go";
+    case Language::CSharp:
+        return "csharp";
+    case Language::PHP:
+        return "php";
+    case Language::Dart:
+        return "dart";
+    case Language::Java:
+        return "java";
+    case Language::Bash:
+        return "bash";
+    case Language::Cpp:
+        return "cpp";
+    case Language::Kotlin:
+        return "kotlin";
+    case Language::Vue:
+        return "vue";
+    case Language::Lua:
+        return "lua";
+    case Language::Nix:
+        return "nix";
+    case Language::Ruby:
+        return "ruby";
+    case Language::Swift:
+        return "swift";
+    case Language::Scala:
+        return "scala";
     }
     return "unknown";
 }
@@ -91,24 +110,42 @@ static std::string compute_blake3(const std::string& content) {
 
 static TSLanguage* get_ts_language(Language lang) {
     switch (lang) {
-        case Language::TypeScript:  return tree_sitter_typescript();
-        case Language::JavaScript:  return tree_sitter_javascript();
-        case Language::Python:      return tree_sitter_python();
-        case Language::Rust:        return tree_sitter_rust();
-        case Language::Go:          return tree_sitter_go();
-        case Language::CSharp:      return tree_sitter_c_sharp();
-        case Language::PHP:         return tree_sitter_php();
-        case Language::Dart:        return tree_sitter_dart();
-        case Language::Java:        return tree_sitter_java();
-        case Language::Bash:        return tree_sitter_bash();
-        case Language::Cpp:         return tree_sitter_cpp();
-        case Language::Kotlin:      return tree_sitter_kotlin();
-        case Language::Vue:         return tree_sitter_vue();
-        case Language::Lua:         return tree_sitter_lua();
-        case Language::Nix:         return tree_sitter_nix();
-        case Language::Ruby:        return tree_sitter_ruby();
-        case Language::Swift:       return tree_sitter_swift();
-        case Language::Scala:       return tree_sitter_scala();
+    case Language::TypeScript:
+        return tree_sitter_typescript();
+    case Language::JavaScript:
+        return tree_sitter_javascript();
+    case Language::Python:
+        return tree_sitter_python();
+    case Language::Rust:
+        return tree_sitter_rust();
+    case Language::Go:
+        return tree_sitter_go();
+    case Language::CSharp:
+        return tree_sitter_c_sharp();
+    case Language::PHP:
+        return tree_sitter_php();
+    case Language::Dart:
+        return tree_sitter_dart();
+    case Language::Java:
+        return tree_sitter_java();
+    case Language::Bash:
+        return tree_sitter_bash();
+    case Language::Cpp:
+        return tree_sitter_cpp();
+    case Language::Kotlin:
+        return tree_sitter_kotlin();
+    case Language::Vue:
+        return tree_sitter_vue();
+    case Language::Lua:
+        return tree_sitter_lua();
+    case Language::Nix:
+        return tree_sitter_nix();
+    case Language::Ruby:
+        return tree_sitter_ruby();
+    case Language::Swift:
+        return tree_sitter_swift();
+    case Language::Scala:
+        return tree_sitter_scala();
     }
     return nullptr;
 }
@@ -116,7 +153,7 @@ static TSLanguage* get_ts_language(Language lang) {
 // Extract text of a node from source
 static std::string node_text(TSNode node, const std::string& src) {
     uint32_t start = ts_node_start_byte(node);
-    uint32_t end   = ts_node_end_byte(node);
+    uint32_t end = ts_node_end_byte(node);
     if (start >= src.size() || end > src.size() || end <= start) return "";
     return src.substr(start, end - start);
 }
@@ -129,16 +166,14 @@ static std::string first_line(TSNode node, const std::string& src) {
 }
 
 static bool is_doc_kind(const std::string& kind) {
-    return kind == "comment" || kind == "block_comment" ||
-           kind == "line_comment" || kind == "string" ||
-           kind == "expression_statement";  // Python docstring wrapped in expr
+    return kind == "comment" || kind == "block_comment" || kind == "line_comment" ||
+           kind == "string" || kind == "expression_statement"; // Python docstring wrapped in expr
 }
 
 // Try to extract docstring/leading comment before a node
 // Searches up to 3 preceding siblings and concatenates contiguous comments.
-static std::optional<std::string> extract_docstring(
-    TSNode node, const std::string& src, TSNode root)
-{
+static std::optional<std::string> extract_docstring(TSNode node, const std::string& src,
+                                                    TSNode root) {
     TSNode parent = ts_node_parent(node);
     if (ts_node_is_null(parent)) return std::nullopt;
 
@@ -146,7 +181,10 @@ static std::optional<std::string> extract_docstring(
     // Find index of this node among siblings
     uint32_t node_idx = child_count;
     for (uint32_t i = 0; i < child_count; i++) {
-        if (ts_node_eq(ts_node_child(parent, i), node)) { node_idx = i; break; }
+        if (ts_node_eq(ts_node_child(parent, i), node)) {
+            node_idx = i;
+            break;
+        }
     }
     if (node_idx == 0) return std::nullopt;
 
@@ -233,7 +271,10 @@ static std::string extract_callee_name(TSNode call_node, const std::string& src)
         TSNode prop = ts_node_child_by_field_name(fn, "property", 8);
         if (ts_node_is_null(prop)) prop = ts_node_child_by_field_name(fn, "field", 5);
         if (ts_node_is_null(prop)) prop = ts_node_child_by_field_name(fn, "name", 4);
-        if (!ts_node_is_null(prop)) { fn = prop; continue; }
+        if (!ts_node_is_null(prop)) {
+            fn = prop;
+            continue;
+        }
 
         // Last resort: pick last named child (closest to leaf)
         uint32_t n = ts_node_named_child_count(fn);
@@ -248,17 +289,56 @@ static std::string extract_callee_name(TSNode call_node, const std::string& src)
 static bool is_callee_noise(const std::string& name) {
     static const std::unordered_set<std::string> stop = {
         // C/C++ keywords disguised as calls
-        "if","while","for","switch","return","sizeof","throw","catch",
+        "if",
+        "while",
+        "for",
+        "switch",
+        "return",
+        "sizeof",
+        "throw",
+        "catch",
         // Common built-ins / generic placeholders
-        "assert","print","println","printf","fprintf","cout","cerr","cin",
-        "log","trace","debug","info","warn","error","panic",
+        "assert",
+        "print",
+        "println",
+        "printf",
+        "fprintf",
+        "cout",
+        "cerr",
+        "cin",
+        "log",
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "panic",
         // Pointer-like in C/C++
-        "static_cast","dynamic_cast","reinterpret_cast","const_cast",
+        "static_cast",
+        "dynamic_cast",
+        "reinterpret_cast",
+        "const_cast",
         // JS/Python noise
-        "Object","Array","String","Number","Boolean","JSON","Math",
-        "len","str","int","float","bool","list","dict","set","tuple",
+        "Object",
+        "Array",
+        "String",
+        "Number",
+        "Boolean",
+        "JSON",
+        "Math",
+        "len",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
         // Common noise
-        "main","new","delete",
+        "main",
+        "new",
+        "delete",
     };
     if (name.size() < 2) return true;
     return stop.count(name) > 0;
@@ -277,8 +357,7 @@ static std::string extract_import_specifier(TSNode node, const std::string& src)
         kind == "raw_string_literal" || kind == "string") {
         auto s = node_text(node, src);
         // Peel quote/backtick pairs (handles "foo", 'foo', `foo`)
-        while (s.size() >= 2 &&
-               (s.front() == '"' || s.front() == '\'' || s.front() == '`') &&
+        while (s.size() >= 2 && (s.front() == '"' || s.front() == '\'' || s.front() == '`') &&
                s.front() == s.back()) {
             s = s.substr(1, s.size() - 2);
         }
@@ -287,17 +366,17 @@ static std::string extract_import_specifier(TSNode node, const std::string& src)
 
     // Path-like identifiers used across tree-sitter grammars
     static const std::unordered_set<std::string> path_kinds = {
-        "dotted_name",             // Python
-        "relative_import",         // Python (from . import ...)
-        "scoped_identifier",       // Rust, Java
-        "scoped_use_list",         // Rust (use foo::{a,b})
-        "use_list",                // Rust fallback
-        "qualified_name",          // C#, PHP
-        "namespace_name",          // PHP
-        "qualified_identifier",    // C++, Kotlin
-        "identifier",              // generic fallback
-        "simple_identifier",       // Kotlin
-        "package_identifier",      // Go
+        "dotted_name",          // Python
+        "relative_import",      // Python (from . import ...)
+        "scoped_identifier",    // Rust, Java
+        "scoped_use_list",      // Rust (use foo::{a,b})
+        "use_list",             // Rust fallback
+        "qualified_name",       // C#, PHP
+        "namespace_name",       // PHP
+        "qualified_identifier", // C++, Kotlin
+        "identifier",           // generic fallback
+        "simple_identifier",    // Kotlin
+        "package_identifier",   // Go
     };
     if (path_kinds.count(kind)) {
         return node_text(node, src);
@@ -328,11 +407,9 @@ static inline void push_import_edge(TSNode node, const std::string& src,
 
 static std::string first_string_literal(TSNode node, const std::string& src) {
     std::string kind = ts_node_type(node);
-    if (kind == "string" || kind == "string_literal" ||
-        kind == "interpreted_string_literal") {
+    if (kind == "string" || kind == "string_literal" || kind == "interpreted_string_literal") {
         auto s = node_text(node, src);
-        while (s.size() >= 2 &&
-               (s.front() == '"' || s.front() == '\'' || s.front() == '`') &&
+        while (s.size() >= 2 && (s.front() == '"' || s.front() == '\'' || s.front() == '`') &&
                s.front() == s.back()) {
             s = s.substr(1, s.size() - 2);
         }
@@ -499,7 +576,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
         } else if (kind == "struct_item") {
-            sym.kind = "class";  // kept "class" for back-compat with existing edge queries
+            sym.kind = "class"; // kept "class" for back-compat with existing edge queries
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -521,7 +598,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             // Without this, both collapsed onto kind="class" name="impl Type", losing the
             // trait↔implementor relationship in the symbol graph.
             TSNode trait_node = ts_node_child_by_field_name(node, "trait", 5);
-            TSNode type_node  = ts_node_child_by_field_name(node, "type", 4);
+            TSNode type_node = ts_node_child_by_field_name(node, "type", 4);
             std::string type_name = ts_node_is_null(type_node) ? "" : node_text(type_node, ctx.src);
             sym.kind = "impl";
             if (!ts_node_is_null(trait_node)) {
@@ -568,8 +645,10 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                     out += node_text(c, ctx.src);
                 } else if (ck == "modifier") {
                     std::string mt = node_text(c, ctx.src);
-                    if (mt == "async") out_async = true;
-                    else if (mt == "partial") out_partial = true;
+                    if (mt == "async")
+                        out_async = true;
+                    else if (mt == "partial")
+                        out_partial = true;
                 }
             }
             return out.empty() ? std::optional<std::string>{} : std::optional<std::string>(out);
@@ -755,8 +834,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
-        } else if (kind == "factory_constructor_signature" ||
-                   kind == "constructor_signature") {
+        } else if (kind == "factory_constructor_signature" || kind == "constructor_signature") {
             // factory + named/redirecting constructors — both important for
             // capsule rendering of DI/factory patterns common in Flutter.
             sym.kind = (kind == "factory_constructor_signature") ? "factory" : "constructor";
@@ -779,7 +857,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
     if (ctx.lang == Language::Java) {
         // Walk a `modifiers` child of a declaration and pull out @-annotations
         // and the `sealed`/`non-sealed` keywords (Java 15+) for capsule rendering.
-        auto collect_modifiers = [&](TSNode decl_node, bool& out_is_sealed) -> std::optional<std::string> {
+        auto collect_modifiers = [&](TSNode decl_node,
+                                     bool& out_is_sealed) -> std::optional<std::string> {
             out_is_sealed = false;
             TSNode mods = ts_node_child_by_field_name(decl_node, "modifiers", 9);
             // Fallback: tree-sitter-java sometimes emits modifiers as the first
@@ -788,7 +867,10 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                 uint32_t cc = ts_node_child_count(decl_node);
                 for (uint32_t i = 0; i < cc; i++) {
                     TSNode c = ts_node_child(decl_node, i);
-                    if (std::string(ts_node_type(c)) == "modifiers") { mods = c; break; }
+                    if (std::string(ts_node_type(c)) == "modifiers") {
+                        mods = c;
+                        break;
+                    }
                 }
             }
             if (ts_node_is_null(mods)) return std::nullopt;
@@ -877,15 +959,16 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
         // in entire `let` blocks.
         if (kind == "binding") {
             TSNode attrpath_node = ts_node_child_by_field_name(node, "attrpath", 8);
-            TSNode expr_node     = ts_node_child_by_field_name(node, "expression", 10);
+            TSNode expr_node = ts_node_child_by_field_name(node, "expression", 10);
             if (!ts_node_is_null(attrpath_node)) {
                 sym.name = node_text(attrpath_node, ctx.src);
                 sym.kind = "binding";
                 if (!ts_node_is_null(expr_node)) {
                     std::string ek = ts_node_type(expr_node);
-                    if (ek == "function_expression")          sym.kind = "function";
-                    else if (ek == "attrset_expression" ||
-                             ek == "rec_attrset_expression")  sym.kind = "attrset";
+                    if (ek == "function_expression")
+                        sym.kind = "function";
+                    else if (ek == "attrset_expression" || ek == "rec_attrset_expression")
+                        sym.kind = "attrset";
                 }
                 sym.signature = first_line(node, ctx.src);
                 is_symbol = !sym.name.empty();
@@ -904,9 +987,9 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                     s.name = node_text(a, ctx.src);
                     s.signature = first_line(node, ctx.src);
                     s.start_line = (int)ts_node_start_point(a).row + 1;
-                    s.end_line   = (int)ts_node_end_point(a).row + 1;
+                    s.end_line = (int)ts_node_end_point(a).row + 1;
                     s.start_byte = (int)ts_node_start_byte(a);
-                    s.end_byte   = (int)ts_node_end_byte(a);
+                    s.end_byte = (int)ts_node_end_byte(a);
                     ctx.symbols.push_back(std::move(s));
                 }
             }
@@ -924,8 +1007,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(fn)) {
                 std::string fn_kind = ts_node_type(fn);
                 std::string fn_text;
-                if (fn_kind == "variable_expression" &&
-                    ts_node_named_child_count(fn) > 0) {
+                if (fn_kind == "variable_expression" && ts_node_named_child_count(fn) > 0) {
                     fn_text = node_text(ts_node_named_child(fn, 0), ctx.src);
                 }
                 if (fn_text == "import") {
@@ -943,8 +1025,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                                          spec.front() == spec.back())
                                     spec = spec.substr(1, spec.size() - 2);
                             }
-                            if (!spec.empty())
-                                ctx.imports.push_back({"", spec, "imports"});
+                            if (!spec.empty()) ctx.imports.push_back({"", spec, "imports"});
                         }
                     }
                 }
@@ -980,7 +1061,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                     }
                 } else if (ck == "raw_text" || ck == "text") {
                     raw_start = ts_node_start_byte(c);
-                    raw_end   = ts_node_end_byte(c);
+                    raw_end = ts_node_end_byte(c);
                     script_start_row = ts_node_start_point(c).row;
                     found_raw = true;
                 }
@@ -995,18 +1076,18 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                 static thread_local bool warned_once = false;
                 if (!warned_once) {
                     std::fprintf(stderr,
-                        "[warn] Vue SFC <script> without `lang` attribute — "
-                        "parsing as JavaScript. Add `lang=\"ts\"` for TypeScript.\n");
+                                 "[warn] Vue SFC <script> without `lang` attribute — "
+                                 "parsing as JavaScript. Add `lang=\"ts\"` for TypeScript.\n");
                     warned_once = true;
                 }
             }
 
             std::string sub_src = ctx.src.substr(raw_start, raw_end - raw_start);
             TSParser* sub_parser = ts_parser_new();
-            ts_parser_set_language(sub_parser,
-                is_typescript ? tree_sitter_typescript() : tree_sitter_javascript());
-            TSTree* sub_tree = ts_parser_parse_string(sub_parser, nullptr,
-                sub_src.c_str(), (uint32_t)sub_src.size());
+            ts_parser_set_language(sub_parser, is_typescript ? tree_sitter_typescript()
+                                                             : tree_sitter_javascript());
+            TSTree* sub_tree = ts_parser_parse_string(sub_parser, nullptr, sub_src.c_str(),
+                                                      (uint32_t)sub_src.size());
             TSNode sub_root = ts_tree_root_node(sub_tree);
 
             std::vector<Symbol> sub_syms;
@@ -1018,9 +1099,9 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
             for (auto& s : sub_syms) {
                 s.start_line += (int)script_start_row;
-                s.end_line   += (int)script_start_row;
+                s.end_line += (int)script_start_row;
                 s.start_byte += (int)raw_start;
-                s.end_byte   += (int)raw_start;
+                s.end_byte += (int)raw_start;
                 ctx.symbols.push_back(std::move(s));
             }
             for (auto& e : sub_imports) {
@@ -1061,9 +1142,12 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                 sym.name = node_text(name_n, ctx.src);
                 TSNode type_n = ts_node_child_by_field_name(spec, "type", 4);
                 std::string tk = ts_node_is_null(type_n) ? "" : ts_node_type(type_n);
-                if (tk == "interface_type") sym.kind = "interface";
-                else if (tk == "struct_type") sym.kind = "struct";
-                else if (sk == "type_alias") sym.kind = "type_alias";
+                if (tk == "interface_type")
+                    sym.kind = "interface";
+                else if (tk == "struct_type")
+                    sym.kind = "struct";
+                else if (sk == "type_alias")
+                    sym.kind = "type_alias";
                 sym.signature = first_line(node, ctx.src);
                 is_symbol = true;
                 // Multi-spec blocks (`type ( A int; B string )`) only emit the
@@ -1100,8 +1184,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             uint32_t cc = ts_node_child_count(node);
             std::string keyword;
             if (cc > 0) keyword = node_text(ts_node_child(node, 0), ctx.src);
-            if (keyword == "export" || keyword == "readonly" ||
-                keyword == "declare" || keyword == "typeset") {
+            if (keyword == "export" || keyword == "readonly" || keyword == "declare" ||
+                keyword == "typeset") {
                 for (uint32_t i = 1; i < cc; i++) {
                     TSNode c = ts_node_child(node, i);
                     if (std::string(ts_node_type(c)) == "variable_assignment") {
@@ -1154,7 +1238,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             TSNode decl = ts_node_child_by_field_name(node, "declarator", 10);
             while (!ts_node_is_null(decl)) {
                 std::string dk = ts_node_type(decl);
-                if (dk == "identifier" || dk == "field_identifier" || dk == "qualified_identifier") {
+                if (dk == "identifier" || dk == "field_identifier" ||
+                    dk == "qualified_identifier") {
                     sym.name = node_text(decl, ctx.src);
                     break;
                 }
@@ -1217,8 +1302,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
         // Walk the modifiers child list (when present) for sealed/suspend/data
         // markers. tree-sitter-kotlin emits these as either modifier_list /
         // modifiers children or as scattered keyword tokens — we cover both.
-        auto kotlin_flags = [&](TSNode def_node, bool& sealed, bool& data,
-                                bool& suspend, bool& enum_class) {
+        auto kotlin_flags = [&](TSNode def_node, bool& sealed, bool& data, bool& suspend,
+                                bool& enum_class) {
             sealed = data = suspend = enum_class = false;
             uint32_t cc = ts_node_child_count(def_node);
             uint32_t scan = cc < 8 ? cc : 8;
@@ -1229,17 +1314,25 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                     uint32_t mc = ts_node_child_count(c);
                     for (uint32_t j = 0; j < mc; j++) {
                         std::string mk = node_text(ts_node_child(c, j), ctx.src);
-                        if (mk == "sealed") sealed = true;
-                        else if (mk == "data") data = true;
-                        else if (mk == "suspend") suspend = true;
-                        else if (mk == "enum") enum_class = true;
+                        if (mk == "sealed")
+                            sealed = true;
+                        else if (mk == "data")
+                            data = true;
+                        else if (mk == "suspend")
+                            suspend = true;
+                        else if (mk == "enum")
+                            enum_class = true;
                     }
                 } else {
                     std::string txt = node_text(c, ctx.src);
-                    if (txt == "sealed") sealed = true;
-                    else if (txt == "data") data = true;
-                    else if (txt == "suspend") suspend = true;
-                    else if (txt == "enum") enum_class = true;
+                    if (txt == "sealed")
+                        sealed = true;
+                    else if (txt == "data")
+                        data = true;
+                    else if (txt == "suspend")
+                        suspend = true;
+                    else if (txt == "enum")
+                        enum_class = true;
                 }
             }
         };
@@ -1255,14 +1348,17 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             for (uint32_t i = 0; i < cc; i++) {
                 TSNode c = ts_node_child(node, i);
                 std::string ct = ts_node_type(c);
-                if (ct == "simple_identifier") { seen_ident = (int)i; break; }
+                if (ct == "simple_identifier") {
+                    seen_ident = (int)i;
+                    break;
+                }
                 if (ct == "user_type" || ct == "receiver_type" || ct == "type_reference") {
                     is_extension = true;
                 }
             }
             sym.kind = is_extension ? "extension_function"
-                       : suspend     ? "suspend_function"
-                                     : "function";
+                       : suspend    ? "suspend_function"
+                                    : "function";
             for (uint32_t i = 0; i < cc; i++) {
                 TSNode c = ts_node_child(node, i);
                 if (std::string(ts_node_type(c)) == "simple_identifier") {
@@ -1276,10 +1372,14 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
         } else if (kind == "class_declaration") {
             bool sealed = false, data = false, suspend = false, enum_class = false;
             kotlin_flags(node, sealed, data, suspend, enum_class);
-            if      (sealed)     sym.kind = "sealed_class";
-            else if (data)       sym.kind = "data_class";
-            else if (enum_class) sym.kind = "enum_class";
-            else                 sym.kind = "class";
+            if (sealed)
+                sym.kind = "sealed_class";
+            else if (data)
+                sym.kind = "data_class";
+            else if (enum_class)
+                sym.kind = "enum_class";
+            else
+                sym.kind = "class";
             uint32_t cc = ts_node_child_count(node);
             for (uint32_t i = 0; i < cc; i++) {
                 TSNode c = ts_node_child(node, i);
@@ -1299,7 +1399,10 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             uint32_t cc = ts_node_child_count(node);
             for (uint32_t i = 0; i < cc; i++) {
                 std::string txt = node_text(ts_node_child(node, i), ctx.src);
-                if (txt == "companion") { is_companion = true; break; }
+                if (txt == "companion") {
+                    is_companion = true;
+                    break;
+                }
             }
             sym.kind = is_companion ? "companion_object" : "object";
             for (uint32_t i = 0; i < cc; i++) {
@@ -1372,8 +1475,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
                             a = ts_node_named_child(a, 0);
                         }
                         auto spec = node_text(a, ctx.src);
-                        if (spec.size() >= 2 &&
-                            (spec.front() == '"' || spec.front() == '\'') &&
+                        if (spec.size() >= 2 && (spec.front() == '"' || spec.front() == '\'') &&
                             spec.front() == spec.back()) {
                             spec = spec.substr(1, spec.size() - 2);
                         }
@@ -1421,20 +1523,25 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
-        } else if (kind == "class_declaration" || kind == "struct_declaration" || kind == "struct" ||
-                   kind == "enum_declaration" || kind == "protocol_declaration") {
+        } else if (kind == "class_declaration" || kind == "struct_declaration" ||
+                   kind == "struct" || kind == "enum_declaration" ||
+                   kind == "protocol_declaration") {
             if (kind == "class_declaration") {
                 sym.kind = "class";
                 TSNode decl_kind = ts_node_child_by_field_name(node, "declaration_kind", 16);
                 if (!ts_node_is_null(decl_kind)) {
                     std::string dk = node_text(decl_kind, ctx.src);
-                    if (dk == "struct") sym.kind = "struct";
-                    else if (dk == "actor") sym.kind = "actor";
+                    if (dk == "struct")
+                        sym.kind = "struct";
+                    else if (dk == "actor")
+                        sym.kind = "actor";
                 }
-            }
-            else if (kind == "struct_declaration" || kind == "struct") sym.kind = "struct";
-            else if (kind == "enum_declaration") sym.kind = "enum";
-            else sym.kind = "protocol";
+            } else if (kind == "struct_declaration" || kind == "struct")
+                sym.kind = "struct";
+            else if (kind == "enum_declaration")
+                sym.kind = "enum";
+            else
+                sym.kind = "protocol";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -1461,9 +1568,12 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             is_symbol = !sym.name.empty();
         } else if (kind == "class_definition" || kind == "object_definition" ||
                    kind == "trait_definition") {
-            if (kind == "class_definition") sym.kind = "class";
-            else if (kind == "object_definition") sym.kind = "object";
-            else sym.kind = "trait";
+            if (kind == "class_definition")
+                sym.kind = "class";
+            else if (kind == "object_definition")
+                sym.kind = "object";
+            else
+                sym.kind = "trait";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
@@ -1475,9 +1585,9 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
 
     if (is_symbol) {
         sym.start_line = (int)ts_node_start_point(node).row + 1;
-        sym.end_line   = (int)ts_node_end_point(node).row + 1;
+        sym.end_line = (int)ts_node_end_point(node).row + 1;
         sym.start_byte = (int)ts_node_start_byte(node);
-        sym.end_byte   = (int)ts_node_end_byte(node);
+        sym.end_byte = (int)ts_node_end_byte(node);
         if (!sym.docstring) {
             // Extract leading comment/docstring (searches up to 3 siblings back)
             TSNode root_dummy = {}; // root param unused in new impl
@@ -1492,9 +1602,9 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
         std::string callee = extract_callee_name(node, ctx.src);
         if (!callee.empty() && !is_callee_noise(callee)) {
             CallSite cs;
-            cs.caller_name = "";  // resolved post-walk via byte range
+            cs.caller_name = ""; // resolved post-walk via byte range
             cs.callee_name = std::move(callee);
-            cs.line        = (int)ts_node_start_point(node).row + 1;
+            cs.line = (int)ts_node_start_point(node).row + 1;
             // Stash byte position in line slot's high bits — no, keep separate.
             // We need start_byte to find enclosing symbol; piggyback in caller_name temporarily
             // and resolve below. Simpler: record byte and resolve after visit.
@@ -1511,10 +1621,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
     }
 }
 
-std::optional<ParsedFile> parse_file(
-    const std::filesystem::path& abs_path,
-    const std::filesystem::path& project_root)
-{
+std::optional<ParsedFile> parse_file(const std::filesystem::path& abs_path,
+                                     const std::filesystem::path& project_root) {
     auto ext = abs_path.extension().string();
     if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
 
@@ -1524,8 +1632,7 @@ std::optional<ParsedFile> parse_file(
 
     std::ifstream file(abs_path, std::ios::binary);
     if (!file) return std::nullopt;
-    std::string src((std::istreambuf_iterator<char>(file)),
-                     std::istreambuf_iterator<char>());
+    std::string src((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
     // Compute hash
     std::string hash = compute_blake3(src);
@@ -1534,12 +1641,12 @@ std::optional<ParsedFile> parse_file(
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, get_ts_language(lang));
     TSTree* tree = ts_parser_parse_string(parser, nullptr, src.c_str(), (uint32_t)src.size());
-    TSNode root  = ts_tree_root_node(tree);
+    TSNode root = ts_tree_root_node(tree);
 
     ParsedFile result;
-    result.path     = std::filesystem::relative(abs_path, project_root).string();
+    result.path = std::filesystem::relative(abs_path, project_root).string();
     result.language = lang;
-    result.hash     = hash;
+    result.hash = hash;
 
     ParseContext ctx{src, result.symbols, result.imports, result.calls, lang};
     visit_node(root, ctx);
@@ -1560,7 +1667,10 @@ std::optional<ParsedFile> parse_file(
             for (const auto& s : result.symbols) {
                 if (c.line < s.start_line || c.line > s.end_line) continue;
                 int span = s.end_line - s.start_line;
-                if (span < best_span) { best_span = span; best = &s; }
+                if (span < best_span) {
+                    best_span = span;
+                    best = &s;
+                }
             }
             if (!best) continue;                       // module-level call → drop
             if (best->name == c.callee_name) continue; // self-recursion → drop

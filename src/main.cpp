@@ -36,8 +36,9 @@ static void stop_watch(int) {
 }
 
 static int64_t elapsed_ms(std::chrono::steady_clock::time_point start) {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start).count();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                                 start)
+        .count();
 }
 
 static int estimate_tokens_cli(const std::string& s) {
@@ -99,7 +100,8 @@ static std::unique_ptr<axon::Database> open_database_or_report(const fs::path& d
     }
 }
 
-static axon::mcp::ServerContext make_server_context(const char* binary_path, bool load_model = true) {
+static axon::mcp::ServerContext make_server_context(const char* binary_path,
+                                                    bool load_model = true) {
     auto cfg = load_config();
     axon::mcp::ServerContext ctx;
     ctx.cfg = cfg;
@@ -115,7 +117,8 @@ static axon::mcp::ServerContext make_server_context(const char* binary_path, boo
                 try {
                     auto model_path = axon::find_model(ctx.binary_dir);
                     ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
-                } catch (...) {}
+                } catch (...) {
+                }
             }
         } catch (const std::exception& e) {
             ctx.db_error = e.what();
@@ -126,13 +129,15 @@ static axon::mcp::ServerContext make_server_context(const char* binary_path, boo
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) { print_usage(); return 1; }
+    if (argc < 2) {
+        print_usage();
+        return 1;
+    }
     std::string cmd = argv[1];
 
     // ── axon --version | -V | version ─────────────────────────────────────
     if (cmd == "--version" || cmd == "-V" || cmd == "version") {
-        std::cout << "axon " << axon::VERSION
-                  << " (build " << axon::GIT_SHA << ")\n";
+        std::cout << "axon " << axon::VERSION << " (build " << axon::GIT_SHA << ")\n";
         return 0;
     }
 
@@ -181,29 +186,32 @@ int main(int argc, char* argv[]) {
         bool force = false;
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
-            if (a == "--force" || a == "-f") force = true;
-            else if (path.empty()) path = a;
+            if (a == "--force" || a == "-f")
+                force = true;
+            else if (path.empty())
+                path = a;
         }
         if (!path.empty() && !fs::exists(path)) {
             std::cerr << "Error: path does not exist: " << path << "\n";
             return 1;
         }
         auto cfg = load_config(path);
-        std::cout << "Indexing " << cfg.project_root
-                  << (force ? " (force)" : "") << " ...\n";
+        std::cout << "Indexing " << cfg.project_root << (force ? " (force)" : "") << " ...\n";
 
         auto db = open_database_or_report(cfg.db_path);
         if (!db) return 1;
         auto start = std::chrono::steady_clock::now();
 
-        auto stats = axon::index_project(cfg, *db, [](const std::string& f, int done, int total) {
-            std::cerr << "\r[" << done << "/" << total << "] " << f << "    ";
-        }, force);
+        auto stats = axon::index_project(
+            cfg, *db,
+            [](const std::string& f, int done, int total) {
+                std::cerr << "\r[" << done << "/" << total << "] " << f << "    ";
+            },
+            force);
         std::cerr << "\n";
 
-        std::cout << "Done: " << stats.files_indexed << " files, "
-                  << stats.symbols_found << " symbols, "
-                  << stats.edges_found   << " edges\n";
+        std::cout << "Done: " << stats.files_indexed << " files, " << stats.symbols_found
+                  << " symbols, " << stats.edges_found << " edges\n";
 
         // Register this repo in the global registry
         axon::register_repo(cfg.project_root.string(), cfg.db_path.string());
@@ -220,10 +228,9 @@ int main(int argc, char* argv[]) {
             std::cerr << "[warn] Skipping embeddings: " << e.what() << "\n";
             std::cerr << "       Run `axon index` again after downloading the model.\n";
         }
-        axon::record_telemetry(cfg, db.get(), {
-            "index", "cli", elapsed_ms(start),
-            stats.symbols_found * 12, stats.files_indexed * 500, 0, false, "indexing"
-        });
+        axon::record_telemetry(cfg, db.get(),
+                               {"index", "cli", elapsed_ms(start), stats.symbols_found * 12,
+                                stats.files_indexed * 500, 0, false, "indexing"});
         return 0;
     }
 
@@ -233,8 +240,10 @@ int main(int argc, char* argv[]) {
         std::vector<fs::path> paths;
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
-            if (a == "--prune") prune = true;
-            else paths.push_back(fs::path(a));
+            if (a == "--prune")
+                prune = true;
+            else
+                paths.push_back(fs::path(a));
         }
 
         auto cfg = load_config();
@@ -259,14 +268,12 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        std::cout << stats.files_indexed << " indexed, "
-                  << stats.files_skipped << " unchanged";
+        std::cout << stats.files_indexed << " indexed, " << stats.files_skipped << " unchanged";
         if (prune) std::cout << ", " << stats.files_pruned << " pruned";
         std::cout << "\n";
-        axon::record_telemetry(cfg, db.get(), {
-            "index-paths", "cli", elapsed_ms(start),
-            stats.symbols_found * 12, stats.files_indexed * 500, 0, false, "indexing"
-        });
+        axon::record_telemetry(cfg, db.get(),
+                               {"index-paths", "cli", elapsed_ms(start), stats.symbols_found * 12,
+                                stats.files_indexed * 500, 0, false, "indexing"});
         return 0;
     }
 
@@ -277,9 +284,12 @@ int main(int argc, char* argv[]) {
         int debounce_ms = 500;
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
-            if (a.rfind("--interval-ms=", 0) == 0) interval_ms = std::stoi(a.substr(14));
-            else if (a.rfind("--debounce-ms=", 0) == 0) debounce_ms = std::stoi(a.substr(14));
-            else if (path.empty()) path = a;
+            if (a.rfind("--interval-ms=", 0) == 0)
+                interval_ms = std::stoi(a.substr(14));
+            else if (a.rfind("--debounce-ms=", 0) == 0)
+                debounce_ms = std::stoi(a.substr(14));
+            else if (path.empty())
+                path = a;
         }
         if (interval_ms < 100) interval_ms = 100;
         if (debounce_ms < 0) debounce_ms = 0;
@@ -297,15 +307,16 @@ int main(int argc, char* argv[]) {
         signal(SIGTERM, stop_watch);
 #endif
 
-        struct Stamp { int64_t mtime = 0; uintmax_t size = 0; };
+        struct Stamp {
+            int64_t mtime = 0;
+            uintmax_t size = 0;
+        };
         auto stamp = [](const fs::path& p) {
             std::error_code ec;
             auto t = fs::last_write_time(p, ec);
             auto s = fs::file_size(p, ec);
-            return Stamp{
-                ec ? int64_t{0} : static_cast<int64_t>(t.time_since_epoch().count()),
-                ec ? uintmax_t{0} : s
-            };
+            return Stamp{ec ? int64_t{0} : static_cast<int64_t>(t.time_since_epoch().count()),
+                         ec ? uintmax_t{0} : s};
         };
         auto snapshot = [&]() {
             std::unordered_map<std::string, Stamp> out;
@@ -325,8 +336,8 @@ int main(int argc, char* argv[]) {
         };
 
         auto seen = snapshot();
-        std::cout << "Watching " << cfg.project_root << " (poll "
-                  << interval_ms << "ms, debounce " << debounce_ms << "ms)\n";
+        std::cout << "Watching " << cfg.project_root << " (poll " << interval_ms << "ms, debounce "
+                  << debounce_ms << "ms)\n";
         std::cout.flush();
 
         while (g_watch_running) {
@@ -351,15 +362,13 @@ int main(int argc, char* argv[]) {
             std::this_thread::sleep_for(std::chrono::milliseconds(debounce_ms));
             auto start = std::chrono::steady_clock::now();
             auto stats = axon::index_files(cfg, *db, changed, deleted);
-            std::cout << stats.files_indexed << " indexed, "
-                      << stats.files_skipped << " unchanged";
+            std::cout << stats.files_indexed << " indexed, " << stats.files_skipped << " unchanged";
             if (deleted) std::cout << ", " << stats.files_pruned << " pruned";
             std::cout << "\n";
             std::cout.flush();
-            axon::record_telemetry(cfg, db.get(), {
-                "watch", "cli", elapsed_ms(start),
-                stats.symbols_found * 12, stats.files_indexed * 500, 0, false, "indexing"
-            });
+            axon::record_telemetry(cfg, db.get(),
+                                   {"watch", "cli", elapsed_ms(start), stats.symbols_found * 12,
+                                    stats.files_indexed * 500, 0, false, "indexing"});
             seen = snapshot();
         }
         std::cout << "Watch stopped.\n";
@@ -376,11 +385,16 @@ int main(int argc, char* argv[]) {
 
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
-            if (a == "--http") use_http = true;
-            else if (a.rfind("--port=", 0) == 0) http_port = std::stoi(a.substr(7));
-            else if (a.rfind("--host=", 0) == 0) http_host = a.substr(7);
-            else if (a.rfind("--group=", 0) == 0) http_group = a.substr(8);
-            else if (a == "--all") http_all_repos = true;
+            if (a == "--http")
+                use_http = true;
+            else if (a.rfind("--port=", 0) == 0)
+                http_port = std::stoi(a.substr(7));
+            else if (a.rfind("--host=", 0) == 0)
+                http_host = a.substr(7);
+            else if (a.rfind("--group=", 0) == 0)
+                http_group = a.substr(8);
+            else if (a == "--all")
+                http_all_repos = true;
         }
 
         auto ctx = make_server_context(argv[0]);
@@ -407,18 +421,27 @@ int main(int argc, char* argv[]) {
 
     // ── axon capsule <query> [--no-cache] ──────────────────────────────────
     if (cmd == "capsule") {
-        if (argc < 3) { std::cerr << "Usage: axon capsule <query> [--no-cache]\n"; return 1; }
+        if (argc < 3) {
+            std::cerr << "Usage: axon capsule <query> [--no-cache]\n";
+            return 1;
+        }
         std::string query;
         bool no_cache = false;
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
-            if (a == "--no-cache") { no_cache = true; continue; }
+            if (a == "--no-cache") {
+                no_cache = true;
+                continue;
+            }
             if (!query.empty()) query += " ";
             query += a;
         }
 
         auto cfg = load_config();
-        if (!fs::exists(cfg.db_path)) { std::cerr << "No index found. Run `axon index` first.\n"; return 1; }
+        if (!fs::exists(cfg.db_path)) {
+            std::cerr << "No index found. Run `axon index` first.\n";
+            return 1;
+        }
 
         auto db = open_database_or_report(cfg.db_path);
         if (!db) return 1;
@@ -429,8 +452,8 @@ int main(int argc, char* argv[]) {
         // a fresh assemble after parser/grammar changes that would otherwise
         // be served from a stale entry.
         const std::string epoch = axon::current_project_epoch(*db);
-        const std::string cache_key = axon::compute_capsule_cache_key(
-            query, cfg.project_cfg.token_budget, epoch);
+        const std::string cache_key =
+            axon::compute_capsule_cache_key(query, cfg.project_cfg.token_budget, epoch);
         if (!no_cache) {
             if (auto hit = axon::capsule_cache_lookup(*db, cache_key, epoch)) {
                 std::cout << "{\n";
@@ -438,17 +461,18 @@ int main(int argc, char* argv[]) {
                 std::cout << "  \"token_estimate\": " << hit->token_estimate << ",\n";
                 std::cout << "  \"pivot_files\": " << hit->pivot_files.size() << ",\n";
                 std::cout << "  \"support_files\": " << hit->support_files.size() << ",\n";
-                std::cout << "  \"compression_tokens_saved\": " << hit->compression_tokens_saved << ",\n";
+                std::cout << "  \"compression_tokens_saved\": " << hit->compression_tokens_saved
+                          << ",\n";
                 std::cout << "  \"cache\": \"hit\"\n";
                 std::cout << "}\n";
                 for (const auto& f : hit->pivot_files)
                     std::cerr << "  [pivot]   " << f.path << " (" << f.token_estimate << " tok)\n";
                 for (const auto& f : hit->support_files)
                     std::cerr << "  [support] " << f.path << " (" << f.token_estimate << " tok)\n";
-                axon::record_telemetry(cfg, db.get(), {
-                    "capsule", "cli", elapsed_ms(start),
-                    hit->token_estimate, hit->token_estimate * 4, hit->token_estimate * 3, true, "cache"
-                });
+                axon::record_telemetry(cfg, db.get(),
+                                       {"capsule", "cli", elapsed_ms(start), hit->token_estimate,
+                                        hit->token_estimate * 4, hit->token_estimate * 3, true,
+                                        "cache"});
                 return 0;
             }
         }
@@ -470,14 +494,11 @@ int main(int argc, char* argv[]) {
             axon::capsule_cache_insert(*db, cache_key, epoch, capsule);
         }
         if (capsule.compression_tokens_saved > 0) {
-            axon::record_telemetry(cfg, db.get(), {
-                "capsule.compression", "cli", 0,
-                capsule.compression_output_tokens,
-                capsule.compression_input_tokens,
-                capsule.compression_tokens_saved,
-                false,
-                "compression"
-            });
+            axon::record_telemetry(cfg, db.get(),
+                                   {"capsule.compression", "cli", 0,
+                                    capsule.compression_output_tokens,
+                                    capsule.compression_input_tokens,
+                                    capsule.compression_tokens_saved, false, "compression"});
         }
 
         std::cout << "{\n";
@@ -492,10 +513,10 @@ int main(int argc, char* argv[]) {
             std::cerr << "  [pivot]   " << f.path << " (" << f.token_estimate << " tok)\n";
         for (const auto& f : capsule.support_files)
             std::cerr << "  [support] " << f.path << " (" << f.token_estimate << " tok)\n";
-        axon::record_telemetry(cfg, db.get(), {
-            "capsule", "cli", elapsed_ms(start),
-            capsule.token_estimate, capsule.token_estimate * 4, capsule.token_estimate * 3, false, "retrieval"
-        });
+        axon::record_telemetry(cfg, db.get(),
+                               {"capsule", "cli", elapsed_ms(start), capsule.token_estimate,
+                                capsule.token_estimate * 4, capsule.token_estimate * 3, false,
+                                "retrieval"});
         return 0;
     }
 
@@ -529,26 +550,27 @@ int main(int argc, char* argv[]) {
             axon::mcp::ServerContext ctx;
             ctx.cfg = cfg;
             std::string proxy_error;
-            auto proxied = axon::mcp::proxy_tool_call(
-                ctx, "artifact_retrieve", {{"artifact_id", artifact_id}}, proxy_error);
+            auto proxied = axon::mcp::proxy_tool_call(ctx, "artifact_retrieve",
+                                                      {{"artifact_id", artifact_id}}, proxy_error);
             if (proxied) {
                 try {
                     auto content = proxied->value("content", nlohmann::json::array());
                     if (content.is_array() && !content.empty()) {
-                        auto payload = nlohmann::json::parse(
-                            content[0].value("text", "{}"), nullptr, false);
+                        auto payload =
+                            nlohmann::json::parse(content[0].value("text", "{}"), nullptr, false);
                         if (payload.is_object() && !payload.contains("error")) {
                             axon::CcrArtifact a;
                             a.artifact_id = payload.value("artifact_id", artifact_id);
                             a.kind = payload.value("kind", "");
                             a.source_ref = payload.value("source_ref", "");
                             a.content = payload.value("content", "");
-                            a.token_estimate = payload.value("token_estimate",
-                                                             static_cast<int64_t>(0));
+                            a.token_estimate =
+                                payload.value("token_estimate", static_cast<int64_t>(0));
                             artifact = std::move(a);
                         }
                     }
-                } catch (const std::exception&) {}
+                } catch (const std::exception&) {
+                }
             }
         }
 
@@ -576,7 +598,11 @@ int main(int argc, char* argv[]) {
         for (int i = 3; i < argc; i++) {
             std::string a = argv[i];
             if (a.rfind("--budget=", 0) == 0) {
-                try { budget = std::stoi(a.substr(9)); } catch (...) { budget = 800; }
+                try {
+                    budget = std::stoi(a.substr(9));
+                } catch (...) {
+                    budget = 800;
+                }
             } else if (a == "--metrics=json" || a == "--json-metrics") {
                 json_metrics = true;
             }
@@ -616,17 +642,12 @@ int main(int argc, char* argv[]) {
             }
             auto make_recoverable = [&](const axon::ShellFilterResult& candidate) {
                 return axon::ccr_make_recoverable_output(
-                    store,
-                    "shell_filter",
-                    "filter." + candidate.command + ":stdin",
-                    input,
-                    candidate.output,
-                    candidate.input_tokens);
+                    store, "shell_filter", "filter." + candidate.command + ":stdin", input,
+                    candidate.output, candidate.input_tokens);
             };
 
             auto recoverable = make_recoverable(filtered);
-            if (recoverable.recoverable &&
-                recoverable.output_tokens > budget &&
+            if (recoverable.recoverable && recoverable.output_tokens > budget &&
                 !recoverable.artifact_id.empty()) {
                 int marker_tokens = estimate_tokens_cli(
                     axon::ccr_marker(recoverable.artifact_id, filtered.input_tokens));
@@ -656,18 +677,16 @@ int main(int argc, char* argv[]) {
         std::cout << filtered.output;
         int64_t filter_latency_ms = elapsed_ms(start);
         if (json_metrics) {
-            nlohmann::json metrics = {
-                {"type", "axon_filter_metrics"},
-                {"command", filtered.command},
-                {"kind", axon::output_kind_to_string(filtered.kind)},
-                {"budget", budget},
-                {"input_tokens", filtered.input_tokens},
-                {"output_tokens", filtered.output_tokens},
-                {"tokens_saved", filtered.tokens_saved},
-                {"changed", filtered.changed},
-                {"layer", "shell_filtering"},
-                {"latency_ms", filter_latency_ms}
-            };
+            nlohmann::json metrics = {{"type", "axon_filter_metrics"},
+                                      {"command", filtered.command},
+                                      {"kind", axon::output_kind_to_string(filtered.kind)},
+                                      {"budget", budget},
+                                      {"input_tokens", filtered.input_tokens},
+                                      {"output_tokens", filtered.output_tokens},
+                                      {"tokens_saved", filtered.tokens_saved},
+                                      {"changed", filtered.changed},
+                                      {"layer", "shell_filtering"},
+                                      {"latency_ms", filter_latency_ms}};
             if (!ccr_artifact_id.empty()) {
                 metrics["ccr_artifact_id"] = ccr_artifact_id;
                 metrics["recoverable"] = true;
@@ -681,8 +700,7 @@ int main(int argc, char* argv[]) {
                       << " output_tokens=" << filtered.output_tokens
                       << " saved=" << filtered.tokens_saved
                       << " changed=" << (filtered.changed ? "true" : "false");
-            if (!ccr_artifact_id.empty())
-                std::cerr << " ccr_artifact_id=" << ccr_artifact_id;
+            if (!ccr_artifact_id.empty()) std::cerr << " ccr_artifact_id=" << ccr_artifact_id;
             std::cerr << "\n";
         }
 
@@ -693,27 +711,15 @@ int main(int argc, char* argv[]) {
                 if (fs::exists(cfg.db_path)) {
                     auto db = open_database_or_report(cfg.db_path);
                     if (db) {
-                        axon::record_telemetry(cfg, db.get(), {
-                            "filter." + filtered.command,
-                            "shell",
-                            filter_latency_ms,
-                            filtered.output_tokens,
-                            filtered.input_tokens,
-                            filtered.tokens_saved,
-                            false,
-                            "shell_filtering"
-                        });
+                        axon::record_telemetry(cfg, db.get(),
+                                               {"filter." + filtered.command, "shell",
+                                                filter_latency_ms, filtered.output_tokens,
+                                                filtered.input_tokens, filtered.tokens_saved, false,
+                                                "shell_filtering"});
                         if (!ccr_artifact_id.empty()) {
-                            axon::record_telemetry(cfg, db.get(), {
-                                "filter.ccr_store",
-                                "shell",
-                                0,
-                                0,
-                                0,
-                                0,
-                                false,
-                                "ccr"
-                            });
+                            axon::record_telemetry(
+                                cfg, db.get(),
+                                {"filter.ccr_store", "shell", 0, 0, 0, 0, false, "ccr"});
                         }
                     }
                 }
@@ -724,16 +730,25 @@ int main(int argc, char* argv[]) {
 
     // ── axon skeleton <file> ───────────────────────────────────────────────
     if (cmd == "skeleton") {
-        if (argc < 3) { std::cerr << "Usage: axon skeleton <file>\n"; return 1; }
+        if (argc < 3) {
+            std::cerr << "Usage: axon skeleton <file>\n";
+            return 1;
+        }
         fs::path p = argv[2];
         std::ifstream f(p, std::ios::binary);
-        if (!f) { std::cerr << "File not found: " << p << "\n"; return 1; }
+        if (!f) {
+            std::cerr << "File not found: " << p << "\n";
+            return 1;
+        }
         std::string src((std::istreambuf_iterator<char>(f)), {});
 
         auto ext = p.extension().string();
         if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
         auto lang = axon::language_from_extension(ext);
-        if (!lang) { std::cerr << "Unsupported language: " << ext << "\n"; return 1; }
+        if (!lang) {
+            std::cerr << "Unsupported language: " << ext << "\n";
+            return 1;
+        }
 
         std::cout << axon::skeletonize(src, *lang);
         return 0;
@@ -747,18 +762,21 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         auto cfg = load_config(path);
-        if (!fs::exists(cfg.db_path)) { std::cout << "No index. Run `axon index`.\n"; return 0; }
+        if (!fs::exists(cfg.db_path)) {
+            std::cout << "No index. Run `axon index`.\n";
+            return 0;
+        }
 
         auto db = open_database_or_report(cfg.db_path);
         if (!db) return 1;
-        auto fr  = db->conn().Query("SELECT count(*) FROM files");
-        auto sr  = db->conn().Query("SELECT count(*) FROM symbols");
-        auto er  = db->conn().Query("SELECT count(*) FROM edges");
-        auto embr= db->conn().Query("SELECT count(*) FROM symbols WHERE embedding IS NOT NULL");
-        auto& fm  = *fr;
-        auto& sm  = *sr;
-        auto& em  = *er;
-        auto& embm= *embr;
+        auto fr = db->conn().Query("SELECT count(*) FROM files");
+        auto sr = db->conn().Query("SELECT count(*) FROM symbols");
+        auto er = db->conn().Query("SELECT count(*) FROM edges");
+        auto embr = db->conn().Query("SELECT count(*) FROM symbols WHERE embedding IS NOT NULL");
+        auto& fm = *fr;
+        auto& sm = *sr;
+        auto& em = *er;
+        auto& embm = *embr;
 
         std::cout << "Project: " << cfg.project_root << "\n";
         std::cout << "Files:    " << fm.GetValue<int64_t>(0, 0) << "\n";

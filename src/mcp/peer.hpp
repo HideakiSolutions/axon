@@ -18,10 +18,8 @@ void stop_peer_listener();
 // If another live axon process owns this repo's DB (per the registry),
 // forward the tool call to it and return its result. Returns nullopt when
 // there is no reachable owner; `error` then carries a short diagnostic.
-std::optional<nlohmann::json> proxy_tool_call(ServerContext& ctx,
-                                              const std::string& name,
-                                              const nlohmann::json& args,
-                                              std::string& error);
+std::optional<nlohmann::json> proxy_tool_call(ServerContext& ctx, const std::string& name,
+                                              const nlohmann::json& args, std::string& error);
 
 // True if `pid` refers to a live process on this machine.
 bool pid_alive(long long pid);

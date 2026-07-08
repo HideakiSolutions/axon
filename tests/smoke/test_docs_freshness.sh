@@ -7,7 +7,9 @@ command -v rg >/dev/null 2>&1 || { echo "SKIP: rg is required for this test (CI 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-tool_count="$(rg -n '\{\{"name","' src/mcp/server.cpp | wc -l | tr -d ' ')"
+# Whitespace-tolerant so clang-format runs can't zero the count; serverInfo
+# also carries a {{"name", ...}} pair and must not count as a tool.
+tool_count="$(rg -n '\{\{"name",\s*"' src/mcp/server.cpp | rg -v 'serverInfo' | wc -l | tr -d ' ')"
 if [[ "$tool_count" != "27" ]]; then
   echo "expected 27 MCP tools in src/mcp/server.cpp, found $tool_count" >&2
   exit 1

@@ -15,32 +15,33 @@ bool is_database_lock_error(const std::string& message) {
            lower.find("could not set lock") != std::string::npos ||
            lower.find("database is locked") != std::string::npos ||
            lower.find("failed to create file lock") != std::string::npos ||
-           (lower.find("lock") != std::string::npos &&
-            lower.find("duckdb") != std::string::npos);
+           (lower.find("lock") != std::string::npos && lower.find("duckdb") != std::string::npos);
 }
 
 std::string database_open_error_message(const std::filesystem::path& db_path,
                                         const std::exception& error) {
     const std::string detail = error.what();
     if (is_database_lock_error(detail)) {
-        return "DuckDB index is locked: " + db_path.string() + "\n"
+        return "DuckDB index is locked: " + db_path.string() +
+               "\n"
                "Another axon process, usually `axon serve` or `axon web`, is using this index. "
                "Stop that process and retry.\n"
-               "DuckDB detail: " + detail;
+               "DuckDB detail: " +
+               detail;
     }
     return "Failed to open DuckDB index: " + db_path.string() + "\n" + detail;
 }
 
 Database::Database(const std::filesystem::path& db_path)
-    : db_(db_path.string()), conn_(std::make_unique<duckdb::Connection>(db_))
-{
+    : db_(db_path.string()), conn_(std::make_unique<duckdb::Connection>(db_)) {
     run_migrations();
 }
 
 void Database::exec(const std::string& sql) {
     auto res = conn_->Query(sql);
     if (res->HasError())
-        throw std::runtime_error("DuckDB exec error: " + res->GetError() + "\nSQL: " + sql.substr(0, 80));
+        throw std::runtime_error("DuckDB exec error: " + res->GetError() +
+                                 "\nSQL: " + sql.substr(0, 80));
 }
 
 duckdb::MaterializedQueryResult& Database::query(const std::string& sql) {
@@ -61,7 +62,10 @@ void Database::run_migrations() {
          "  skeleton  VARCHAR"
          ")");
     // Add skeleton column if upgrading from older schema
-    try { exec("ALTER TABLE files ADD COLUMN skeleton VARCHAR"); } catch (...) {}
+    try {
+        exec("ALTER TABLE files ADD COLUMN skeleton VARCHAR");
+    } catch (...) {
+    }
 
     exec("CREATE SEQUENCE IF NOT EXISTS seq_id START 1");
 
@@ -95,7 +99,10 @@ void Database::run_migrations() {
          ")");
 
     // Index for O(1) symbol-level edge resolution
-    try { exec("CREATE INDEX IF NOT EXISTS idx_symbols_file_name ON symbols(file_id, name)"); } catch (...) {}
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_symbols_file_name ON symbols(file_id, name)");
+    } catch (...) {
+    }
 
     // Routes table (created on demand by index_routes, but define here for upgrade path)
     exec("CREATE TABLE IF NOT EXISTS routes ("
@@ -137,9 +144,19 @@ void Database::run_migrations() {
     // created before this column silently lost ALL telemetry (the INSERT
     // names `layer` and errored). Fresh DBs still get NOT NULL from the
     // CREATE TABLE above.
-    try { exec("ALTER TABLE telemetry_events ADD COLUMN layer VARCHAR DEFAULT 'unknown'"); } catch (...) {}
-    try { exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_created ON telemetry_events(created_at)"); } catch (...) {}
-    try { exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_layer ON telemetry_events(layer)"); } catch (...) {}
+    try {
+        exec("ALTER TABLE telemetry_events ADD COLUMN layer VARCHAR DEFAULT 'unknown'");
+    } catch (...) {
+    }
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_created ON "
+             "telemetry_events(created_at)");
+    } catch (...) {
+    }
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_layer ON telemetry_events(layer)");
+    } catch (...) {
+    }
 
     exec("CREATE TABLE IF NOT EXISTS ccr_artifacts ("
          "  artifact_id     VARCHAR PRIMARY KEY,"
@@ -149,8 +166,14 @@ void Database::run_migrations() {
          "  token_estimate  BIGINT NOT NULL DEFAULT 0,"
          "  created_at      TIMESTAMP NOT NULL DEFAULT now()"
          ")");
-    try { exec("CREATE INDEX IF NOT EXISTS idx_ccr_artifacts_created ON ccr_artifacts(created_at)"); } catch (...) {}
-    try { exec("CREATE INDEX IF NOT EXISTS idx_ccr_artifacts_source ON ccr_artifacts(source_ref)"); } catch (...) {}
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_ccr_artifacts_created ON ccr_artifacts(created_at)");
+    } catch (...) {
+    }
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_ccr_artifacts_source ON ccr_artifacts(source_ref)");
+    } catch (...) {
+    }
 
     // ── Dialogue Layer ────────────────────────────────────────────────────────
     // Structured conversation memory: Thread → Session → Turn, with automatic
@@ -172,7 +195,10 @@ void Database::run_migrations() {
          "  digest           VARCHAR,"
          "  digest_embedding FLOAT[768]"
          ")");
-    try { exec("CREATE INDEX IF NOT EXISTS idx_sessions_thread ON sessions(thread_id)"); } catch (...) {}
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_sessions_thread ON sessions(thread_id)");
+    } catch (...) {
+    }
 
     exec("CREATE TABLE IF NOT EXISTS turns ("
          "  id         BIGINT PRIMARY KEY,"
@@ -182,7 +208,10 @@ void Database::run_migrations() {
          "  ts         TIMESTAMP NOT NULL DEFAULT now(),"
          "  embedding  FLOAT[768]"
          ")");
-    try { exec("CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id, ts)"); } catch (...) {}
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id, ts)");
+    } catch (...) {
+    }
 
     exec("CREATE TABLE IF NOT EXISTS turn_anchors ("
          "  id        BIGINT PRIMARY KEY,"
@@ -191,9 +220,18 @@ void Database::run_migrations() {
          "  symbol_id BIGINT,"
          "  kind      VARCHAR NOT NULL DEFAULT 'mentions'"
          ")");
-    try { exec("CREATE INDEX IF NOT EXISTS idx_anchors_turn   ON turn_anchors(turn_id)");   } catch (...) {}
-    try { exec("CREATE INDEX IF NOT EXISTS idx_anchors_file   ON turn_anchors(file_id)");   } catch (...) {}
-    try { exec("CREATE INDEX IF NOT EXISTS idx_anchors_symbol ON turn_anchors(symbol_id)"); } catch (...) {}
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_anchors_turn   ON turn_anchors(turn_id)");
+    } catch (...) {
+    }
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_anchors_file   ON turn_anchors(file_id)");
+    } catch (...) {
+    }
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_anchors_symbol ON turn_anchors(symbol_id)");
+    } catch (...) {
+    }
 }
 
 } // namespace axon

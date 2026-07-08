@@ -3,15 +3,15 @@
 #include <sstream>
 
 #ifdef _WIN32
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#  define close_socket closesocket
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define close_socket closesocket
 #else
-#  include <arpa/inet.h>
-#  include <netdb.h>
-#  include <sys/socket.h>
-#  include <unistd.h>
-#  define close_socket close
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#define close_socket close
 #endif
 
 namespace axon {
@@ -45,13 +45,8 @@ double safe_double(duckdb::MaterializedQueryResult& res, int col) {
 }
 
 bool is_known_layer(const std::string& layer) {
-    return layer == "retrieval" ||
-           layer == "shell_filtering" ||
-           layer == "compression" ||
-           layer == "cache" ||
-           layer == "ccr" ||
-           layer == "indexing" ||
-           layer == "unknown";
+    return layer == "retrieval" || layer == "shell_filtering" || layer == "compression" ||
+           layer == "cache" || layer == "ccr" || layer == "indexing" || layer == "unknown";
 }
 
 std::string infer_layer(const TelemetryEvent& event) {
@@ -61,35 +56,24 @@ std::string infer_layer(const TelemetryEvent& event) {
         event.type.find("compression") != std::string::npos) {
         return "compression";
     }
-    if (event.origin == "shell" ||
-        event.type.find("shell") != std::string::npos ||
+    if (event.origin == "shell" || event.type.find("shell") != std::string::npos ||
         event.type.find("filter") != std::string::npos) {
         return "shell_filtering";
     }
-    if (event.type == "index" ||
-        event.type == "index-paths" ||
-        event.type == "watch") {
+    if (event.type == "index" || event.type == "index-paths" || event.type == "watch") {
         return "indexing";
     }
-    if (event.type == "artifact_retrieve" ||
-        event.type == "artifact-retrieve" ||
+    if (event.type == "artifact_retrieve" || event.type == "artifact-retrieve" ||
         event.type.find("ccr") != std::string::npos) {
         return "ccr";
     }
-    if (event.type == "capsule" ||
-        event.type == "get_context_capsule" ||
-        event.type == "get_skeleton" ||
-        event.type == "get_overview" ||
-        event.type == "get_impact_graph" ||
-        event.type == "get_callers" ||
-        event.type == "get_tests_for" ||
-        event.type == "search_memory" ||
-        event.type == "turn_search" ||
-        event.type == "dialogue_context" ||
-        event.type.rfind("/api/capsule", 0) == 0 ||
-        event.type.rfind("/api/search", 0) == 0 ||
-        event.type.rfind("/api/overview", 0) == 0 ||
-        event.type.rfind("/api/graph", 0) == 0) {
+    if (event.type == "capsule" || event.type == "get_context_capsule" ||
+        event.type == "get_skeleton" || event.type == "get_overview" ||
+        event.type == "get_impact_graph" || event.type == "get_callers" ||
+        event.type == "get_tests_for" || event.type == "search_memory" ||
+        event.type == "turn_search" || event.type == "dialogue_context" ||
+        event.type.rfind("/api/capsule", 0) == 0 || event.type.rfind("/api/search", 0) == 0 ||
+        event.type.rfind("/api/overview", 0) == 0 || event.type.rfind("/api/graph", 0) == 0) {
         return "retrieval";
     }
     return "unknown";
@@ -97,14 +81,13 @@ std::string infer_layer(const TelemetryEvent& event) {
 
 json empty_layer_metrics() {
     json layers = json::object();
-    for (const auto* layer : {"retrieval", "shell_filtering", "compression", "cache", "ccr", "unknown"}) {
-        layers[layer] = {
-            {"requests", 0},
-            {"tokens_sent", 0},
-            {"tokens_saved", 0},
-            {"reduction_percent", 0.0},
-            {"average_latency_ms", 0.0}
-        };
+    for (const auto* layer :
+         {"retrieval", "shell_filtering", "compression", "cache", "ccr", "unknown"}) {
+        layers[layer] = {{"requests", 0},
+                         {"tokens_sent", 0},
+                         {"tokens_saved", 0},
+                         {"reduction_percent", 0.0},
+                         {"average_latency_ms", 0.0}};
     }
     return layers;
 }
@@ -123,7 +106,11 @@ void try_post_http(const std::string& endpoint, const std::string& payload) {
     }
     auto colon = host.rfind(':');
     if (colon != std::string::npos) {
-        try { port = std::stoi(host.substr(colon + 1)); } catch (...) { return; }
+        try {
+            port = std::stoi(host.substr(colon + 1));
+        } catch (...) {
+            return;
+        }
         host = host.substr(0, colon);
     }
     if (host.empty()) return;
@@ -137,8 +124,7 @@ void try_post_http(const std::string& endpoint, const std::string& payload) {
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     addrinfo* info = nullptr;
-    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &info) != 0)
-        return;
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &info) != 0) return;
 
     int fd = -1;
     for (addrinfo* p = info; p; p = p->ai_next) {
@@ -174,7 +160,10 @@ bool telemetry_enabled(const Config& cfg) {
 
 double cost_per_m_input_usd() {
     if (const char* v = std::getenv("AXON_COST_PER_M_INPUT_USD")) {
-        try { return std::stod(v); } catch (...) {}
+        try {
+            return std::stod(v);
+        } catch (...) {
+        }
     }
     return 3.0;
 }
@@ -185,57 +174,55 @@ void record_telemetry(const Config& cfg, Database* db, const TelemetryEvent& eve
         std::string layer = infer_layer(event);
         int64_t baseline = event.baseline_tokens_estimated;
         int64_t saved = event.tokens_saved;
-        if (baseline <= 0 && event.tokens_estimated > 0)
-            baseline = event.tokens_estimated;
+        if (baseline <= 0 && event.tokens_estimated > 0) baseline = event.tokens_estimated;
         if (saved <= 0 && baseline > event.tokens_estimated)
             saved = baseline - event.tokens_estimated;
 
-        db->conn().Query(
-            "INSERT INTO telemetry_events "
-            "(id, type, origin, layer, latency_ms, tokens_estimated, baseline_tokens_estimated, tokens_saved, cache_hit, created_at) "
-            "VALUES (nextval('seq_id'), '" + sq(event.type) + "', '" + sq(event.origin) + "', '" + sq(layer) + "', " +
-            std::to_string(event.latency_ms) + ", " + std::to_string(event.tokens_estimated) + ", " +
-            std::to_string(baseline) + ", " + std::to_string(saved) + ", " +
-            std::string(event.cache_hit ? "true" : "false") + ", now())");
+        db->conn().Query("INSERT INTO telemetry_events "
+                         "(id, type, origin, layer, latency_ms, tokens_estimated, "
+                         "baseline_tokens_estimated, tokens_saved, cache_hit, created_at) "
+                         "VALUES (nextval('seq_id'), '" +
+                         sq(event.type) + "', '" + sq(event.origin) + "', '" + sq(layer) + "', " +
+                         std::to_string(event.latency_ms) + ", " +
+                         std::to_string(event.tokens_estimated) + ", " + std::to_string(baseline) +
+                         ", " + std::to_string(saved) + ", " +
+                         std::string(event.cache_hit ? "true" : "false") + ", now())");
 
         if (const char* endpoint = std::getenv("AXON_TELEMETRY_ENDPOINT")) {
-            json payload = {
-                {"type", event.type},
-                {"origin", event.origin},
-                {"layer", layer},
-                {"latency_ms", event.latency_ms},
-                {"tokens_estimated", event.tokens_estimated},
-                {"baseline_tokens_estimated", baseline},
-                {"tokens_saved", saved},
-                {"cache_hit", event.cache_hit}
-            };
+            json payload = {{"type", event.type},
+                            {"origin", event.origin},
+                            {"layer", layer},
+                            {"latency_ms", event.latency_ms},
+                            {"tokens_estimated", event.tokens_estimated},
+                            {"baseline_tokens_estimated", baseline},
+                            {"tokens_saved", saved},
+                            {"cache_hit", event.cache_hit}};
             try_post_http(endpoint, payload.dump());
         }
-    } catch (...) {}
+    } catch (...) {
+    }
 }
 
 json metrics_json(const Config& cfg, Database* db) {
-    json out = {
-        {"telemetry_enabled", telemetry_enabled(cfg)},
-        {"requests", 0},
-        {"tokens_sent", 0},
-        {"tokens_saved", 0},
-        {"reduction_percent", 0.0},
-        {"average_latency_ms", 0.0},
-        {"cache_hit_rate", 0.0},
-        {"estimated_cost_usd", 0.0},
-        {"layers", empty_layer_metrics()}
-    };
+    json out = {{"telemetry_enabled", telemetry_enabled(cfg)},
+                {"requests", 0},
+                {"tokens_sent", 0},
+                {"tokens_saved", 0},
+                {"reduction_percent", 0.0},
+                {"average_latency_ms", 0.0},
+                {"cache_hit_rate", 0.0},
+                {"estimated_cost_usd", 0.0},
+                {"layers", empty_layer_metrics()}};
 
     if (!db) return out;
 
     try {
         if (telemetry_enabled(cfg)) {
-            auto total = db->conn().Query(
-                "SELECT COUNT(*), COALESCE(SUM(tokens_estimated),0), "
-                "COALESCE(SUM(tokens_saved),0), COALESCE(AVG(latency_ms),0), "
-                "COALESCE(SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END),0) "
-                "FROM telemetry_events");
+            auto total =
+                db->conn().Query("SELECT COUNT(*), COALESCE(SUM(tokens_estimated),0), "
+                                 "COALESCE(SUM(tokens_saved),0), COALESCE(AVG(latency_ms),0), "
+                                 "COALESCE(SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END),0) "
+                                 "FROM telemetry_events");
             if (!total->HasError() && total->RowCount() > 0) {
                 int64_t requests = safe_i64(*total, 0);
                 int64_t tokens = safe_i64(*total, 1);
@@ -251,10 +238,10 @@ json metrics_json(const Config& cfg, Database* db) {
                 out["cache_hit_rate"] = requests > 0 ? (static_cast<double>(hits) / requests) : 0.0;
                 out["estimated_cost_usd"] = (tokens / 1000000.0) * cost_per_m_input_usd();
             }
-            auto by_layer = db->conn().Query(
-                "SELECT layer, COUNT(*), COALESCE(SUM(tokens_estimated),0), "
-                "COALESCE(SUM(tokens_saved),0), COALESCE(AVG(latency_ms),0) "
-                "FROM telemetry_events GROUP BY layer");
+            auto by_layer =
+                db->conn().Query("SELECT layer, COUNT(*), COALESCE(SUM(tokens_estimated),0), "
+                                 "COALESCE(SUM(tokens_saved),0), COALESCE(AVG(latency_ms),0) "
+                                 "FROM telemetry_events GROUP BY layer");
             if (!by_layer->HasError()) {
                 for (duckdb::idx_t i = 0; i < by_layer->RowCount(); ++i) {
                     std::string layer = by_layer->GetValue(0, i).ToString();
@@ -269,24 +256,20 @@ json metrics_json(const Config& cfg, Database* db) {
                         {"tokens_sent", tokens},
                         {"tokens_saved", saved},
                         {"reduction_percent", denom > 0.0 ? (100.0 * saved / denom) : 0.0},
-                        {"average_latency_ms", avg_latency}
-                    };
+                        {"average_latency_ms", avg_latency}};
                 }
             }
         } else {
-            auto counts = db->conn().Query(
-                "SELECT "
-                "(SELECT COUNT(*) FROM files), "
-                "(SELECT COUNT(*) FROM symbols), "
-                "(SELECT COUNT(*) FROM edges), "
-                "COALESCE((SELECT SUM(byte_size) FROM files), 0)");
+            auto counts = db->conn().Query("SELECT "
+                                           "(SELECT COUNT(*) FROM files), "
+                                           "(SELECT COUNT(*) FROM symbols), "
+                                           "(SELECT COUNT(*) FROM edges), "
+                                           "COALESCE((SELECT SUM(byte_size) FROM files), 0)");
             if (!counts->HasError() && counts->RowCount() > 0) {
-                out["graph"] = {
-                    {"files", safe_i64(*counts, 0)},
-                    {"symbols", safe_i64(*counts, 1)},
-                    {"edges", safe_i64(*counts, 2)},
-                    {"bytes_indexed", safe_i64(*counts, 3)}
-                };
+                out["graph"] = {{"files", safe_i64(*counts, 0)},
+                                {"symbols", safe_i64(*counts, 1)},
+                                {"edges", safe_i64(*counts, 2)},
+                                {"bytes_indexed", safe_i64(*counts, 3)}};
             }
             auto capsule = db->conn().Query(
                 "SELECT payload FROM capsule_cache ORDER BY created_at DESC LIMIT 1");
@@ -295,10 +278,12 @@ json metrics_json(const Config& cfg, Database* db) {
                     auto payload = json::parse(capsule->GetValue(0, 0).ToString());
                     if (payload.contains("token_estimate"))
                         out["last_capsule_token_estimate"] = payload["token_estimate"];
-                } catch (...) {}
+                } catch (...) {
+                }
             }
         }
-    } catch (...) {}
+    } catch (...) {
+    }
 
     return out;
 }

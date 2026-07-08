@@ -11,7 +11,7 @@ AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLambdasOnASingleLine: All
 AlwaysBreakTemplateDeclarations: Yes
 BreakBeforeBraces: Attach
-DerivedPointerAlignment: false
+DerivePointerAlignment: false
 PointerAlignment: Left
 SortIncludes:    false
 SpaceBeforeParens: ControlStatements

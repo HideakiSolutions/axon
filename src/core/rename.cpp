@@ -12,11 +12,9 @@ static std::string regex_escape(const std::string& s) {
     return std::regex_replace(s, special, R"(\$&)");
 }
 
-std::vector<RenameEdit> collect_rename_edits(
-    const std::string& file_path,
-    const std::string& old_name,
-    const std::string& new_name)
-{
+std::vector<RenameEdit> collect_rename_edits(const std::string& file_path,
+                                             const std::string& old_name,
+                                             const std::string& new_name) {
     std::vector<RenameEdit> edits;
     std::ifstream f(file_path);
     if (!f) return edits;
@@ -40,7 +38,8 @@ std::vector<RenameEdit> collect_rename_edits(
 int apply_rename_edits(const std::vector<RenameEdit>& edits) {
     // Group edits by file
     std::unordered_map<std::string, std::vector<const RenameEdit*>> by_file;
-    for (const auto& e : edits) by_file[e.file_path].push_back(&e);
+    for (const auto& e : edits)
+        by_file[e.file_path].push_back(&e);
 
     int written = 0;
     for (const auto& [path, file_edits] : by_file) {
@@ -49,12 +48,14 @@ int apply_rename_edits(const std::vector<RenameEdit>& edits) {
 
         std::vector<std::string> lines;
         std::string line;
-        while (std::getline(in, line)) lines.push_back(line);
+        while (std::getline(in, line))
+            lines.push_back(line);
         in.close();
 
         // Apply edits (indexed by line number)
         std::unordered_map<int, std::string> replacements;
-        for (const auto* e : file_edits) replacements[e->line] = e->new_text;
+        for (const auto* e : file_edits)
+            replacements[e->line] = e->new_text;
 
         std::ofstream out(path);
         if (!out) continue;
