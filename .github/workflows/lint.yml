@@ -28,16 +28,14 @@ jobs:
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format-15
       - name: Check formatting
-        # First-pass enforcement is advisory: report diffs but don't block PRs
-        # while existing source predates the .clang-format file. Flip
-        # `continue-on-error` to false once the back-catalog is normalized.
-        continue-on-error: true
+        # Back-catalog normalized (style: normalize src/ with clang-format 15);
+        # this is now a real gate and a required check on main.
         run: |
           files=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \))
           fail=0
           for f in $files; do
             if ! diff -u "$f" <(clang-format-15 "$f") > /dev/null; then
-              echo "::warning file=$f::clang-format would reformat"
+              echo "::error file=$f::clang-format would reformat"
               fail=1
             fi
           done
