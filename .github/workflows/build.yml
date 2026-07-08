@@ -24,6 +24,8 @@ jobs:
             compiler: gcc
           - os: macos-14
             compiler: clang
+          - os: windows-latest
+            compiler: msvc
     env:
       AXON_DUCKDB_VERSION: 1.2.2
     steps:
@@ -42,6 +44,14 @@ jobs:
         run: |
           brew install cmake ninja ccache jq ripgrep
 
+      - name: Install build dependencies (Windows)
+        # cmake, ninja, jq and Git Bash ship on the runner image; ripgrep is
+        # needed by the docs-freshness and shell-filter benchmark smokes
+        # (they self-skip with exit 77 when rg is absent, but we want the
+        # coverage, not the skip).
+        if: runner.os == 'Windows'
+        run: choco install ripgrep -y --no-progress
+
       - name: Stage libduckdb.dylib (macOS)
         # The vendored third_party/duckdb/lib/libduckdb.so is Linux ELF; for
         # macOS we drop the matching universal .dylib (DuckDB ships x64+arm64
@@ -55,6 +65,24 @@ jobs:
           mkdir -p third_party/duckdb/lib
           unzip -o /tmp/duckdb.zip -d third_party/duckdb/lib/
           test -f third_party/duckdb/lib/libduckdb.dylib
+
+      - name: Stage duckdb.dll (Windows)
+        # Same pinned release the Linux .so / macOS .dylib come from; the zip
+        # carries duckdb.dll (runtime) + duckdb.lib (import lib) which
+        # CMakeLists's WIN32 branch expects under third_party/duckdb/lib.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = $env:AXON_DUCKDB_VERSION
+          Invoke-WebRequest -Uri "https://github.com/duckdb/duckdb/releases/download/v$ver/libduckdb-windows-amd64.zip" `
+            -OutFile "$env:TEMP\duckdb.zip"
+          New-Item -ItemType Directory -Force -Path third_party\duckdb\lib | Out-Null
+          Expand-Archive -Path "$env:TEMP\duckdb.zip" -DestinationPath third_party\duckdb\lib -Force
+          if (-not (Test-Path "third_party\duckdb\lib\duckdb.dll")) { exit 1 }
+
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Cache third_party
         uses: actions/cache@v6
@@ -78,6 +106,19 @@ jobs:
       - name: Build tests
         run: cmake --build build -j 2
 
+      - name: Add runtime DLL dirs to PATH (Windows)
+        # Windows has no RUNPATH: test executables resolve duckdb.dll and the
+        # llama/ggml DLLs through PATH. Register every build dir that emitted
+        # a DLL plus the staged duckdb lib dir before ctest runs.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dirs = Get-ChildItem -Path build -Filter *.dll -Recurse |
+              Where-Object { $_.FullName -notmatch '\\CMakeFiles\\' } |
+              ForEach-Object { $_.DirectoryName } | Sort-Object -Unique
+          $dirs += (Resolve-Path 'third_party\duckdb\lib').Path
+          $dirs | ForEach-Object { Add-Content -Path $env:GITHUB_PATH -Value $_ }
+
       - name: Run unit tests
         # CTest aggregates every test registered via add_axon_test().
         # --output-on-failure so a regression surfaces in the workflow log
@@ -85,6 +126,9 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Smoke binary
+        # bash on all three platforms — Git Bash resolves ./build/axon to
+        # axon.exe on Windows, so the same invocation stays portable.
+        shell: bash
         run: |
           ./build/axon --version
           ./build/axon help
@@ -109,6 +153,8 @@ jobs:
           name: axon-${{ matrix.os }}
           path: |
             build/axon
+            build/axon.exe
             third_party/duckdb/lib/libduckdb.*
+            third_party/duckdb/lib/duckdb.dll
             editors/vscode/*.vsix
           retention-days: 7
