@@ -129,6 +129,49 @@ WATCH_STATUS=$( cd "$WATCH_DIR" && "$AXON" status )
 assert_contains "Files:" "$WATCH_STATUS" "watch leaves index readable after modify/delete"
 assert_contains "pruned" "$(cat "$WATCH_LOG" 2>/dev/null || true)" "watch prunes deleted file"
 
+# Native backend selected on auto (this is what the two CI platforms prove).
+case "$(uname)" in
+  Linux)  NATIVE_BACKEND="inotify" ;;
+  Darwin) NATIVE_BACKEND="fsevents" ;;
+  *)      NATIVE_BACKEND="poll" ;;
+esac
+assert_contains "backend ${NATIVE_BACKEND}" "$(cat "$WATCH_LOG" 2>/dev/null || true)" \
+  "watch auto-selects the ${NATIVE_BACKEND} backend"
+
+# ── Watch parity: --backend=poll must behave identically ──────────────────
+POLL_DIR="${TMP_BASE}/watchtest-poll"
+cp -r "${REPO_ROOT}/examples/ts-mini" "$POLL_DIR"
+mkdir -p "$POLL_DIR/.git" && echo "ref: refs/heads/main" > "$POLL_DIR/.git/HEAD"
+( cd "$POLL_DIR" && "$AXON" init >/dev/null && "$AXON" index >/dev/null 2>&1 || true )
+POLL_LOG="${TMP_BASE}/axon-watch-poll.log"
+"$AXON" watch "$POLL_DIR" --interval-ms=200 --debounce-ms=100 --backend=poll >"$POLL_LOG" 2>&1 &
+POLL_PID=$!
+sleep 0.5
+printf '\nexport function watchedSymbolPoll() { return 1; }\n' >> "$POLL_DIR/src/util.ts"
+sleep 1
+rm -f "$POLL_DIR/src/util.ts"
+sleep 1
+kill "$POLL_PID" >/dev/null 2>&1 || true
+wait "$POLL_PID" >/dev/null 2>&1 || true
+assert_contains "backend poll" "$(cat "$POLL_LOG" 2>/dev/null || true)" "watch honors --backend=poll"
+assert_contains "indexed" "$(cat "$POLL_LOG" 2>/dev/null || true)" "poll backend reindexes on modify"
+assert_contains "pruned" "$(cat "$POLL_LOG" 2>/dev/null || true)" "poll backend prunes deleted file"
+
+# ── Watch overflow path: forced seam triggers a full rescan ───────────────
+OVERFLOW_LOG="${TMP_BASE}/axon-watch-overflow.log"
+AXON_WATCH_FORCE_OVERFLOW=1 "$AXON" watch "$POLL_DIR" --interval-ms=200 --debounce-ms=100 \
+  --backend=poll >"$OVERFLOW_LOG" 2>&1 &
+OVERFLOW_PID=$!
+sleep 0.5
+printf 'export function overflowProbe() { return 1; }\n' > "$POLL_DIR/src/overflow.ts"
+sleep 1.5
+kill "$OVERFLOW_PID" >/dev/null 2>&1 || true
+wait "$OVERFLOW_PID" >/dev/null 2>&1 || true
+assert_contains "full rescan" "$(cat "$OVERFLOW_LOG" 2>/dev/null || true)" \
+  "overflow falls back to a full rescan"
+OVERFLOW_STATUS=$( cd "$POLL_DIR" && "$AXON" status )
+assert_contains "Files:" "$OVERFLOW_STATUS" "index readable after overflow rescan"
+
 # ── Capsule cache: miss → hit → no-cache ──────────────────────────────────
 # `axon capsule` needs an embedding model on the miss path. In CI we may
 # not have one staged, so detect absence (via a dry-run that is allowed

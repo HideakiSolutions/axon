@@ -22,9 +22,8 @@ static std::string sq(const std::string& s) {
 namespace axon {
 namespace fs = std::filesystem;
 
-static const std::vector<std::string> SKIP_DIRS = {"node_modules", ".git",  "target", "build",
-                                                   "__pycache__",  ".axon", "dist",   ".next",
-                                                   "vendor",       ".venv", "venv",   ".worktrees"};
+// Hard skip-list lives in skip_dirs.cpp (is_hard_skip_dir) so the native
+// watchers and their tests share it without linking the indexer.
 
 // Compiled .axonignore entry. Patterns with no glob meta-chars retain a fast
 // equality path; patterns containing *, **, or ? compile to regex once and
@@ -134,8 +133,7 @@ static bool should_skip(const fs::path& p) {
     // Hard-coded skip dirs always apply, regardless of .axonignore — these
     // are not user-overridable for safety (re-indexing a node_modules would
     // tank performance and pollute the symbol space).
-    for (const auto& dir : SKIP_DIRS)
-        if (p.filename() == dir) return true;
+    if (is_hard_skip_dir(p.filename().string())) return true;
     if (g_ignore_rules.empty()) return false;
     // Compute filename + project-relative path once.
     std::string fname = p.filename().string();
@@ -448,9 +446,7 @@ static void resolve_calls(duckdb::Connection& conn, int64_t from_id,
 // next indexing pass even though the file still exists on disk.
 static bool path_is_ignored(const fs::path& rel) {
     for (const auto& part : rel) {
-        const std::string name = part.filename().string();
-        for (const auto& dir : SKIP_DIRS)
-            if (name == dir) return true;
+        if (is_hard_skip_dir(part.filename().string())) return true;
     }
     // Match against the compiled .axonignore rules: we only need a pruning
     // signal here, so reuse the same rule semantics as the walker — anchored

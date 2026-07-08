@@ -46,6 +46,20 @@ endfunction()
 
 add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp)
 
+# Watcher tests — filesystem-only (no DuckDB/llama); language_from_extension
+# comes from the shared parser objects, the skip-list from skip_dirs.cpp.
+add_axon_test(test_watcher
+    unit/test_watcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/watcher.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/watcher_poll.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/watcher_inotify.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/watcher_fsevents.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skip_dirs.cpp
+)
+if(APPLE)
+    target_link_libraries(test_watcher PRIVATE "-framework CoreServices")
+endif()
+
 # Compress tests — pure function, no DuckDB or llama.cpp required.
 add_axon_test(test_compress
     unit/test_compress.cpp

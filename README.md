@@ -305,10 +305,10 @@ Shell output filtering starts with `axon filter <auto|diff|lint|log|grep|json|pa
 ### Watch mode
 
 ```bash
-axon watch [path] --interval-ms=1000 --debounce-ms=500
+axon watch [path] --interval-ms=1000 --debounce-ms=500 --backend=auto|native|poll
 ```
 
-`watch` uses portable polling and calls the same incremental indexer as `axon index-paths`. Claude hooks remain the fastest path for Claude Code edits; watch mode covers external editors, git checkouts, generators, and manual deletes.
+`watch` uses a native backend by default — inotify on Linux, FSEvents on macOS — and falls back to portable polling automatically when native init fails (Windows uses polling). It calls the same incremental indexer as `axon index-paths`; kernel event-queue overflow triggers a full rescan. Claude hooks remain the fastest path for Claude Code edits; watch mode covers external editors, git checkouts, generators, and manual deletes.
 
 ### VS Code
 
@@ -661,8 +661,8 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | Dialogue Layer | ✅ Done | Threads/sessions/turns/anchors/digests — native DuckDB + 768-dim embeddings |
 | Auto-anchor | ✅ Done | File path (regex) + symbol name (top-500 cache) detection on every `turn_add` |
 | Dialogue context in capsule | ✅ Done | `get_context_capsule` accepts `dialogue_budget`; returns `related_turns` |
-| Portable watch mode | ✅ Done | `axon watch` polling reindexes edits outside Claude Code |
-| HNSW vector index (DuckDB VSS) | 🔄 Planned | Projects > 100k symbols |
+| Watch mode (native + poll fallback) | ✅ Done | `axon watch` uses inotify/FSEvents with automatic polling fallback; reindexes edits outside Claude Code |
+| HNSW vector index (DuckDB VSS) | ⏸ Deferred | NO-GO while VSS persistence is experimental; re-evaluate at >100k symbols or scan >20% of miss latency |
 | Filtered tags in `search_memory` | 🔄 Planned | |
 | Capsule cache by query hash | 🔄 Planned | |
 | Caller resolution beyond name match | 🔄 Planned | Type-aware resolution for overloaded callees |

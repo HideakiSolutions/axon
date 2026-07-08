@@ -291,6 +291,8 @@ if(APPLE)
         BUILD_RPATH "@executable_path/../lib;${CMAKE_SOURCE_DIR}/third_party/duckdb/lib"
         INSTALL_RPATH "@executable_path/../lib"
     )
+    # FSEvents (native watch backend) — part of the base macOS SDK.
+    target_link_libraries(axon PRIVATE "-framework CoreServices")
 elseif(NOT WIN32)
     set_target_properties(axon PROPERTIES
         BUILD_RPATH "$ORIGIN/../lib;${CMAKE_SOURCE_DIR}/third_party/duckdb/lib"
