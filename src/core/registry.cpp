@@ -1,11 +1,16 @@
 #include "registry.hpp"
 #include <nlohmann/json.hpp>
-#include <fstream>
+#include <algorithm>
+#include <cerrno>
 #include <cstdlib>
+#include <fstream>
+#include <unordered_set>
 #ifdef _WIN32
 #include <process.h>
+#include <windows.h>
 #define axon_getpid _getpid
 #else
+#include <csignal>
 #include <unistd.h>
 #define axon_getpid getpid
 #endif
@@ -15,9 +20,17 @@ namespace axon {
 using json = nlohmann::json;
 
 std::filesystem::path registry_path() {
-    const char* home = getenv("HOME");
-    if (!home) home = "/tmp";
-    std::filesystem::path axon_dir = std::filesystem::path(home) / ".axon";
+    // AXON_HOME overrides the default ~/.axon — tests and sandboxes point it
+    // at a scratch dir so they never touch the user's real registry.
+    std::filesystem::path axon_dir;
+    const char* axon_home = getenv("AXON_HOME");
+    if (axon_home && *axon_home) {
+        axon_dir = axon_home;
+    } else {
+        const char* home = getenv("HOME");
+        if (!home) home = "/tmp";
+        axon_dir = std::filesystem::path(home) / ".axon";
+    }
     std::filesystem::create_directories(axon_dir);
     return axon_dir / "registry.json";
 }
@@ -154,6 +167,52 @@ std::optional<RepoEntry> find_repo(const std::string& root) {
 
 std::vector<RepoEntry> get_repos(const RegistryData& reg) {
     return reg.repos;
+}
+
+// Local liveness probe (peer.cpp has its own for lock-owner handoff; core/
+// must not depend on mcp/, so the ~10 lines are duplicated here on purpose).
+static bool process_alive(long long pid) {
+    if (pid <= 0) return false;
+#ifdef _WIN32
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!h) return false;
+    DWORD code = 0;
+    bool alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    CloseHandle(h);
+    return alive;
+#else
+    return ::kill((pid_t)pid, 0) == 0 || errno == EPERM;
+#endif
+}
+
+int prune_registry() {
+    auto reg = load_registry();
+    std::vector<RepoEntry> kept;
+    kept.reserve(reg.repos.size());
+    int removed = 0;
+    for (auto& r : reg.repos) {
+        bool root_exists = std::filesystem::exists(r.root);
+        bool owner_alive = r.owner_pid != 0 && process_alive(r.owner_pid);
+        if (root_exists || owner_alive) {
+            kept.push_back(std::move(r));
+        } else {
+            removed++;
+        }
+    }
+    if (removed == 0) return 0;
+
+    std::unordered_set<std::string> kept_names;
+    for (const auto& r : kept)
+        kept_names.insert(r.name);
+    for (auto& [gname, members] : reg.groups) {
+        members.erase(std::remove_if(members.begin(), members.end(),
+                                     [&](const std::string& m) { return !kept_names.count(m); }),
+                      members.end());
+    }
+
+    reg.repos = std::move(kept);
+    save_registry(reg);
+    return removed;
 }
 
 std::vector<RepoEntry> get_group_repos(const RegistryData& reg, const std::string& group_name) {
