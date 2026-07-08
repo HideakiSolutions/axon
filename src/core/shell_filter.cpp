@@ -26,23 +26,25 @@ std::string normalize_command(std::string command) {
     if (command == "logs") return "log";
     if (command == "json") return "json";
     if (command == "tsc" || command == "typescript" || command == "compiler") return "tsc";
-    if (command == "test" || command == "tests" || command == "pytest" ||
-        command == "vitest" || command == "ctest" || command == "gtest") return "test";
-    if (command == "package" || command == "packages" || command == "npm" ||
-        command == "pnpm" || command == "yarn" || command == "bun") return "package";
-    if (command == "lint" || command == "linter" || command == "eslint" ||
-        command == "ruff" || command == "prettier" || command == "format") return "lint";
+    if (command == "test" || command == "tests" || command == "pytest" || command == "vitest" ||
+        command == "ctest" || command == "gtest")
+        return "test";
+    if (command == "package" || command == "packages" || command == "npm" || command == "pnpm" ||
+        command == "yarn" || command == "bun")
+        return "package";
+    if (command == "lint" || command == "linter" || command == "eslint" || command == "ruff" ||
+        command == "prettier" || command == "format")
+        return "lint";
     if (command == "text" || command == "plain") return "text";
     return command.empty() ? "auto" : command;
 }
 
-OutputKind forced_kind_for_command(const std::string& command,
-                                   const std::string& input) {
+OutputKind forced_kind_for_command(const std::string& command, const std::string& input) {
     if (command == "diff") return OutputKind::Diff;
     if (command == "log") return OutputKind::Log;
     if (command == "json") return OutputKind::Json;
-    if (command == "grep" || command == "text" || command == "tsc" ||
-        command == "test" || command == "package" || command == "lint")
+    if (command == "grep" || command == "text" || command == "tsc" || command == "test" ||
+        command == "package" || command == "lint")
         return OutputKind::PlainText;
     return classify_output(input);
 }
@@ -98,9 +100,11 @@ std::string trim_to(const std::string& s, size_t max_len) {
 
 std::string trim_whitespace(const std::string& s) {
     size_t start = 0;
-    while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) ++start;
+    while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start])))
+        ++start;
     size_t end = s.size();
-    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1])))
+        --end;
     return s.substr(start, end - start);
 }
 
@@ -151,8 +155,8 @@ std::string filter_grep_output(const std::string& input, int token_budget) {
 
     auto build_summary = [&](int keep_per_file, size_t max_line_len) {
         std::ostringstream out;
-        out << "# axon grep summary: " << total_matches << " matches in "
-            << by_file.size() << " files\n";
+        out << "# axon grep summary: " << total_matches << " matches in " << by_file.size()
+            << " files\n";
         int emitted = 0;
         int omitted = 0;
         for (const auto& [file, matches] : by_file) {
@@ -169,10 +173,8 @@ std::string filter_grep_output(const std::string& input, int token_budget) {
             }
             if (estimate_tokens_local(out.str()) >= token_budget) break;
         }
-        if (omitted > 0)
-            out << "\n# omitted " << omitted << " matches after per-file caps\n";
-        if (!passthrough.empty())
-            out << "# ignored " << passthrough.size() << " non-rg lines\n";
+        if (omitted > 0) out << "\n# omitted " << omitted << " matches after per-file caps\n";
+        if (!passthrough.empty()) out << "# ignored " << passthrough.size() << " non-rg lines\n";
         return std::pair<std::string, int>{out.str(), emitted};
     };
 
@@ -194,37 +196,32 @@ std::string filter_grep_output(const std::string& input, int token_budget) {
 
 std::string detect_log_level(const std::string& line) {
     std::string lower = lowercase_copy(line);
-    if (lower.find("fatal") != std::string::npos ||
-        lower.find("panic") != std::string::npos) return "fatal";
-    if (lower.find("error") != std::string::npos ||
-        lower.find("exception") != std::string::npos ||
-        lower.find("failed") != std::string::npos ||
-        lower.find("failure") != std::string::npos ||
-        lower.find("can't ") != std::string::npos ||
-        lower.find("cannot ") != std::string::npos) return "error";
+    if (lower.find("fatal") != std::string::npos || lower.find("panic") != std::string::npos)
+        return "fatal";
+    if (lower.find("error") != std::string::npos || lower.find("exception") != std::string::npos ||
+        lower.find("failed") != std::string::npos || lower.find("failure") != std::string::npos ||
+        lower.find("can't ") != std::string::npos || lower.find("cannot ") != std::string::npos)
+        return "error";
     if (lower.find("warn") != std::string::npos) return "warn";
     if (lower.find("debug") != std::string::npos) return "debug";
     if (lower.find("trace") != std::string::npos) return "trace";
-    if (lower.find("info") != std::string::npos ||
-        lower.find("started ") != std::string::npos ||
-        lower.find("consumed ") != std::string::npos) return "info";
+    if (lower.find("info") != std::string::npos || lower.find("started ") != std::string::npos ||
+        lower.find("consumed ") != std::string::npos)
+        return "info";
     return "other";
 }
 
 bool looks_like_log_line(const std::string& line) {
-    if (line.size() >= 15 &&
-        std::isupper(static_cast<unsigned char>(line[0])) &&
+    if (line.size() >= 15 && std::isupper(static_cast<unsigned char>(line[0])) &&
         std::islower(static_cast<unsigned char>(line[1])) &&
         std::islower(static_cast<unsigned char>(line[2])) &&
         std::isspace(static_cast<unsigned char>(line[3]))) {
         return true;
     }
-    if (line.size() >= 19 &&
-        std::isdigit(static_cast<unsigned char>(line[0])) &&
+    if (line.size() >= 19 && std::isdigit(static_cast<unsigned char>(line[0])) &&
         std::isdigit(static_cast<unsigned char>(line[1])) &&
         std::isdigit(static_cast<unsigned char>(line[2])) &&
-        std::isdigit(static_cast<unsigned char>(line[3])) &&
-        line[4] == '-' && line[7] == '-' &&
+        std::isdigit(static_cast<unsigned char>(line[3])) && line[4] == '-' && line[7] == '-' &&
         (line[10] == 'T' || line[10] == ' ')) {
         return true;
     }
@@ -234,26 +231,20 @@ bool looks_like_log_line(const std::string& line) {
 std::string normalize_log_message(const std::string& line) {
     std::string msg = trim_whitespace(line);
 
-    static const std::regex syslog_prefix(
-        R"(^[A-Z][a-z]{2}\s+\d+\s+\d\d:\d\d:\d\d\s+\S+\s+(.+)$)");
+    static const std::regex syslog_prefix(R"(^[A-Z][a-z]{2}\s+\d+\s+\d\d:\d\d:\d\d\s+\S+\s+(.+)$)");
     std::smatch match;
     if (std::regex_match(msg, match, syslog_prefix)) {
         msg = match[1].str();
-    } else if (msg.size() >= 20 &&
-               std::isdigit(static_cast<unsigned char>(msg[0])) &&
-               msg[4] == '-' && msg[7] == '-' &&
-               (msg[10] == 'T' || msg[10] == ' ')) {
+    } else if (msg.size() >= 20 && std::isdigit(static_cast<unsigned char>(msg[0])) &&
+               msg[4] == '-' && msg[7] == '-' && (msg[10] == 'T' || msg[10] == ' ')) {
         size_t first_space = msg.find(' ');
-        size_t second_space = first_space == std::string::npos
-            ? std::string::npos
-            : msg.find(' ', first_space + 1);
-        if (second_space != std::string::npos)
-            msg = msg.substr(second_space + 1);
+        size_t second_space =
+            first_space == std::string::npos ? std::string::npos : msg.find(' ', first_space + 1);
+        if (second_space != std::string::npos) msg = msg.substr(second_space + 1);
     }
 
     size_t colon = msg.find(": ");
-    if (colon != std::string::npos && colon < 80)
-        msg = msg.substr(colon + 2);
+    if (colon != std::string::npos && colon < 80) msg = msg.substr(colon + 2);
 
     msg = std::regex_replace(msg, std::regex(R"(\b\d+\b)"), "#");
     msg = std::regex_replace(msg, std::regex(R"(\s+)"), " ");
@@ -286,12 +277,12 @@ std::string filter_log_output(const std::string& input, int token_budget) {
     }
 
     if (lines.empty() || signal_lines == 0) return input;
-    if (lines.size() < 3 ||
-        static_cast<int>(lines.size() * 2) < non_empty_lines) {
+    if (lines.size() < 3 || static_cast<int>(lines.size() * 2) < non_empty_lines) {
         return input;
     }
 
-    auto build_summary = [&](int important_keep, int repeat_keep, int edge_keep, size_t max_line_len) {
+    auto build_summary = [&](int important_keep, int repeat_keep, int edge_keep,
+                             size_t max_line_len) {
         std::ostringstream out;
         out << "# axon log summary: " << lines.size() << " log lines";
         if (signal_lines != static_cast<int>(lines.size()))
@@ -304,11 +295,10 @@ std::string filter_log_output(const std::string& input, int token_budget) {
         out << "\n";
 
         std::vector<std::pair<std::string, int>> repeated_sorted(repeated.begin(), repeated.end());
-        std::sort(repeated_sorted.begin(), repeated_sorted.end(),
-                  [](const auto& a, const auto& b) {
-                      if (a.second != b.second) return a.second > b.second;
-                      return a.first < b.first;
-                  });
+        std::sort(repeated_sorted.begin(), repeated_sorted.end(), [](const auto& a, const auto& b) {
+            if (a.second != b.second) return a.second > b.second;
+            return a.first < b.first;
+        });
 
         int emitted = 0;
         if (!repeated_sorted.empty()) {
@@ -344,14 +334,14 @@ std::string filter_log_output(const std::string& input, int token_budget) {
         out << "\n## edges\n";
         int first_keep = std::min<int>(edge_keep, static_cast<int>(lines.size()));
         for (int i = 0; i < first_keep; ++i) {
-            out << "first: [" << lines[i].level << "] "
-                << trim_to(lines[i].text, max_line_len) << "\n";
+            out << "first: [" << lines[i].level << "] " << trim_to(lines[i].text, max_line_len)
+                << "\n";
             ++emitted;
         }
         int start = std::max<int>(first_keep, static_cast<int>(lines.size()) - edge_keep);
         for (int i = start; i < static_cast<int>(lines.size()); ++i) {
-            out << "last: [" << lines[i].level << "] "
-                << trim_to(lines[i].text, max_line_len) << "\n";
+            out << "last: [" << lines[i].level << "] " << trim_to(lines[i].text, max_line_len)
+                << "\n";
             ++emitted;
         }
 
@@ -399,10 +389,7 @@ std::string filter_json_output(const std::string& input, int token_budget) {
         out << "# axon json summary\n";
 
         std::function<void(const nlohmann::json&, int, int, const std::string&)> append;
-        append = [&](const nlohmann::json& value,
-                     int depth,
-                     int indent,
-                     const std::string& label) {
+        append = [&](const nlohmann::json& value, int depth, int indent, const std::string& label) {
             std::string pad(static_cast<size_t>(indent), ' ');
             if (depth >= max_depth || (!value.is_object() && !value.is_array())) {
                 out << pad << label << json_type_summary(value) << "\n";
@@ -485,8 +472,7 @@ std::string filter_tsc_output(const std::string& input, int token_budget) {
             by_code[diagnostic.code]++;
             by_file[last_file].push_back(std::move(diagnostic));
             ++total_diagnostics;
-        } else if (!last_file.empty() &&
-                   !line.empty() &&
+        } else if (!last_file.empty() && !line.empty() &&
                    std::isspace(static_cast<unsigned char>(line.front()))) {
             auto& previous = by_file[last_file].back();
             std::string continuation = trim_whitespace(line);
@@ -500,8 +486,8 @@ std::string filter_tsc_output(const std::string& input, int token_budget) {
 
     auto build_summary = [&](int keep_per_file, size_t max_message_len, int max_files) {
         std::ostringstream out;
-        out << "# axon tsc summary: " << total_diagnostics << " diagnostics in "
-            << by_file.size() << " files\n";
+        out << "# axon tsc summary: " << total_diagnostics << " diagnostics in " << by_file.size()
+            << " files\n";
         out << "codes:";
         for (const auto& [code, count] : by_code) {
             out << " " << code << "=" << count;
@@ -576,22 +562,17 @@ bool is_pytest_block_header(const std::string& line) {
     std::string title = trim_whitespace(trimmed.substr(start, end - start));
     if (title == "ERRORS" || title == "FAILURES" || title == "short test summary info")
         return false;
-    return title.find("ERROR") != std::string::npos ||
-           title.find("FAILED") != std::string::npos;
+    return title.find("ERROR") != std::string::npos || title.find("FAILED") != std::string::npos;
 }
 
 bool is_test_summary_line(const std::string& line) {
     return line.find("short test summary info") != std::string::npos ||
-           line.find(" failed") != std::string::npos ||
-           line.find(" errors") != std::string::npos ||
-           line.find(" error") != std::string::npos ||
-           line.find(" passed") != std::string::npos ||
+           line.find(" failed") != std::string::npos || line.find(" errors") != std::string::npos ||
+           line.find(" error") != std::string::npos || line.find(" passed") != std::string::npos ||
            line.find(" tests passed") != std::string::npos ||
            line.find(" tests failed") != std::string::npos ||
-           line.find("100% tests passed") != std::string::npos ||
-           line.find("FAILED ") == 0 ||
-           line.find("ERROR ") == 0 ||
-           line.find("[  FAILED  ]") != std::string::npos ||
+           line.find("100% tests passed") != std::string::npos || line.find("FAILED ") == 0 ||
+           line.find("ERROR ") == 0 || line.find("[  FAILED  ]") != std::string::npos ||
            line.find("Failed") != std::string::npos;
 }
 
@@ -601,16 +582,11 @@ bool is_test_detail_line(const std::string& line) {
            line.find("ImportError") != std::string::npos ||
            line.find("ModuleNotFoundError") != std::string::npos ||
            line.find("Expected") != std::string::npos ||
-           line.find("expected") != std::string::npos ||
-           line.find("Actual") != std::string::npos ||
-           line.find("actual") != std::string::npos ||
-           line.rfind("E   ", 0) == 0 ||
-           line.rfind("E       ", 0) == 0 ||
-           line.find(".cpp:") != std::string::npos ||
-           line.find(".cc:") != std::string::npos ||
-           line.find(".py:") != std::string::npos ||
-           line.find(".ts:") != std::string::npos ||
-           line.find(".tsx:") != std::string::npos;
+           line.find("expected") != std::string::npos || line.find("Actual") != std::string::npos ||
+           line.find("actual") != std::string::npos || line.rfind("E   ", 0) == 0 ||
+           line.rfind("E       ", 0) == 0 || line.find(".cpp:") != std::string::npos ||
+           line.find(".cc:") != std::string::npos || line.find(".py:") != std::string::npos ||
+           line.find(".ts:") != std::string::npos || line.find(".tsx:") != std::string::npos;
 }
 
 std::string normalize_test_header(std::string line) {
@@ -649,8 +625,7 @@ std::string filter_test_output(const std::string& input, int token_budget) {
         }
 
         if (line.find("[  FAILED  ]") != std::string::npos ||
-            line.find("***Failed") != std::string::npos ||
-            line.rfind("FAILED ", 0) == 0 ||
+            line.find("***Failed") != std::string::npos || line.rfind("FAILED ", 0) == 0 ||
             line.rfind("ERROR ", 0) == 0) {
             if (current_title.empty()) current_title = trim_whitespace(line);
             current_lines.push_back(trim_to(trim_whitespace(line), 220));
@@ -740,24 +715,17 @@ bool starts_with_word(const std::string& line, const std::string& word) {
 }
 
 bool is_package_operation_line(const std::string& line) {
-    return starts_with_word(line, "add") ||
-           starts_with_word(line, "remove") ||
-           starts_with_word(line, "change") ||
-           starts_with_word(line, "update");
+    return starts_with_word(line, "add") || starts_with_word(line, "remove") ||
+           starts_with_word(line, "change") || starts_with_word(line, "update");
 }
 
 bool is_package_important_line(const std::string& line) {
     std::string trimmed = trim_whitespace(line);
-    return trimmed.rfind("npm ERR!", 0) == 0 ||
-           trimmed.rfind("npm WARN", 0) == 0 ||
-           trimmed.rfind("npm error", 0) == 0 ||
-           trimmed.rfind("ERR!", 0) == 0 ||
-           trimmed.rfind("WARN", 0) == 0 ||
-           trimmed.rfind("warning", 0) == 0 ||
-           trimmed.rfind("error", 0) == 0 ||
-           trimmed.rfind(">", 0) == 0 ||
-           trimmed.rfind("sh: ", 0) == 0 ||
-           trimmed.find("deprecated") != std::string::npos ||
+    return trimmed.rfind("npm ERR!", 0) == 0 || trimmed.rfind("npm WARN", 0) == 0 ||
+           trimmed.rfind("npm error", 0) == 0 || trimmed.rfind("ERR!", 0) == 0 ||
+           trimmed.rfind("WARN", 0) == 0 || trimmed.rfind("warning", 0) == 0 ||
+           trimmed.rfind("error", 0) == 0 || trimmed.rfind(">", 0) == 0 ||
+           trimmed.rfind("sh: ", 0) == 0 || trimmed.find("deprecated") != std::string::npos ||
            trimmed.find("vulnerabilities") != std::string::npos ||
            trimmed.find("vulnerability") != std::string::npos ||
            trimmed.find("added ") != std::string::npos ||
@@ -786,8 +754,7 @@ std::string filter_package_output(const std::string& input, int token_budget) {
                 ++parsed.add_count;
             } else if (starts_with_word(trimmed, "remove")) {
                 ++parsed.remove_count;
-            } else if (starts_with_word(trimmed, "change") ||
-                       starts_with_word(trimmed, "update")) {
+            } else if (starts_with_word(trimmed, "change") || starts_with_word(trimmed, "update")) {
                 ++parsed.change_count;
             }
         } else if (is_package_important_line(trimmed)) {
@@ -871,8 +838,7 @@ bool parse_concise_lint_line(const std::string& line, LintDiagnostic& out) {
     return true;
 }
 
-bool parse_eslint_stylish_line(const std::string& line,
-                               const std::string& current_file,
+bool parse_eslint_stylish_line(const std::string& line, const std::string& current_file,
                                LintDiagnostic& out) {
     if (current_file.empty()) return false;
     static const std::regex diagnostic(
@@ -922,8 +888,7 @@ std::string filter_lint_output(const std::string& input, int token_budget) {
             continue;
         }
 
-        if (trimmed.find('/') != std::string::npos &&
-            trimmed.find(':') == std::string::npos &&
+        if (trimmed.find('/') != std::string::npos && trimmed.find(':') == std::string::npos &&
             trimmed.find(' ') == std::string::npos) {
             current_file = trimmed;
             continue;
@@ -936,10 +901,11 @@ std::string filter_lint_output(const std::string& input, int token_budget) {
 
     if (total_diagnostics == 0 && summaries.empty()) return input;
 
-    auto build_summary = [&](int keep_per_file, int max_files, int max_summaries, size_t max_line_len) {
+    auto build_summary = [&](int keep_per_file, int max_files, int max_summaries,
+                             size_t max_line_len) {
         std::ostringstream out;
-        out << "# axon lint summary: " << total_diagnostics << " diagnostics in "
-            << by_file.size() << " files\n";
+        out << "# axon lint summary: " << total_diagnostics << " diagnostics in " << by_file.size()
+            << " files\n";
         if (!by_code.empty()) {
             out << "codes:";
             for (const auto& [code, count] : by_code)
@@ -1010,8 +976,7 @@ std::string filter_lint_output(const std::string& input, int token_budget) {
 
 } // namespace
 
-ShellFilterResult filter_shell_output(const std::string& command,
-                                      const std::string& input,
+ShellFilterResult filter_shell_output(const std::string& command, const std::string& input,
                                       int token_budget) {
     ShellFilterResult result;
     result.command = normalize_command(command);

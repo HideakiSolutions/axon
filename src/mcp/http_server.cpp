@@ -8,19 +8,19 @@
 #include "../core/telemetry.hpp"
 #include <nlohmann/json.hpp>
 #ifdef _WIN32
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#  define close(s) closesocket(s)
-#  ifdef _MSC_VER
-     typedef int ssize_t;   // MinGW defines ssize_t; MSVC does not
-#  endif
-#else
-#  include <sys/socket.h>
-#  include <netinet/in.h>
-#  include <arpa/inet.h>
-#  include <unistd.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define close(s) closesocket(s)
+#ifdef _MSC_VER
+typedef int ssize_t; // MinGW defines ssize_t; MSVC does not
 #endif
-#include <csignal>    // SIGINT, signal() — available on all platforms
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
+#include <csignal> // SIGINT, signal() — available on all platforms
 #include <chrono>
 #include <unordered_set>
 #include <sstream>
@@ -35,7 +35,8 @@ static volatile bool g_running = true;
 
 static void build_response(int fd, int status, const std::string& body,
                            const std::string& content_type = "application/json") {
-    std::string status_text = (status == 200) ? "OK" : (status == 404 ? "Not Found" : "Bad Request");
+    std::string status_text =
+        (status == 200) ? "OK" : (status == 404 ? "Not Found" : "Bad Request");
     std::ostringstream oss;
     oss << "HTTP/1.1 " << status << " " << status_text << "\r\n"
         << "Content-Type: " << content_type << "; charset=utf-8\r\n"
@@ -50,8 +51,7 @@ static void build_response(int fd, int status, const std::string& body,
 }
 
 // Extrai path e query string de "GET /api/search?q=foo HTTP/1.1"
-static void parse_request_line(const std::string& request,
-                               std::string& method, std::string& path,
+static void parse_request_line(const std::string& request, std::string& method, std::string& path,
                                std::string& query, std::string& body) {
     std::istringstream ss(request);
     std::string line;
@@ -62,17 +62,16 @@ static void parse_request_line(const std::string& request,
 
     auto q = full_path.find('?');
     if (q != std::string::npos) {
-        path  = full_path.substr(0, q);
+        path = full_path.substr(0, q);
         query = full_path.substr(q + 1);
     } else {
-        path  = full_path;
+        path = full_path;
         query = "";
     }
 
     // Read headers to find Content-Length, then read body
     auto body_start = request.find("\r\n\r\n");
-    if (body_start != std::string::npos)
-        body = request.substr(body_start + 4);
+    if (body_start != std::string::npos) body = request.substr(body_start + 4);
 }
 
 static std::string get_query_param(const std::string& query, const std::string& key) {
@@ -88,7 +87,10 @@ static std::string get_query_param(const std::string& query, const std::string& 
 static std::string url_decode(const std::string& s) {
     std::string out;
     for (size_t i = 0; i < s.size(); i++) {
-        if (s[i] == '+') { out += ' '; continue; }
+        if (s[i] == '+') {
+            out += ' ';
+            continue;
+        }
         if (s[i] == '%' && i + 2 < s.size()) {
             int c = 0;
             sscanf(s.c_str() + i + 1, "%2x", &c);
@@ -253,7 +255,10 @@ static std::string handle_request(const std::string& method, const std::string& 
     // Escape SQL strings
     auto sq = [](const std::string& s) {
         std::string out;
-        for (char c : s) { if (c == '\'') out += '\''; out += c; }
+        for (char c : s) {
+            if (c == '\'') out += '\'';
+            out += c;
+        }
         return out;
     };
 
@@ -281,18 +286,20 @@ static std::string handle_request(const std::string& method, const std::string& 
             json edges = json::array();
 
             // Nodes = symbols
-            auto sr = ctx.db->conn().Query(
-                "SELECT s.id, s.name, s.kind, f.path "
-                "FROM symbols s JOIN files f ON s.file_id = f.id");
+            auto sr = ctx.db->conn().Query("SELECT s.id, s.name, s.kind, f.path "
+                                           "FROM symbols s JOIN files f ON s.file_id = f.id");
             if (!sr->HasError()) {
                 for (duckdb::idx_t i = 0; i < sr->RowCount(); i++) {
-                    std::string sid  = std::to_string(sr->GetValue<int64_t>(0, i));
+                    std::string sid = std::to_string(sr->GetValue<int64_t>(0, i));
                     std::string name = sr->GetValue(1, i).ToString();
                     std::string kind = sr->GetValue(2, i).ToString();
                     std::string fpath = sr->GetValue(3, i).ToString();
                     // Compute rough degree in edges below — use 1 for now, updated after edge scan
-                    nodes.push_back({{"id", sid}, {"label", name}, {"kind", kind},
-                                     {"path", fpath}, {"size", 1}});
+                    nodes.push_back({{"id", sid},
+                                     {"label", name},
+                                     {"kind", kind},
+                                     {"path", fpath},
+                                     {"size", 1}});
                 }
             }
 
@@ -321,10 +328,12 @@ static std::string handle_request(const std::string& method, const std::string& 
                 if (!er->HasError()) {
                     for (duckdb::idx_t i = 0; i < er->RowCount(); i++) {
                         std::string from = er->GetValue(0, i).ToString();
-                        std::string to   = er->GetValue(1, i).ToString();
+                        std::string to = er->GetValue(1, i).ToString();
                         std::string kind = er->GetValue(2, i).ToString();
                         edges.push_back({{"id", from + "->" + to},
-                                         {"source", from}, {"target", to}, {"kind", kind}});
+                                         {"source", from},
+                                         {"target", to},
+                                         {"kind", kind}});
                     }
                 }
             }
@@ -332,12 +341,10 @@ static std::string handle_request(const std::string& method, const std::string& 
             std::unordered_set<std::string> node_files;
             for (const auto& n : nodes)
                 if (n.contains("path")) node_files.insert(n["path"].get<std::string>());
-            json meta = {
-                {"files",   (int)node_files.size()},
-                {"symbols", (int)nodes.size()},
-                {"edges",   (int)edges.size()},
-                {"project", ctx.cfg.project_root.filename().string()}
-            };
+            json meta = {{"files", (int)node_files.size()},
+                         {"symbols", (int)nodes.size()},
+                         {"edges", (int)edges.size()},
+                         {"project", ctx.cfg.project_root.filename().string()}};
             return json{{"nodes", nodes}, {"edges", edges}, {"meta", meta}}.dump();
         }
 
@@ -353,30 +360,33 @@ static std::string handle_request(const std::string& method, const std::string& 
 
             int deg = ctx.graph.degree(id);
             std::string label = fpath.substr(fpath.find_last_of('/') + 1);
-            nodes.push_back({{"id", fpath}, {"label", label}, {"language", lang},
-                             {"path", fpath}, {"size", deg}, {"kind", "file"}});
+            nodes.push_back({{"id", fpath},
+                             {"label", label},
+                             {"language", lang},
+                             {"path", fpath},
+                             {"size", deg},
+                             {"kind", "file"}});
         }
 
         // Prefer DB query to get symbol-granular edge info; fall back to in-memory
         if (ctx.db_ready()) {
-            auto eres = ctx.db->conn().Query(
-                "SELECT f1.path, f2.path, e.kind, s1.name, s2.name "
-                "FROM edges e "
-                "JOIN files f1 ON e.from_file = f1.id "
-                "JOIN files f2 ON e.to_file   = f2.id "
-                "LEFT JOIN symbols s1 ON e.from_symbol = s1.id "
-                "LEFT JOIN symbols s2 ON e.to_symbol   = s2.id");
+            auto eres = ctx.db->conn().Query("SELECT f1.path, f2.path, e.kind, s1.name, s2.name "
+                                             "FROM edges e "
+                                             "JOIN files f1 ON e.from_file = f1.id "
+                                             "JOIN files f2 ON e.to_file   = f2.id "
+                                             "LEFT JOIN symbols s1 ON e.from_symbol = s1.id "
+                                             "LEFT JOIN symbols s2 ON e.to_symbol   = s2.id");
             if (!eres->HasError()) {
                 for (duckdb::idx_t i = 0; i < eres->RowCount(); i++) {
                     std::string from = eres->GetValue(0, i).ToString();
-                    std::string to   = eres->GetValue(1, i).ToString();
+                    std::string to = eres->GetValue(1, i).ToString();
                     std::string kind = eres->GetValue(2, i).ToString();
-                    json edge = {{"id", from + "->" + to}, {"source", from},
-                                 {"target", to}, {"kind", kind}};
+                    json edge = {
+                        {"id", from + "->" + to}, {"source", from}, {"target", to}, {"kind", kind}};
                     auto fsym = eres->GetValue(3, i);
                     auto tsym = eres->GetValue(4, i);
                     if (!fsym.IsNull()) edge["from_symbol"] = fsym.ToString();
-                    if (!tsym.IsNull()) edge["to_symbol"]   = tsym.ToString();
+                    if (!tsym.IsNull()) edge["to_symbol"] = tsym.ToString();
                     edges.push_back(edge);
                 }
             }
@@ -423,30 +433,41 @@ static std::string handle_request(const std::string& method, const std::string& 
                     for (size_t i = 0; i < res->RowCount(); i++) {
                         std::string path = repo.name + "/" + res->GetValue(0, i).ToString();
                         int degree = 0;
-                        try { degree = std::stoi(res->GetValue(1, i).ToString()); } catch (...) {}
+                        try {
+                            degree = std::stoi(res->GetValue(1, i).ToString());
+                        } catch (...) {
+                        }
                         std::string label = fs::path(path).filename().string();
-                        nodes.push_back({{"id", path}, {"label", label}, {"degree", degree},
-                                         {"path", path}, {"size", degree}, {"kind", "file"},
+                        nodes.push_back({{"id", path},
+                                         {"label", label},
+                                         {"degree", degree},
+                                         {"path", path},
+                                         {"size", degree},
+                                         {"kind", "file"},
                                          {"repo", repo.name}});
                     }
                 } else {
-                    std::cerr << "[axon] skip repo " << repo.name << " nodes: " << res->GetError() << "\n";
+                    std::cerr << "[axon] skip repo " << repo.name << " nodes: " << res->GetError()
+                              << "\n";
                 }
 
                 // Query edges
-                auto eres = other_conn.Query(
-                    "SELECT f1.path, f2.path FROM edges e "
-                    "JOIN files f1 ON e.from_file = f1.id "
-                    "JOIN files f2 ON e.to_file   = f2.id");
+                auto eres = other_conn.Query("SELECT f1.path, f2.path FROM edges e "
+                                             "JOIN files f1 ON e.from_file = f1.id "
+                                             "JOIN files f2 ON e.to_file   = f2.id");
                 if (!eres->HasError()) {
                     for (size_t i = 0; i < eres->RowCount(); i++) {
                         std::string from = repo.name + "/" + eres->GetValue(0, i).ToString();
-                        std::string to   = repo.name + "/" + eres->GetValue(1, i).ToString();
-                        edges.push_back({{"id", from + "->" + to}, {"source", from}, {"target", to},
-                                         {"kind", "imports"}, {"repo", repo.name}});
+                        std::string to = repo.name + "/" + eres->GetValue(1, i).ToString();
+                        edges.push_back({{"id", from + "->" + to},
+                                         {"source", from},
+                                         {"target", to},
+                                         {"kind", "imports"},
+                                         {"repo", repo.name}});
                     }
                 } else {
-                    std::cerr << "[axon] skip repo " << repo.name << " edges: " << eres->GetError() << "\n";
+                    std::cerr << "[axon] skip repo " << repo.name << " edges: " << eres->GetError()
+                              << "\n";
                 }
             } catch (const std::exception& e) {
                 std::cerr << "[axon] skip repo " << repo.name << ": " << e.what() << "\n";
@@ -455,12 +476,10 @@ static std::string handle_request(const std::string& method, const std::string& 
             }
         }
 
-        json meta = {
-            {"files",   (int)ctx.graph.id_to_path.size()},
-            {"symbols", 0},  // filled below if DB available
-            {"edges",   (int)edges.size()},
-            {"project", ctx.cfg.project_root.filename().string()}
-        };
+        json meta = {{"files", (int)ctx.graph.id_to_path.size()},
+                     {"symbols", 0}, // filled below if DB available
+                     {"edges", (int)edges.size()},
+                     {"project", ctx.cfg.project_root.filename().string()}};
 
         if (ctx.db_ready()) {
             auto sr = ctx.db->conn().Query("SELECT count(*) FROM symbols");
@@ -480,14 +499,13 @@ static std::string handle_request(const std::string& method, const std::string& 
 
         json top_symbols = json::array();
         if (ctx.db_ready()) {
-            auto sr = ctx.db->conn().Query(
-                "SELECT s.name, s.kind, f.path FROM symbols s "
-                "JOIN files f ON s.file_id = f.id LIMIT 20");
+            auto sr = ctx.db->conn().Query("SELECT s.name, s.kind, f.path FROM symbols s "
+                                           "JOIN files f ON s.file_id = f.id LIMIT 20");
             if (!sr->HasError()) {
                 for (duckdb::idx_t i = 0; i < sr->RowCount(); i++)
-                    top_symbols.push_back({{"name", sr->GetValue(0,i).ToString()},
-                                          {"kind", sr->GetValue(1,i).ToString()},
-                                          {"file", sr->GetValue(2,i).ToString()}});
+                    top_symbols.push_back({{"name", sr->GetValue(0, i).ToString()},
+                                           {"kind", sr->GetValue(1, i).ToString()},
+                                           {"file", sr->GetValue(2, i).ToString()}});
             }
         }
         return json{{"top_files", top_files}, {"top_symbols", top_symbols}}.dump();
@@ -500,23 +518,24 @@ static std::string handle_request(const std::string& method, const std::string& 
         json symbols = json::array();
 
         if (!q.empty() && ctx.db_ready()) {
-            auto fr = ctx.db->conn().Query(
-                "SELECT path, language FROM files WHERE path LIKE '%" + sq(q) + "%' LIMIT 20");
+            auto fr = ctx.db->conn().Query("SELECT path, language FROM files WHERE path LIKE '%" +
+                                           sq(q) + "%' LIMIT 20");
             if (!fr->HasError())
                 for (duckdb::idx_t i = 0; i < fr->RowCount(); i++)
-                    files.push_back({{"path", fr->GetValue(0,i).ToString()},
-                                    {"language", fr->GetValue(1,i).ToString()}});
+                    files.push_back({{"path", fr->GetValue(0, i).ToString()},
+                                     {"language", fr->GetValue(1, i).ToString()}});
 
-            auto sr = ctx.db->conn().Query(
-                "SELECT s.name, s.kind, f.path, s.start_line FROM symbols s "
-                "JOIN files f ON s.file_id = f.id "
-                "WHERE s.name LIKE '%" + sq(q) + "%' LIMIT 20");
+            auto sr =
+                ctx.db->conn().Query("SELECT s.name, s.kind, f.path, s.start_line FROM symbols s "
+                                     "JOIN files f ON s.file_id = f.id "
+                                     "WHERE s.name LIKE '%" +
+                                     sq(q) + "%' LIMIT 20");
             if (!sr->HasError())
                 for (duckdb::idx_t i = 0; i < sr->RowCount(); i++)
-                    symbols.push_back({{"name", sr->GetValue(0,i).ToString()},
-                                      {"kind", sr->GetValue(1,i).ToString()},
-                                      {"file", sr->GetValue(2,i).ToString()},
-                                      {"line", sr->GetValue(3,i).GetValue<int32_t>()}});
+                    symbols.push_back({{"name", sr->GetValue(0, i).ToString()},
+                                       {"kind", sr->GetValue(1, i).ToString()},
+                                       {"file", sr->GetValue(2, i).ToString()},
+                                       {"line", sr->GetValue(3, i).GetValue<int32_t>()}});
         }
         return json{{"files", files}, {"symbols", symbols}}.dump();
     }
@@ -530,7 +549,8 @@ static std::string handle_request(const std::string& method, const std::string& 
             auto sr = ctx.db->conn().Query(
                 "SELECT s.name, s.kind, f.path, s.start_line, s.signature, s.file_id "
                 "FROM symbols s JOIN files f ON s.file_id = f.id "
-                "WHERE s.name = '" + sq(sym_name) + "' LIMIT 1");
+                "WHERE s.name = '" +
+                sq(sym_name) + "' LIMIT 1");
             if (!sr->HasError() && sr->RowCount() > 0) {
                 int64_t file_id = sr->GetValue<int64_t>(5, 0);
                 json caller_files = json::array();
@@ -538,14 +558,13 @@ static std::string handle_request(const std::string& method, const std::string& 
                 if (it != ctx.graph.incoming.end())
                     for (int64_t src : it->second) {
                         auto pit = ctx.graph.id_to_path.find(src);
-                        if (pit != ctx.graph.id_to_path.end())
-                            caller_files.push_back(pit->second);
+                        if (pit != ctx.graph.id_to_path.end()) caller_files.push_back(pit->second);
                     }
-                result = {{"name",         sr->GetValue(0,0).ToString()},
-                          {"kind",         sr->GetValue(1,0).ToString()},
-                          {"file",         sr->GetValue(2,0).ToString()},
-                          {"line",         sr->GetValue(3,0).GetValue<int32_t>()},
-                          {"signature",    sr->GetValue(4,0).ToString()},
+                result = {{"name", sr->GetValue(0, 0).ToString()},
+                          {"kind", sr->GetValue(1, 0).ToString()},
+                          {"file", sr->GetValue(2, 0).ToString()},
+                          {"line", sr->GetValue(3, 0).GetValue<int32_t>()},
+                          {"signature", sr->GetValue(4, 0).ToString()},
                           {"caller_files", caller_files}};
             }
         }
@@ -560,11 +579,11 @@ static std::string handle_request(const std::string& method, const std::string& 
                 auto b = json::parse(body);
                 ref = b.value("ref", "HEAD");
             }
-        } catch (...) {}
+        } catch (...) {
+        }
 
         std::string root = ctx.cfg.project_root.string();
-        if (!axon::is_git_repo(root))
-            return json{{"error","Not a git repository"}}.dump();
+        if (!axon::is_git_repo(root)) return json{{"error", "Not a git repository"}}.dump();
 
         auto diffs = axon::get_git_diffs(root, ref);
         json changed_files = json::array();
@@ -574,10 +593,15 @@ static std::string handle_request(const std::string& method, const std::string& 
             changed_files.push_back(diff.path);
             if (!ctx.db_ready() || diff.hunks.empty()) continue;
             auto sq2 = [&](const std::string& s) -> std::string {
-                std::string o; for (char c : s) { if (c=='\'') o+='\''; o+=c; } return o;
+                std::string o;
+                for (char c : s) {
+                    if (c == '\'') o += '\'';
+                    o += c;
+                }
+                return o;
             };
-            auto fid_res = ctx.db->conn().Query(
-                "SELECT id FROM files WHERE path = '" + sq2(diff.path) + "'");
+            auto fid_res =
+                ctx.db->conn().Query("SELECT id FROM files WHERE path = '" + sq2(diff.path) + "'");
             if (fid_res->HasError() || fid_res->RowCount() == 0) continue;
             int64_t file_id = fid_res->GetValue<int64_t>(0, 0);
             for (const auto& hunk : diff.hunks) {
@@ -588,14 +612,16 @@ static std::string handle_request(const std::string& method, const std::string& 
                     " AND end_line >= " + std::to_string(hunk.start_line));
                 if (sym_res->HasError()) continue;
                 for (duckdb::idx_t i = 0; i < sym_res->RowCount(); i++)
-                    affected_symbols.push_back({{"name", sym_res->GetValue(0,i).ToString()},
-                                               {"kind", sym_res->GetValue(1,i).ToString()},
-                                               {"file", diff.path},
-                                               {"line", sym_res->GetValue(2,i).GetValue<int32_t>()}});
+                    affected_symbols.push_back(
+                        {{"name", sym_res->GetValue(0, i).ToString()},
+                         {"kind", sym_res->GetValue(1, i).ToString()},
+                         {"file", diff.path},
+                         {"line", sym_res->GetValue(2, i).GetValue<int32_t>()}});
             }
         }
-        return json{{"ref", ref}, {"changed_files", changed_files},
-                   {"affected_symbols", affected_symbols}}.dump();
+        return json{
+            {"ref", ref}, {"changed_files", changed_files}, {"affected_symbols", affected_symbols}}
+            .dump();
     }
 
     // GET /api/observations?q=<text>&limit=N
@@ -610,29 +636,36 @@ static std::string handle_request(const std::string& method, const std::string& 
                 auto emb = ctx.model->embed(q);
                 std::ostringstream vs;
                 vs << "[";
-                for (size_t i = 0; i < emb.size(); i++) { if (i) vs << ","; vs << emb[i]; }
+                for (size_t i = 0; i < emb.size(); i++) {
+                    if (i) vs << ",";
+                    vs << emb[i];
+                }
                 vs << "]";
                 auto res = ctx.db->conn().Query(
                     "SELECT id, content, file_path, created_at FROM observations "
                     "WHERE embedding IS NOT NULL "
-                    "ORDER BY array_cosine_similarity(embedding, " + vs.str() + "::FLOAT[768]) DESC "
-                    "LIMIT " + std::to_string(limit));
+                    "ORDER BY array_cosine_similarity(embedding, " +
+                    vs.str() +
+                    "::FLOAT[768]) DESC "
+                    "LIMIT " +
+                    std::to_string(limit));
                 if (!res->HasError())
                     for (duckdb::idx_t i = 0; i < res->RowCount(); i++)
-                        obs.push_back({{"id",         res->GetValue<int64_t>(0, i)},
-                                      {"content",    res->GetValue(1, i).ToString()},
-                                      {"file_path",  res->GetValue(2, i).ToString()},
-                                      {"created_at", res->GetValue(3, i).ToString()}});
+                        obs.push_back({{"id", res->GetValue<int64_t>(0, i)},
+                                       {"content", res->GetValue(1, i).ToString()},
+                                       {"file_path", res->GetValue(2, i).ToString()},
+                                       {"created_at", res->GetValue(3, i).ToString()}});
             } else {
                 auto res = ctx.db->conn().Query(
                     "SELECT id, content, file_path, created_at FROM observations "
-                    "ORDER BY created_at DESC LIMIT " + std::to_string(limit));
+                    "ORDER BY created_at DESC LIMIT " +
+                    std::to_string(limit));
                 if (!res->HasError())
                     for (duckdb::idx_t i = 0; i < res->RowCount(); i++)
-                        obs.push_back({{"id",         res->GetValue<int64_t>(0, i)},
-                                      {"content",    res->GetValue(1, i).ToString()},
-                                      {"file_path",  res->GetValue(2, i).ToString()},
-                                      {"created_at", res->GetValue(3, i).ToString()}});
+                        obs.push_back({{"id", res->GetValue<int64_t>(0, i)},
+                                       {"content", res->GetValue(1, i).ToString()},
+                                       {"file_path", res->GetValue(2, i).ToString()},
+                                       {"created_at", res->GetValue(3, i).ToString()}});
             }
         }
         return json{{"observations", obs}, {"count", (int)obs.size()}}.dump();
@@ -660,25 +693,30 @@ static std::string handle_request(const std::string& method, const std::string& 
                                   const char* cache_state) -> std::string {
             json pivot_files = json::array();
             for (const auto& f : c.pivot_files)
-                pivot_files.push_back({{"path", f.path}, {"content", f.content},
+                pivot_files.push_back({{"path", f.path},
+                                       {"content", f.content},
                                        {"source_ref", f.source_ref},
                                        {"expand_command", f.expand_command},
-                                       {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
+                                       {"is_skeleton", f.is_skeleton},
+                                       {"token_estimate", f.token_estimate}});
             json support_files = json::array();
             for (const auto& f : c.support_files)
-                support_files.push_back({{"path", f.path}, {"content", f.content},
+                support_files.push_back({{"path", f.path},
+                                         {"content", f.content},
                                          {"source_ref", f.source_ref},
                                          {"expand_command", f.expand_command},
-                                         {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
-            json cap = {{"query",          c.query},
-                        {"pivot_files",    pivot_files},
-                        {"support_files",  support_files},
+                                         {"is_skeleton", f.is_skeleton},
+                                         {"token_estimate", f.token_estimate}});
+            json cap = {{"query", c.query},
+                        {"pivot_files", pivot_files},
+                        {"support_files", support_files},
                         {"token_estimate", c.token_estimate},
-                        {"compression", {{"input_tokens", c.compression_input_tokens},
-                                         {"output_tokens", c.compression_output_tokens},
-                                         {"tokens_saved", c.compression_tokens_saved}}},
+                        {"compression",
+                         {{"input_tokens", c.compression_input_tokens},
+                          {"output_tokens", c.compression_output_tokens},
+                          {"tokens_saved", c.compression_tokens_saved}}},
                         {"ccr_artifact_ids", c.ccr_artifact_ids},
-                        {"total_files",    c.total_files}};
+                        {"total_files", c.total_files}};
             if (cache_state) cap["cache"] = cache_state;
             return json{{"capsule", cap}}.dump();
         };
@@ -696,12 +734,13 @@ static std::string handle_request(const std::string& method, const std::string& 
         }
 
         if (!ctx.model_ready())
-            return json{{"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}.dump();
+            return json{
+                {"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}
+                .dump();
 
-        auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model,
-                                              ctx.graph, ctx.cfg.project_root, budget);
-        if (eligible_for_cache)
-            axon::capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
+        auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model, ctx.graph,
+                                              ctx.cfg.project_root, budget);
+        if (eligible_for_cache) axon::capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
 
         return capsule_to_json(capsule, nullptr);
     }
@@ -710,82 +749,90 @@ static std::string handle_request(const std::string& method, const std::string& 
     if (method == "GET" && path.rfind("/api/artifact/", 0) == 0) {
         std::string artifact_id = url_decode(path.substr(std::string("/api/artifact/").size()));
         std::optional<axon::CcrArtifact> artifact;
-        if (ctx.db_ready())
-            artifact = axon::ccr_retrieve_artifact(*ctx.db, artifact_id);
+        if (ctx.db_ready()) artifact = axon::ccr_retrieve_artifact(*ctx.db, artifact_id);
         // Fall back to the file sidecar (populated by `axon filter` while
         // another process held the DB lock).
         if (!artifact)
             artifact = axon::ccr_retrieve_artifact_file(ctx.cfg.axon_dir / "ccr", artifact_id);
         if (!artifact) {
-            if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
-            return json{{"error","artifact not found"},{"artifact_id",artifact_id}}.dump();
+            if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
+            return json{{"error", "artifact not found"}, {"artifact_id", artifact_id}}.dump();
         }
-        return json{{"artifact", {{"artifact_id", artifact->artifact_id},
-                                  {"kind", artifact->kind},
-                                  {"source_ref", artifact->source_ref},
-                                  {"content", artifact->content},
-                                  {"token_estimate", artifact->token_estimate}}}}.dump();
+        return json{{"artifact",
+                     {{"artifact_id", artifact->artifact_id},
+                      {"kind", artifact->kind},
+                      {"source_ref", artifact->source_ref},
+                      {"content", artifact->content},
+                      {"token_estimate", artifact->token_estimate}}}}
+            .dump();
     }
 
     // ── Dialogue Layer HTTP endpoints ─────────────────────────────────────────
 
     // GET /api/threads
     if (method == "GET" && path == "/api/threads") {
-        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
         auto threads = axon::thread_list(*ctx.db);
         json result = json::array();
         for (const auto& t : threads)
-            result.push_back({{"id",t.id},{"name",t.name},{"kind",t.kind},{"created_at",t.created_at}});
+            result.push_back(
+                {{"id", t.id}, {"name", t.name}, {"kind", t.kind}, {"created_at", t.created_at}});
         return json{{"threads", result}, {"count", (int)result.size()}}.dump();
     }
 
     // GET /api/threads/:id/sessions
     if (method == "GET" && path.rfind("/api/threads/", 0) == 0 &&
         path.find("/sessions") != std::string::npos) {
-        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
         auto slash = path.rfind('/', path.size() - 9);
         int64_t thread_id = std::stoll(path.substr(13, slash - 13));
         auto sessions = axon::thread_get_sessions(*ctx.db, thread_id);
         json result = json::array();
         for (const auto& s : sessions)
-            result.push_back({{"id",s.id},{"label",s.label},
-                              {"started_at",s.started_at},{"ended_at",s.ended_at},
-                              {"digest",s.digest}});
+            result.push_back({{"id", s.id},
+                              {"label", s.label},
+                              {"started_at", s.started_at},
+                              {"ended_at", s.ended_at},
+                              {"digest", s.digest}});
         return json{{"sessions", result}}.dump();
     }
 
     // GET /api/sessions/:id/turns
     if (method == "GET" && path.rfind("/api/sessions/", 0) == 0 &&
         path.find("/turns") != std::string::npos) {
-        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
         int64_t session_id = std::stoll(path.substr(14, path.find("/turns") - 14));
         auto turns = axon::session_get(*ctx.db, session_id);
         json result = json::array();
         for (const auto& t : turns)
-            result.push_back({{"id",t.id},{"role",t.role},{"content",t.content},{"ts",t.ts}});
+            result.push_back(
+                {{"id", t.id}, {"role", t.role}, {"content", t.content}, {"ts", t.ts}});
         return json{{"turns", result}, {"session_id", session_id}}.dump();
     }
 
     // GET /api/dialogue/search?q=<query>&limit=N&thread_id=N
     if (method == "GET" && path == "/api/dialogue/search") {
         if (!ctx.db_ready() || !ctx.model_ready())
-            return json{{"error","DB or model not ready"}}.dump();
-        std::string q     = url_decode(get_query_param(query, "q"));
-        std::string lim   = get_query_param(query, "limit");
+            return json{{"error", "DB or model not ready"}}.dump();
+        std::string q = url_decode(get_query_param(query, "q"));
+        std::string lim = get_query_param(query, "limit");
         std::string tid_s = get_query_param(query, "thread_id");
-        int limit         = lim.empty()   ? 5  : std::stoi(lim);
+        int limit = lim.empty() ? 5 : std::stoi(lim);
         int64_t thread_id = tid_s.empty() ? -1 : std::stoll(tid_s);
         auto hits = axon::turn_search(*ctx.db, *ctx.model, q, limit, thread_id);
         json result = json::array();
         for (const auto& h : hits)
-            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
-                              {"content",h.turn.content},{"ts",h.turn.ts},
-                              {"session",h.session_label},{"thread",h.thread_name},
-                              {"score",h.score}});
+            result.push_back({{"turn_id", h.turn.id},
+                              {"role", h.turn.role},
+                              {"content", h.turn.content},
+                              {"ts", h.turn.ts},
+                              {"session", h.session_label},
+                              {"thread", h.thread_name},
+                              {"score", h.score}});
         return json{{"results", result}, {"count", (int)result.size()}}.dump();
     }
 
-    return json{{"error","Not found"}}.dump();
+    return json{{"error", "Not found"}}.dump();
 }
 
 void run_http(ServerContext& ctx, const HttpConfig& cfg) {
@@ -799,14 +846,18 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
 #endif
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) { std::cerr << "socket() failed\n"; return; }
+    if (server_fd < 0) {
+        std::cerr << "socket() failed\n";
+        return;
+    }
 
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt),
+               sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(cfg.port);
+    addr.sin_port = htons(cfg.port);
     inet_pton(AF_INET, cfg.host.c_str(), &addr.sin_addr);
 
     if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -816,19 +867,19 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
     }
     listen(server_fd, 16);
     std::cout << "Axon Web listening on http://" << cfg.host << ":" << cfg.port << "\n";
-    std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  /api/detect-changes  /api/observations  /api/capsule\n";
+    std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  "
+                 "/api/detect-changes  /api/observations  /api/capsule\n";
 
     // Same peer-proxy mechanism as stdio serves: a localhost listener that
     // executes tool calls for latecomer serves while this process holds the
     // DuckDB write lock (always on 127.0.0.1 even when --host is public).
-    if (start_peer_listener(ctx) && ctx.db_ready())
-        register_self_as_owner(ctx, ctx.peer_port);
+    if (start_peer_listener(ctx) && ctx.db_ready()) register_self_as_owner(ctx, ctx.peer_port);
 
     while (g_running) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(server_fd, &fds);
-        timeval tv{1, 0};  // 1s timeout to check g_running
+        timeval tv{1, 0}; // 1s timeout to check g_running
         if (select(server_fd + 1, &fds, nullptr, nullptr, &tv) <= 0) continue;
 
         int client_fd = accept(server_fd, nullptr, nullptr);
@@ -854,14 +905,16 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             }
             if (path != "/api/metrics") {
                 int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - start).count();
+                                         std::chrono::steady_clock::now() - start)
+                                         .count();
                 int64_t tokens = static_cast<int64_t>(response_body.size() / 4);
                 bool cache_hit = response_body.find("\"cache\":\"hit\"") != std::string::npos;
-                axon::record_telemetry(ctx.cfg, ctx.db.get(), {
-                    path, "http", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""
-                });
+                axon::record_telemetry(
+                    ctx.cfg, ctx.db.get(),
+                    {path, "http", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""});
             }
-            std::string content_type = (path == "/" || path == "/index.html") ? "text/html" : "application/json";
+            std::string content_type =
+                (path == "/" || path == "/index.html") ? "text/html" : "application/json";
             build_response(client_fd, 200, response_body, content_type);
         }
         close(client_fd);

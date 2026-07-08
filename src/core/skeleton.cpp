@@ -5,48 +5,66 @@
 #include <vector>
 
 extern "C" {
-    TSLanguage* tree_sitter_typescript();
-    TSLanguage* tree_sitter_javascript();
-    TSLanguage* tree_sitter_python();
-    TSLanguage* tree_sitter_rust();
-    TSLanguage* tree_sitter_go();
-    TSLanguage* tree_sitter_c_sharp();
-    TSLanguage* tree_sitter_php();
-    TSLanguage* tree_sitter_dart();
-    TSLanguage* tree_sitter_java();
-    TSLanguage* tree_sitter_bash();
-    TSLanguage* tree_sitter_cpp();
-    TSLanguage* tree_sitter_kotlin();
-    TSLanguage* tree_sitter_vue();
-    TSLanguage* tree_sitter_lua();
-    TSLanguage* tree_sitter_nix();
-    TSLanguage* tree_sitter_ruby();
-    TSLanguage* tree_sitter_swift();
-    TSLanguage* tree_sitter_scala();
+TSLanguage* tree_sitter_typescript();
+TSLanguage* tree_sitter_javascript();
+TSLanguage* tree_sitter_python();
+TSLanguage* tree_sitter_rust();
+TSLanguage* tree_sitter_go();
+TSLanguage* tree_sitter_c_sharp();
+TSLanguage* tree_sitter_php();
+TSLanguage* tree_sitter_dart();
+TSLanguage* tree_sitter_java();
+TSLanguage* tree_sitter_bash();
+TSLanguage* tree_sitter_cpp();
+TSLanguage* tree_sitter_kotlin();
+TSLanguage* tree_sitter_vue();
+TSLanguage* tree_sitter_lua();
+TSLanguage* tree_sitter_nix();
+TSLanguage* tree_sitter_ruby();
+TSLanguage* tree_sitter_swift();
+TSLanguage* tree_sitter_scala();
 }
 
 namespace axon {
 
 static TSLanguage* get_ts_language(Language lang) {
     switch (lang) {
-        case Language::TypeScript:  return tree_sitter_typescript();
-        case Language::JavaScript:  return tree_sitter_javascript();
-        case Language::Python:      return tree_sitter_python();
-        case Language::Rust:        return tree_sitter_rust();
-        case Language::Go:          return tree_sitter_go();
-        case Language::CSharp:      return tree_sitter_c_sharp();
-        case Language::PHP:         return tree_sitter_php();
-        case Language::Dart:        return tree_sitter_dart();
-        case Language::Java:        return tree_sitter_java();
-        case Language::Bash:        return tree_sitter_bash();
-        case Language::Cpp:         return tree_sitter_cpp();
-        case Language::Kotlin:      return tree_sitter_kotlin();
-        case Language::Vue:         return tree_sitter_vue();
-        case Language::Lua:         return tree_sitter_lua();
-        case Language::Nix:         return tree_sitter_nix();
-        case Language::Ruby:        return tree_sitter_ruby();
-        case Language::Swift:       return tree_sitter_swift();
-        case Language::Scala:       return tree_sitter_scala();
+    case Language::TypeScript:
+        return tree_sitter_typescript();
+    case Language::JavaScript:
+        return tree_sitter_javascript();
+    case Language::Python:
+        return tree_sitter_python();
+    case Language::Rust:
+        return tree_sitter_rust();
+    case Language::Go:
+        return tree_sitter_go();
+    case Language::CSharp:
+        return tree_sitter_c_sharp();
+    case Language::PHP:
+        return tree_sitter_php();
+    case Language::Dart:
+        return tree_sitter_dart();
+    case Language::Java:
+        return tree_sitter_java();
+    case Language::Bash:
+        return tree_sitter_bash();
+    case Language::Cpp:
+        return tree_sitter_cpp();
+    case Language::Kotlin:
+        return tree_sitter_kotlin();
+    case Language::Vue:
+        return tree_sitter_vue();
+    case Language::Lua:
+        return tree_sitter_lua();
+    case Language::Nix:
+        return tree_sitter_nix();
+    case Language::Ruby:
+        return tree_sitter_ruby();
+    case Language::Swift:
+        return tree_sitter_swift();
+    case Language::Scala:
+        return tree_sitter_scala();
     }
     return nullptr;
 }
@@ -66,39 +84,32 @@ static std::string first_line(TSNode node, const std::string& src) {
 
 // Returns true if this node type represents a "body" to be skipped
 static bool is_body_kind(const char* kind) {
-    return (
-        strcmp(kind, "statement_block") == 0 ||   // TS/JS function body
-        strcmp(kind, "block") == 0               ||   // Python/Go body
-        strcmp(kind, "block_body") == 0          ||
-        strcmp(kind, "field_declaration_list") == 0 || // TS class body (keep for now)
-        strcmp(kind, "declaration_list") == 0         // Rust impl body
+    return (strcmp(kind, "statement_block") == 0 || // TS/JS function body
+            strcmp(kind, "block") == 0 ||           // Python/Go body
+            strcmp(kind, "block_body") == 0 ||
+            strcmp(kind, "field_declaration_list") == 0 || // TS class body (keep for now)
+            strcmp(kind, "declaration_list") == 0          // Rust impl body
     );
 }
 
 static bool is_comment_kind(const char* kind) {
-    return (strcmp(kind, "comment") == 0 ||
-            strcmp(kind, "line_comment") == 0 ||
+    return (strcmp(kind, "comment") == 0 || strcmp(kind, "line_comment") == 0 ||
             strcmp(kind, "block_comment") == 0);
 }
 
 // Recursively build skeleton, skipping function bodies
-static void build_skeleton(TSNode node, const std::string& src,
-                            Language lang, int depth, std::ostringstream& out,
-                            bool strip_comments)
-{
+static void build_skeleton(TSNode node, const std::string& src, Language lang, int depth,
+                           std::ostringstream& out, bool strip_comments) {
     if (ts_node_is_null(node)) return;
     std::string kind = ts_node_type(node);
 
     // For function/method nodes: emit only first line (signature)
-    bool is_func = (kind == "function_declaration" ||
-                    kind == "function_definition"  ||
-                    kind == "function_item"        ||
-                    kind == "method_definition"    ||
-                    kind == "method_declaration"   ||
-                    kind == "method"               ||     // Ruby
-                    kind == "singleton_method"     ||     // Ruby
-                    kind == "constructor_declaration" ||  // C#/Java
-                    kind == "function_signature"   ||     // Dart
+    bool is_func = (kind == "function_declaration" || kind == "function_definition" ||
+                    kind == "function_item" || kind == "method_definition" ||
+                    kind == "method_declaration" || kind == "method" || // Ruby
+                    kind == "singleton_method" ||                       // Ruby
+                    kind == "constructor_declaration" ||                // C#/Java
+                    kind == "function_signature" ||                     // Dart
                     kind == "generator_function_declaration");
 
     if (is_func) {
@@ -107,20 +118,14 @@ static void build_skeleton(TSNode node, const std::string& src,
     }
 
     // For class/impl: emit header, recurse into members (methods get skeletonized)
-    bool is_class = (kind == "class_declaration"  ||
-                     kind == "class_definition"   ||
-                     kind == "impl_item"          ||
-                     kind == "struct_item"        ||
-                     kind == "struct_declaration" ||
-                     (lang == Language::Swift && kind == "struct") ||
-                     kind == "protocol_declaration" ||
-                     kind == "extension_declaration" ||
-                     kind == "module"             ||      // Ruby
-                     kind == "class"              ||      // Ruby
-                     kind == "object_definition"  ||
-                     kind == "trait_definition"   ||
-                     kind == "interface_declaration" ||
-                     kind == "enum_declaration");
+    bool is_class =
+        (kind == "class_declaration" || kind == "class_definition" || kind == "impl_item" ||
+         kind == "struct_item" || kind == "struct_declaration" ||
+         (lang == Language::Swift && kind == "struct") || kind == "protocol_declaration" ||
+         kind == "extension_declaration" || kind == "module" || // Ruby
+         kind == "class" ||                                     // Ruby
+         kind == "object_definition" || kind == "trait_definition" ||
+         kind == "interface_declaration" || kind == "enum_declaration");
 
     if (is_class && depth > 0) {
         // Emit first line of class and recurse into children
@@ -141,11 +146,11 @@ static void build_skeleton(TSNode node, const std::string& src,
             if (!ts_node_is_null(expr_node)) {
                 std::string ek = ts_node_type(expr_node);
                 if (ek == "attrset_expression" || ek == "rec_attrset_expression" ||
-                    ek == "let_expression"     || ek == "let_attrset_expression") {
+                    ek == "let_expression" || ek == "let_attrset_expression") {
                     uint32_t cnt2 = ts_node_child_count(expr_node);
                     for (uint32_t i = 0; i < cnt2; i++)
-                        build_skeleton(ts_node_child(expr_node, i), src, lang,
-                                       depth + 1, out, strip_comments);
+                        build_skeleton(ts_node_child(expr_node, i), src, lang, depth + 1, out,
+                                       strip_comments);
                 }
             }
             return;
@@ -159,7 +164,8 @@ static void build_skeleton(TSNode node, const std::string& src,
 
     // C++: namespace_definition and class/struct specifiers — recurse into body
     if (lang == Language::Cpp) {
-        if (kind == "namespace_definition" || kind == "class_specifier" || kind == "struct_specifier") {
+        if (kind == "namespace_definition" || kind == "class_specifier" ||
+            kind == "struct_specifier") {
             if (kind != "namespace_definition") out << first_line(node, src) << "\n";
             uint32_t cnt2 = ts_node_child_count(node);
             for (uint32_t i = 0; i < cnt2; i++)
@@ -185,15 +191,12 @@ static void build_skeleton(TSNode node, const std::string& src,
     }
 
     // Imports, type aliases: emit as-is
-    bool emit_full = (kind == "import_statement"        ||
-                      kind == "import_declaration"       ||
-                      kind == "import_from_statement"    ||
-                      kind == "use_declaration"          ||
-                      kind == "using_directive"          ||  // C#
-                      kind == "namespace_use_declaration"||  // PHP
-                      kind == "import_or_export"         ||  // Dart
-                      kind == "type_alias_declaration"   ||
-                      kind == "interface_declaration");
+    bool emit_full = (kind == "import_statement" || kind == "import_declaration" ||
+                      kind == "import_from_statement" || kind == "use_declaration" ||
+                      kind == "using_directive" ||           // C#
+                      kind == "namespace_use_declaration" || // PHP
+                      kind == "import_or_export" ||          // Dart
+                      kind == "type_alias_declaration" || kind == "interface_declaration");
     if (emit_full) {
         out << node_text(node, src) << "\n";
         return;
@@ -210,7 +213,7 @@ std::string skeletonize(const std::string& source, Language lang, bool strip_com
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, get_ts_language(lang));
     TSTree* tree = ts_parser_parse_string(parser, nullptr, source.c_str(), (uint32_t)source.size());
-    TSNode root  = ts_tree_root_node(tree);
+    TSNode root = ts_tree_root_node(tree);
 
     std::ostringstream out;
 
@@ -243,7 +246,7 @@ std::string skeletonize(const std::string& source, Language lang, bool strip_com
                     }
                 } else if (ck == "raw_text" || ck == "text") {
                     raw_start = ts_node_start_byte(c);
-                    raw_end   = ts_node_end_byte(c);
+                    raw_end = ts_node_end_byte(c);
                     found_raw = true;
                 }
             }
@@ -253,13 +256,14 @@ std::string skeletonize(const std::string& source, Language lang, bool strip_com
             TSParser* sub_parser = ts_parser_new();
             Language sub_lang = is_typescript ? Language::TypeScript : Language::JavaScript;
             ts_parser_set_language(sub_parser, get_ts_language(sub_lang));
-            TSTree* sub_tree = ts_parser_parse_string(sub_parser, nullptr,
-                sub_src.c_str(), (uint32_t)sub_src.size());
+            TSTree* sub_tree = ts_parser_parse_string(sub_parser, nullptr, sub_src.c_str(),
+                                                      (uint32_t)sub_src.size());
             TSNode sub_root = ts_tree_root_node(sub_tree);
 
             uint32_t sub_cnt = ts_node_child_count(sub_root);
             for (uint32_t j = 0; j < sub_cnt; j++)
-                build_skeleton(ts_node_child(sub_root, j), sub_src, sub_lang, 0, out, strip_comments);
+                build_skeleton(ts_node_child(sub_root, j), sub_src, sub_lang, 0, out,
+                               strip_comments);
 
             ts_tree_delete(sub_tree);
             ts_parser_delete(sub_parser);

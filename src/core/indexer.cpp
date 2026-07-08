@@ -12,29 +12,31 @@
 static std::string sq(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 4);
-    for (char c : s) { if (c == '\'') out += '\''; out += c; }
+    for (char c : s) {
+        if (c == '\'') out += '\'';
+        out += c;
+    }
     return out;
 }
 
 namespace axon {
 namespace fs = std::filesystem;
 
-static const std::vector<std::string> SKIP_DIRS = {
-    "node_modules", ".git", "target", "build", "__pycache__",
-    ".axon", "dist", ".next", "vendor", ".venv", "venv", ".worktrees"
-};
+static const std::vector<std::string> SKIP_DIRS = {"node_modules", ".git",  "target", "build",
+                                                   "__pycache__",  ".axon", "dist",   ".next",
+                                                   "vendor",       ".venv", "venv",   ".worktrees"};
 
 // Compiled .axonignore entry. Patterns with no glob meta-chars retain a fast
 // equality path; patterns containing *, **, or ? compile to regex once and
 // match repeatedly. Last-rule-wins for conflicting include/exclude (gitignore
 // semantics).
 struct IgnoreRule {
-    std::string raw;            // original line, post-trim
-    bool        negate = false; // leading `!` flips include/exclude
-    bool        anchored = false; // leading `/` matches only at project root
-    bool        dir_only = false; // trailing `/` matches directories only
-    bool        has_glob = false; // any of * ? **
-    std::regex  re;             // compiled if has_glob, else unused
+    std::string raw;       // original line, post-trim
+    bool negate = false;   // leading `!` flips include/exclude
+    bool anchored = false; // leading `/` matches only at project root
+    bool dir_only = false; // trailing `/` matches directories only
+    bool has_glob = false; // any of * ? **
+    std::regex re;         // compiled if has_glob, else unused
 };
 
 static std::vector<IgnoreRule> g_ignore_rules;
@@ -65,18 +67,17 @@ static std::regex glob_to_regex(const std::string& pat) {
     for (size_t i = start; i < pat.size(); i++) {
         char c = pat[i];
         if (c == '*') {
-            if (i + 1 < pat.size() && pat[i+1] == '*') {
+            if (i + 1 < pat.size() && pat[i + 1] == '*') {
                 // Mid-pattern `**` — match anything across slashes.
                 re += ".*";
-                i++;  // consume the second *
+                i++; // consume the second *
             } else {
                 re += "[^/]*";
             }
         } else if (c == '?') {
             re += "[^/]";
-        } else if (c == '.' || c == '+' || c == '(' || c == ')' || c == '[' ||
-                   c == ']' || c == '{' || c == '}' || c == '^' || c == '$' ||
-                   c == '|' || c == '\\') {
+        } else if (c == '.' || c == '+' || c == '(' || c == ')' || c == '[' || c == ']' ||
+                   c == '{' || c == '}' || c == '^' || c == '$' || c == '|' || c == '\\') {
             re += '\\';
             re += c;
         } else {
@@ -96,21 +97,31 @@ static void load_axonignore(const fs::path& project_root) {
     std::string line;
     while (std::getline(f, line)) {
         // Strip trailing whitespace + CR
-        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' ||
-                                 line.back() == '\t')) line.pop_back();
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+            line.pop_back();
         // Skip empty + comment lines
         if (line.empty() || line[0] == '#') continue;
         IgnoreRule rule;
-        if (!line.empty() && line[0] == '!') { rule.negate = true; line = line.substr(1); }
-        if (!line.empty() && line[0] == '/') { rule.anchored = true; line = line.substr(1); }
-        if (!line.empty() && line.back() == '/') { rule.dir_only = true; line.pop_back(); }
+        if (!line.empty() && line[0] == '!') {
+            rule.negate = true;
+            line = line.substr(1);
+        }
+        if (!line.empty() && line[0] == '/') {
+            rule.anchored = true;
+            line = line.substr(1);
+        }
+        if (!line.empty() && line.back() == '/') {
+            rule.dir_only = true;
+            line.pop_back();
+        }
         if (line.empty()) continue;
         rule.raw = line;
-        rule.has_glob = (line.find('*') != std::string::npos ||
-                        line.find('?') != std::string::npos);
+        rule.has_glob =
+            (line.find('*') != std::string::npos || line.find('?') != std::string::npos);
         if (rule.has_glob) {
-            try { rule.re = glob_to_regex(line); }
-            catch (...) {
+            try {
+                rule.re = glob_to_regex(line);
+            } catch (...) {
                 std::cerr << "[warn] .axonignore: invalid pattern '" << line << "', skipping\n";
                 continue;
             }
@@ -145,12 +156,16 @@ static bool should_skip(const fs::path& p) {
             // Anchored rules match against the project-relative path; bare
             // patterns also match if any path segment matches the filename
             // (gitignore convention for `*.log` etc.)
-            if (std::regex_match(rel, rule.re)) hit = true;
-            else if (!rule.anchored && std::regex_match(fname, rule.re)) hit = true;
+            if (std::regex_match(rel, rule.re))
+                hit = true;
+            else if (!rule.anchored && std::regex_match(fname, rule.re))
+                hit = true;
         } else {
             // Plain string: anchored vs filename-eq, matches v0.5.0 behavior.
-            if (rule.anchored) hit = (rel == rule.raw);
-            else hit = (fname == rule.raw);
+            if (rule.anchored)
+                hit = (rel == rule.raw);
+            else
+                hit = (fname == rule.raw);
         }
         if (hit) skipped = !rule.negate;
     }
@@ -158,14 +173,9 @@ static bool should_skip(const fs::path& p) {
 }
 
 // Returns file id, or -1 if unchanged (same hash and !force)
-static int64_t upsert_file(duckdb::Connection& conn,
-                           const std::string& rel_path,
-                           const std::string& lang,
-                           const std::string& hash,
-                           int64_t byte_size,
-                           const std::string& skeleton,
-                           bool force = false)
-{
+static int64_t upsert_file(duckdb::Connection& conn, const std::string& rel_path,
+                           const std::string& lang, const std::string& hash, int64_t byte_size,
+                           const std::string& skeleton, bool force = false) {
     // Check existing
     auto check = conn.Query("SELECT id, hash FROM files WHERE path = '" + sq(rel_path) + "'");
     auto& mat = *check;
@@ -173,36 +183,39 @@ static int64_t upsert_file(duckdb::Connection& conn,
     if (mat.RowCount() > 0) {
         int64_t fid = mat.GetValue<int64_t>(0, 0);
         std::string existing_hash = mat.GetValue(1, 0).ToString();
-        if (existing_hash == hash && !force) return -1;  // unchanged
+        if (existing_hash == hash && !force) return -1; // unchanged
 
         // Updated: delete this file's outgoing edges (will be rebuilt) + symbols.
         // Keep incoming edges — those belong to OTHER files' resolve_edges results
         // and would be lost here since those files aren't being re-walked.
         conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(fid));
         conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(fid));
-        conn.Query("UPDATE files SET hash = '" + sq(hash) + "', language = '" + sq(lang) + "', byte_size = " + std::to_string(byte_size) + ", skeleton = '" + sq(skeleton) + "', indexed_at = now() WHERE id = " + std::to_string(fid));
+        conn.Query("UPDATE files SET hash = '" + sq(hash) + "', language = '" + sq(lang) +
+                   "', byte_size = " + std::to_string(byte_size) + ", skeleton = '" + sq(skeleton) +
+                   "', indexed_at = now() WHERE id = " + std::to_string(fid));
         return fid;
     }
 
     // New file
-    auto res = conn.Query(
-        "INSERT INTO files (id, path, language, hash, byte_size, skeleton, indexed_at) "
-        "VALUES (nextval('seq_id'), '" + sq(rel_path) + "', '" + sq(lang) + "', '" + sq(hash) + "', " +
-        std::to_string(byte_size) + ", '" + sq(skeleton) + "', now()) RETURNING id");
+    auto res =
+        conn.Query("INSERT INTO files (id, path, language, hash, byte_size, skeleton, indexed_at) "
+                   "VALUES (nextval('seq_id'), '" +
+                   sq(rel_path) + "', '" + sq(lang) + "', '" + sq(hash) + "', " +
+                   std::to_string(byte_size) + ", '" + sq(skeleton) + "', now()) RETURNING id");
     auto& mat2 = *res;
     return mat2.GetValue<int64_t>(0, 0);
 }
 
 static void insert_symbols(duckdb::Connection& conn, int64_t file_id,
-                           const std::vector<Symbol>& symbols)
-{
+                           const std::vector<Symbol>& symbols) {
     for (const auto& sym : symbols) {
-        std::string sql =
-            "INSERT INTO symbols (id, file_id, name, kind, start_line, end_line, signature, docstring) "
-            "VALUES (nextval('seq_id'), " + std::to_string(file_id) +
-            ", '" + sq(sym.name) + "', '" + sq(sym.kind) + "', " +
-            std::to_string(sym.start_line) + ", " + std::to_string(sym.end_line) +
-            ", '" + sq(sym.signature.value_or("")) + "', '" + sq(sym.docstring.value_or("")) + "')";
+        std::string sql = "INSERT INTO symbols (id, file_id, name, kind, start_line, end_line, "
+                          "signature, docstring) "
+                          "VALUES (nextval('seq_id'), " +
+                          std::to_string(file_id) + ", '" + sq(sym.name) + "', '" + sq(sym.kind) +
+                          "', " + std::to_string(sym.start_line) + ", " +
+                          std::to_string(sym.end_line) + ", '" + sq(sym.signature.value_or("")) +
+                          "', '" + sq(sym.docstring.value_or("")) + "')";
         conn.Query(sql);
     }
 }
@@ -216,10 +229,8 @@ static void insert_symbols(duckdb::Connection& conn, int64_t file_id,
 //     "./helpers"                → src/helpers.ts
 //     "@scope/pkg/sub"           → node_modules/@scope/pkg/sub.ts
 //     "../lib/x"                 → src/lib/x.py
-static int64_t resolve_specifier_to_file(duckdb::Connection& conn,
-                                         const std::string& specifier,
-                                         int64_t from_id)
-{
+static int64_t resolve_specifier_to_file(duckdb::Connection& conn, const std::string& specifier,
+                                         int64_t from_id) {
     auto run = [&](const std::string& sql) -> int64_t {
         auto res = conn.Query(sql);
         if (res->HasError() || res->RowCount() == 0) return 0;
@@ -231,28 +242,42 @@ static int64_t resolve_specifier_to_file(duckdb::Connection& conn,
     auto try_basename = [&](const std::string& name) -> int64_t {
         if (name.size() < 2) return 0;
         std::string n = sq(name);
-        std::string sql =
-            "SELECT id FROM files WHERE id != " + std::to_string(from_id) + " AND ("
-            "  path LIKE '%/" + n + ".%'"
-            " OR path LIKE '" + n + ".%'"
-            " OR path LIKE '%/" + n + "/index.%'"
-            " OR path LIKE '%/" + n + "/mod.%'"   // Rust module file convention
-            " OR path LIKE '%/" + n + ".d.ts'"    // TS declaration
-            ") LIMIT 1";
+        std::string sql = "SELECT id FROM files WHERE id != " + std::to_string(from_id) +
+                          " AND ("
+                          "  path LIKE '%/" +
+                          n +
+                          ".%'"
+                          " OR path LIKE '" +
+                          n +
+                          ".%'"
+                          " OR path LIKE '%/" +
+                          n +
+                          "/index.%'"
+                          " OR path LIKE '%/" +
+                          n +
+                          "/mod.%'" // Rust module file convention
+                          " OR path LIKE '%/" +
+                          n +
+                          ".d.ts'" // TS declaration
+                          ") LIMIT 1";
         return run(sql);
     };
 
     // try_contains: last-resort substring match (loose, may overmatch).
     auto try_contains = [&](const std::string& needle) -> int64_t {
         if (needle.size() < 3) return 0;
-        return run("SELECT id FROM files WHERE path LIKE '%" + sq(needle) + "%' "
-                   "AND id != " + std::to_string(from_id) + " LIMIT 1");
+        return run("SELECT id FROM files WHERE path LIKE '%" + sq(needle) +
+                   "%' "
+                   "AND id != " +
+                   std::to_string(from_id) + " LIMIT 1");
     };
 
     // Normalize: strip leading "./", "../" chain, and surrounding whitespace.
     std::string s = specifier;
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(0, 1);
-    while (!s.empty() && (s.back()  == ' ' || s.back()  == '\t')) s.pop_back();
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+        s.erase(0, 1);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
+        s.pop_back();
     while (s.size() >= 2 && s[0] == '.' && (s[1] == '/' || s[1] == '.')) {
         size_t cut = s.find('/');
         if (cut == std::string::npos) break;
@@ -262,10 +287,15 @@ static int64_t resolve_specifier_to_file(duckdb::Connection& conn,
 
     // 1) If specifier contains '/', prefer suffix path match (likely already a relative path).
     if (s.find('/') != std::string::npos) {
-        int64_t id = run("SELECT id FROM files WHERE path LIKE '%/" + sq(s) + ".%' "
-                         "AND id != " + std::to_string(from_id) + " LIMIT 1");
-        if (!id) id = run("SELECT id FROM files WHERE path LIKE '%" + sq(s) + ".%' "
-                          "AND id != " + std::to_string(from_id) + " LIMIT 1");
+        int64_t id = run("SELECT id FROM files WHERE path LIKE '%/" + sq(s) +
+                         ".%' "
+                         "AND id != " +
+                         std::to_string(from_id) + " LIMIT 1");
+        if (!id)
+            id = run("SELECT id FROM files WHERE path LIKE '%" + sq(s) +
+                     ".%' "
+                     "AND id != " +
+                     std::to_string(from_id) + " LIMIT 1");
         if (id) return id;
     }
 
@@ -273,17 +303,26 @@ static int64_t resolve_specifier_to_file(duckdb::Connection& conn,
     std::vector<std::string> parts;
     {
         std::string cur;
-        for (size_t i = 0; i < s.size(); ) {
+        for (size_t i = 0; i < s.size();) {
             char c = s[i];
             if (c == ':' && i + 1 < s.size() && s[i + 1] == ':') {
-                if (!cur.empty()) { parts.push_back(cur); cur.clear(); }
-                i += 2; continue;
+                if (!cur.empty()) {
+                    parts.push_back(cur);
+                    cur.clear();
+                }
+                i += 2;
+                continue;
             }
             if (c == '.' || c == '/' || c == '\\') {
-                if (!cur.empty()) { parts.push_back(cur); cur.clear(); }
-                i++; continue;
+                if (!cur.empty()) {
+                    parts.push_back(cur);
+                    cur.clear();
+                }
+                i++;
+                continue;
             }
-            cur += c; i++;
+            cur += c;
+            i++;
         }
         if (!cur.empty()) parts.push_back(cur);
     }
@@ -309,9 +348,7 @@ static int64_t resolve_specifier_to_file(duckdb::Connection& conn,
 }
 
 static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
-                          const std::vector<ImportEdge>& imports,
-                          bool symbol_mode)
-{
+                          const std::vector<ImportEdge>& imports, bool symbol_mode) {
     if (imports.empty()) return;
     for (const auto& edge : imports) {
         int64_t to_id = resolve_specifier_to_file(conn, edge.to_specifier, from_id);
@@ -320,8 +357,8 @@ static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
         // Insert file-level edge
         auto ins = conn.Query(
             "INSERT INTO edges (id, from_file, to_file, kind) VALUES (nextval('seq_id'), " +
-            std::to_string(from_id) + ", " + std::to_string(to_id) +
-            ", '" + sq(edge.kind) + "') RETURNING id");
+            std::to_string(from_id) + ", " + std::to_string(to_id) + ", '" + sq(edge.kind) +
+            "') RETURNING id");
 
         if (!symbol_mode || ins->HasError() || ins->RowCount() == 0) continue;
 
@@ -338,24 +375,24 @@ static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
         if (spec.empty()) continue;
 
         // Try to find a symbol in from_file matching the specifier leaf
-        auto from_sym = conn.Query(
-            "SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
-            " AND name = '" + sq(spec) + "' LIMIT 1");
+        auto from_sym =
+            conn.Query("SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
+                       " AND name = '" + sq(spec) + "' LIMIT 1");
         int64_t from_sym_id = (!from_sym->HasError() && from_sym->RowCount() > 0)
-                              ? from_sym->GetValue<int64_t>(0, 0) : 0;
+                                  ? from_sym->GetValue<int64_t>(0, 0)
+                                  : 0;
 
         // Try to find a symbol in to_file with matching name
-        auto to_sym = conn.Query(
-            "SELECT id FROM symbols WHERE file_id = " + std::to_string(to_id) +
-            " AND name = '" + sq(spec) + "' LIMIT 1");
-        int64_t to_sym_id = (!to_sym->HasError() && to_sym->RowCount() > 0)
-                            ? to_sym->GetValue<int64_t>(0, 0) : 0;
+        auto to_sym = conn.Query("SELECT id FROM symbols WHERE file_id = " + std::to_string(to_id) +
+                                 " AND name = '" + sq(spec) + "' LIMIT 1");
+        int64_t to_sym_id =
+            (!to_sym->HasError() && to_sym->RowCount() > 0) ? to_sym->GetValue<int64_t>(0, 0) : 0;
 
         if (from_sym_id > 0 || to_sym_id > 0) {
             std::string upd = "UPDATE edges SET ";
             if (from_sym_id > 0) upd += "from_symbol = " + std::to_string(from_sym_id);
             if (from_sym_id > 0 && to_sym_id > 0) upd += ", ";
-            if (to_sym_id > 0)   upd += "to_symbol = " + std::to_string(to_sym_id);
+            if (to_sym_id > 0) upd += "to_symbol = " + std::to_string(to_sym_id);
             upd += " WHERE id = " + std::to_string(edge_id);
             conn.Query(upd);
         }
@@ -370,36 +407,38 @@ static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
 //                 likely the canonical definition)
 // Drops calls that cannot be resolved on either side.
 static void resolve_calls(duckdb::Connection& conn, int64_t from_id,
-                          const std::vector<CallSite>& calls)
-{
+                          const std::vector<CallSite>& calls) {
     if (calls.empty()) return;
 
     for (const auto& c : calls) {
         if (c.caller_name.empty() || c.callee_name.empty()) continue;
 
-        auto from_res = conn.Query(
-            "SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
-            " AND name = '" + sq(c.caller_name) + "' LIMIT 1");
+        auto from_res =
+            conn.Query("SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
+                       " AND name = '" + sq(c.caller_name) + "' LIMIT 1");
         if (from_res->HasError() || from_res->RowCount() == 0) continue;
         int64_t from_sym_id = from_res->GetValue<int64_t>(0, 0);
 
         // Look up callee globally. Prefer same file (intra-module call), then
         // any other file. Pick the most-defined one when multiple match.
-        auto to_res = conn.Query(
-            "SELECT s.id, s.file_id FROM symbols s "
-            "WHERE s.name = '" + sq(c.callee_name) + "' "
-            "ORDER BY (s.file_id = " + std::to_string(from_id) + ") DESC, s.id ASC "
-            "LIMIT 1");
+        auto to_res = conn.Query("SELECT s.id, s.file_id FROM symbols s "
+                                 "WHERE s.name = '" +
+                                 sq(c.callee_name) +
+                                 "' "
+                                 "ORDER BY (s.file_id = " +
+                                 std::to_string(from_id) +
+                                 ") DESC, s.id ASC "
+                                 "LIMIT 1");
         if (to_res->HasError() || to_res->RowCount() == 0) continue;
-        int64_t to_sym_id  = to_res->GetValue<int64_t>(0, 0);
+        int64_t to_sym_id = to_res->GetValue<int64_t>(0, 0);
         int64_t to_file_id = to_res->GetValue<int64_t>(1, 0);
-        if (to_sym_id == from_sym_id) continue;  // self-recursion, drop
+        if (to_sym_id == from_sym_id) continue; // self-recursion, drop
 
         conn.Query(
             "INSERT INTO edges (id, from_file, to_file, kind, from_symbol, to_symbol) VALUES (" +
-            std::string("nextval('seq_id'), ") +
-            std::to_string(from_id) + ", " + std::to_string(to_file_id) +
-            ", 'calls', " + std::to_string(from_sym_id) + ", " + std::to_string(to_sym_id) + ")");
+            std::string("nextval('seq_id'), ") + std::to_string(from_id) + ", " +
+            std::to_string(to_file_id) + ", 'calls', " + std::to_string(from_sym_id) + ", " +
+            std::to_string(to_sym_id) + ")");
     }
 }
 
@@ -424,11 +463,15 @@ static bool path_is_ignored(const fs::path& rel) {
     for (const auto& rule : g_ignore_rules) {
         bool hit = false;
         if (rule.has_glob) {
-            if (std::regex_match(rel_str, rule.re)) hit = true;
-            else if (!rule.anchored && std::regex_match(fname, rule.re)) hit = true;
+            if (std::regex_match(rel_str, rule.re))
+                hit = true;
+            else if (!rule.anchored && std::regex_match(fname, rule.re))
+                hit = true;
         } else {
-            if (rule.anchored) hit = (rel_str == rule.raw);
-            else hit = (fname == rule.raw);
+            if (rule.anchored)
+                hit = (rel_str == rule.raw);
+            else
+                hit = (fname == rule.raw);
         }
         if (hit) ignored = !rule.negate;
     }
@@ -442,14 +485,16 @@ static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root)
     if (res->HasError()) return 0;
     auto& mat = *res;
 
-    struct Victim { int64_t id; std::string path; };
+    struct Victim {
+        int64_t id;
+        std::string path;
+    };
     std::vector<Victim> victims;
     for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
         int64_t fid = mat.GetValue<int64_t>(0, i);
         std::string rel = mat.GetValue(1, i).ToString();
         fs::path abs = project_root / rel;
-        if (!fs::exists(abs) || path_is_ignored(fs::path(rel)))
-            victims.push_back({fid, rel});
+        if (!fs::exists(abs) || path_is_ignored(fs::path(rel))) victims.push_back({fid, rel});
     }
 
     if (victims.empty()) return 0;
@@ -465,7 +510,8 @@ static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root)
     return (int)victims.size();
 }
 
-IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress, bool force) {
+IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress,
+                         bool force) {
     IndexStats stats;
     auto& conn = db.conn();
 
@@ -473,11 +519,9 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
 
     // Collect source files
     std::vector<fs::path> files;
-    for (auto it = fs::recursive_directory_iterator(
-             cfg.project_root,
-             fs::directory_options::skip_permission_denied);
-         it != fs::end(it); ++it)
-    {
+    for (auto it = fs::recursive_directory_iterator(cfg.project_root,
+                                                    fs::directory_options::skip_permission_denied);
+         it != fs::end(it); ++it) {
         if (it->is_directory() && should_skip(it->path())) {
             it.disable_recursion_pending();
             continue;
@@ -494,7 +538,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     struct Pending {
         std::string path;
         std::vector<ImportEdge> imports;
-        std::vector<CallSite>  calls;
+        std::vector<CallSite> calls;
     };
     std::vector<Pending> pending_edges;
 
@@ -504,7 +548,10 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
         if (on_progress) on_progress(abs_path.filename().string(), i, total);
 
         auto parsed = parse_file(abs_path, cfg.project_root);
-        if (!parsed) { stats.files_skipped++; continue; }
+        if (!parsed) {
+            stats.files_skipped++;
+            continue;
+        }
 
         int64_t byte_size = (int64_t)fs::file_size(abs_path);
 
@@ -517,16 +564,19 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
                 ss << sf.rdbuf();
                 skeleton = skeletonize(ss.str(), parsed->language);
             }
-        } catch (...) {}
+        } catch (...) {
+        }
 
-        int64_t fid = upsert_file(conn, parsed->path,
-                                  language_name(parsed->language),
-                                  parsed->hash, byte_size, skeleton, force);
-        if (fid == -1) { stats.files_skipped++; continue; }  // unchanged
+        int64_t fid = upsert_file(conn, parsed->path, language_name(parsed->language), parsed->hash,
+                                  byte_size, skeleton, force);
+        if (fid == -1) {
+            stats.files_skipped++;
+            continue;
+        } // unchanged
 
         insert_symbols(conn, fid, parsed->symbols);
         stats.symbols_found += (int)parsed->symbols.size();
-        stats.edges_found   += (int)parsed->imports.size();
+        stats.edges_found += (int)parsed->imports.size();
         stats.files_indexed++;
 
         if (!parsed->imports.empty() || !parsed->calls.empty())
@@ -556,9 +606,8 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     return stats;
 }
 
-IndexStats index_files(const Config& cfg, Database& db,
-                      const std::vector<fs::path>& paths,
-                      bool prune, ProgressCallback on_progress) {
+IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::path>& paths,
+                       bool prune, ProgressCallback on_progress) {
     IndexStats stats;
     auto& conn = db.conn();
 
@@ -587,7 +636,10 @@ IndexStats index_files(const Config& cfg, Database& db,
 
     int total = (int)abs_paths.size();
 
-    struct Pending { std::string path; std::vector<ImportEdge> imports; };
+    struct Pending {
+        std::string path;
+        std::vector<ImportEdge> imports;
+    };
     std::vector<Pending> pending_edges;
 
     if (total > 0) {
@@ -597,7 +649,10 @@ IndexStats index_files(const Config& cfg, Database& db,
             if (on_progress) on_progress(abs_path.filename().string(), i, total);
 
             auto parsed = parse_file(abs_path, cfg.project_root);
-            if (!parsed) { stats.files_skipped++; continue; }
+            if (!parsed) {
+                stats.files_skipped++;
+                continue;
+            }
 
             int64_t byte_size = (int64_t)fs::file_size(abs_path);
 
@@ -609,20 +664,22 @@ IndexStats index_files(const Config& cfg, Database& db,
                     ss << sf.rdbuf();
                     skeleton = skeletonize(ss.str(), parsed->language);
                 }
-            } catch (...) {}
+            } catch (...) {
+            }
 
-            int64_t fid = upsert_file(conn, parsed->path,
-                                      language_name(parsed->language),
+            int64_t fid = upsert_file(conn, parsed->path, language_name(parsed->language),
                                       parsed->hash, byte_size, skeleton);
-            if (fid == -1) { stats.files_skipped++; continue; }  // unchanged
+            if (fid == -1) {
+                stats.files_skipped++;
+                continue;
+            } // unchanged
 
             insert_symbols(conn, fid, parsed->symbols);
             stats.symbols_found += (int)parsed->symbols.size();
-            stats.edges_found   += (int)parsed->imports.size();
+            stats.edges_found += (int)parsed->imports.size();
             stats.files_indexed++;
 
-            if (!parsed->imports.empty())
-                pending_edges.push_back({parsed->path, parsed->imports});
+            if (!parsed->imports.empty()) pending_edges.push_back({parsed->path, parsed->imports});
         }
         conn.Query("COMMIT");
 

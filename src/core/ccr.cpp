@@ -33,26 +33,21 @@ std::string blake3_hex(const std::string& in) {
 
 } // namespace
 
-std::string ccr_artifact_id(const std::string& kind,
-                            const std::string& source_ref,
+std::string ccr_artifact_id(const std::string& kind, const std::string& source_ref,
                             const std::string& content) {
     return "ccr_" + blake3_hex(kind + "\n" + source_ref + "\n" + content);
 }
 
-std::string ccr_marker(const std::string& artifact_id,
-                       int64_t original_tokens) {
+std::string ccr_marker(const std::string& artifact_id, int64_t original_tokens) {
     return "/* axon:ccr artifact_id=" + artifact_id +
            " original_tokens=" + std::to_string(original_tokens) + " */\n";
 }
 
-std::string ccr_store_artifact(Database& db,
-                               const std::string& kind,
-                               const std::string& source_ref,
-                               const std::string& content,
-                               int64_t token_estimate) {
+std::string ccr_store_artifact(Database& db, const std::string& kind, const std::string& source_ref,
+                               const std::string& content, int64_t token_estimate) {
     std::string id = ccr_artifact_id(kind, source_ref, content);
-    auto del = db.conn().Query(
-        "DELETE FROM ccr_artifacts WHERE artifact_id = '" + sql_quote(id) + "'");
+    auto del =
+        db.conn().Query("DELETE FROM ccr_artifacts WHERE artifact_id = '" + sql_quote(id) + "'");
     if (del->HasError()) return "";
     auto ins = db.conn().Query(
         "INSERT INTO ccr_artifacts "
@@ -63,11 +58,10 @@ std::string ccr_store_artifact(Database& db,
     return id;
 }
 
-std::optional<CcrArtifact> ccr_retrieve_artifact(Database& db,
-                                                 const std::string& artifact_id) {
-    auto res = db.conn().Query(
-        "SELECT artifact_id, kind, source_ref, content, token_estimate "
-        "FROM ccr_artifacts WHERE artifact_id = '" + sql_quote(artifact_id) + "' LIMIT 1");
+std::optional<CcrArtifact> ccr_retrieve_artifact(Database& db, const std::string& artifact_id) {
+    auto res = db.conn().Query("SELECT artifact_id, kind, source_ref, content, token_estimate "
+                               "FROM ccr_artifacts WHERE artifact_id = '" +
+                               sql_quote(artifact_id) + "' LIMIT 1");
     if (res->HasError() || res->RowCount() == 0) return std::nullopt;
 
     CcrArtifact artifact;
@@ -79,27 +73,23 @@ std::optional<CcrArtifact> ccr_retrieve_artifact(Database& db,
     return artifact;
 }
 
-std::string ccr_store_artifact_file(const std::filesystem::path& ccr_dir,
-                                    const std::string& kind,
-                                    const std::string& source_ref,
-                                    const std::string& content,
+std::string ccr_store_artifact_file(const std::filesystem::path& ccr_dir, const std::string& kind,
+                                    const std::string& source_ref, const std::string& content,
                                     int64_t token_estimate) {
     std::string id = ccr_artifact_id(kind, source_ref, content);
     std::error_code ec;
     std::filesystem::create_directories(ccr_dir, ec);
     if (ec) return "";
 
-    nlohmann::json j = {
-        {"artifact_id", id},
-        {"kind", kind},
-        {"source_ref", source_ref},
-        {"content", content},
-        {"token_estimate", token_estimate}
-    };
+    nlohmann::json j = {{"artifact_id", id},
+                        {"kind", kind},
+                        {"source_ref", source_ref},
+                        {"content", content},
+                        {"token_estimate", token_estimate}};
 
     // Write to a temp file then rename so readers never see a partial
     // artifact (filter and retrieve can run concurrently from hooks).
-    auto tmp_path   = ccr_dir / (id + ".json.tmp");
+    auto tmp_path = ccr_dir / (id + ".json.tmp");
     auto final_path = ccr_dir / (id + ".json");
     {
         std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
@@ -119,14 +109,11 @@ std::string ccr_store_artifact_file(const std::filesystem::path& ccr_dir,
     return id;
 }
 
-std::optional<CcrArtifact> ccr_retrieve_artifact_file(
-    const std::filesystem::path& ccr_dir,
-    const std::string& artifact_id) {
+std::optional<CcrArtifact> ccr_retrieve_artifact_file(const std::filesystem::path& ccr_dir,
+                                                      const std::string& artifact_id) {
     // Ids are "ccr_" + hex; reject anything that could escape the dir.
-    if (artifact_id.empty() ||
-        artifact_id.find('/') != std::string::npos ||
-        artifact_id.find('\\') != std::string::npos ||
-        artifact_id.find("..") != std::string::npos)
+    if (artifact_id.empty() || artifact_id.find('/') != std::string::npos ||
+        artifact_id.find('\\') != std::string::npos || artifact_id.find("..") != std::string::npos)
         return std::nullopt;
 
     std::ifstream in(ccr_dir / (artifact_id + ".json"), std::ios::binary);
@@ -146,8 +133,7 @@ std::optional<CcrArtifact> ccr_retrieve_artifact_file(
     return artifact;
 }
 
-CcrRecoverableOutput ccr_make_recoverable_output(const CcrStoreFn& store,
-                                                 const std::string& kind,
+CcrRecoverableOutput ccr_make_recoverable_output(const CcrStoreFn& store, const std::string& kind,
                                                  const std::string& source_ref,
                                                  const std::string& original,
                                                  const std::string& lossy_output,
@@ -179,8 +165,7 @@ CcrRecoverableOutput ccr_make_recoverable_output(const CcrStoreFn& store,
     return result;
 }
 
-CcrRecoverableOutput ccr_make_recoverable_output(Database& db,
-                                                 const std::string& kind,
+CcrRecoverableOutput ccr_make_recoverable_output(Database& db, const std::string& kind,
                                                  const std::string& source_ref,
                                                  const std::string& original,
                                                  const std::string& lossy_output,
@@ -189,8 +174,8 @@ CcrRecoverableOutput ccr_make_recoverable_output(Database& db,
                              const std::string& content, int64_t tokens) {
         return ccr_store_artifact(db, k, ref, content, tokens);
     };
-    return ccr_make_recoverable_output(store, kind, source_ref, original,
-                                       lossy_output, original_tokens);
+    return ccr_make_recoverable_output(store, kind, source_ref, original, lossy_output,
+                                       original_tokens);
 }
 
 } // namespace axon

@@ -11,8 +11,7 @@ namespace axon {
 namespace fs = std::filesystem;
 
 static const std::vector<std::string> ROOT_MARKERS = {
-    ".git", "Cargo.toml", "package.json", "pyproject.toml", "go.mod", "CMakeLists.txt"
-};
+    ".git", "Cargo.toml", "package.json", "pyproject.toml", "go.mod", "CMakeLists.txt"};
 
 std::optional<fs::path> find_project_root(const fs::path& start) {
     fs::path current = fs::absolute(start);
@@ -59,22 +58,23 @@ ProjectConfig load_project_config(const fs::path& axon_dir) {
             // Remove surrounding quotes if present
             if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
                 val = val.substr(1, val.size() - 2);
-            if (val == "file" || val == "symbol")
-                pcfg.granularity = val;
+            if (val == "file" || val == "symbol") pcfg.granularity = val;
         } else if (key == "index_routes") {
             pcfg.index_routes = (val == "true");
         } else if (key == "fts_enabled") {
             pcfg.fts_enabled = (val == "true");
         } else if (key == "token_budget") {
-            try { pcfg.token_budget = std::stoi(val); } catch (...) {}
+            try {
+                pcfg.token_budget = std::stoi(val);
+            } catch (...) {
+            }
         } else if (key == "telemetry") {
             pcfg.telemetry = (val == "true");
         } else if (key == "capsule_compression") {
             // Remove surrounding quotes if present
             if (val.size() >= 2 && val.front() == '"' && val.back() == '"')
                 val = val.substr(1, val.size() - 2);
-            if (val == "off" || val == "body")
-                pcfg.capsule_compression = val;
+            if (val == "off" || val == "body") pcfg.capsule_compression = val;
         }
         // Unrecognized keys: ignored silently
     }
@@ -85,7 +85,10 @@ ProjectConfig load_project_config(const fs::path& axon_dir) {
 // Env vars always win over TOML (allows per-shell override without editing files).
 static void apply_env_overrides(ProjectConfig& pcfg) {
     if (const char* m = std::getenv("AXON_TOKEN_BUDGET")) {
-        try { pcfg.token_budget = std::stoi(m); } catch (...) {}
+        try {
+            pcfg.token_budget = std::stoi(m);
+        } catch (...) {
+        }
     }
     if (const char* t = std::getenv("AXON_TELEMETRY")) {
         std::string v = t;
@@ -97,7 +100,7 @@ Config make_config(const fs::path& root) {
     Config cfg;
     cfg.project_root = root;
     cfg.axon_dir = root / ".axon";
-    cfg.db_path  = cfg.axon_dir / "index.duckdb";
+    cfg.db_path = cfg.axon_dir / "index.duckdb";
     fs::create_directories(cfg.axon_dir);
     cfg.project_cfg = load_project_config(cfg.axon_dir);
     apply_env_overrides(cfg.project_cfg);
@@ -118,12 +121,14 @@ fs::path find_model(const fs::path& binary_dir) {
     std::vector<fs::path> candidates = {
         binary_dir / "../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
         binary_dir / "../../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
-        fs::path(std::getenv("HOME") ? std::getenv("HOME") : "") / ".axon/models/nomic-embed-text-v1.5.Q4_K_M.gguf",
+        fs::path(std::getenv("HOME") ? std::getenv("HOME") : "") /
+            ".axon/models/nomic-embed-text-v1.5.Q4_K_M.gguf",
     };
     for (const auto& p : candidates) {
         if (fs::exists(p)) return fs::canonical(p);
     }
-    throw std::runtime_error("Embedding model not found. Override with AXON_EMBEDDING_MODEL=<path>, "
+    throw std::runtime_error(
+        "Embedding model not found. Override with AXON_EMBEDDING_MODEL=<path>, "
         "or download to a location on the search path (~/.axon/models/ works for "
         "any install; <package>/models/ sits next to the binary's bin/ dir):\n"
         "  pip install huggingface_hub\n"
