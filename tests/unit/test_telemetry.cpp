@@ -83,3 +83,44 @@ TEST_F(TelemetryTest, LegacyEventsInferLayerSafely) {
     EXPECT_EQ(metrics["layers"]["retrieval"]["requests"].get<int64_t>(), 1);
     EXPECT_EQ(metrics["layers"]["cache"]["requests"].get<int64_t>(), 1);
 }
+
+TEST(TelemetryMigrationTest, UpgradedDbFromPreLayerSchemaStillRecordsTelemetry) {
+    auto db_path = make_temp_db();
+    {
+        // Simulate a database created before the `layer` column existed
+        // (≤ v1.2.1 schema). CREATE TABLE IF NOT EXISTS in Database won't
+        // touch it — only the ALTER migration can add the column, and DuckDB
+        // rejects ADD COLUMN with a NOT NULL constraint, so a NOT NULL
+        // migration left every upgraded DB without the column and every
+        // telemetry INSERT failing silently.
+        duckdb::DuckDB raw(db_path.string());
+        duckdb::Connection con(raw);
+        con.Query(
+            "CREATE TABLE telemetry_events ("
+            "  id                         BIGINT PRIMARY KEY,"
+            "  type                       VARCHAR NOT NULL,"
+            "  origin                     VARCHAR NOT NULL,"
+            "  created_at                 TIMESTAMP NOT NULL DEFAULT now(),"
+            "  latency_ms                 BIGINT NOT NULL DEFAULT 0,"
+            "  tokens_estimated           BIGINT NOT NULL DEFAULT 0,"
+            "  baseline_tokens_estimated  BIGINT NOT NULL DEFAULT 0,"
+            "  tokens_saved               BIGINT NOT NULL DEFAULT 0,"
+            "  cache_hit                  BOOLEAN NOT NULL DEFAULT false"
+            ")");
+    }
+
+    axon::Config cfg;
+    cfg.project_cfg.telemetry = true;
+    auto db = std::make_unique<axon::Database>(db_path);
+    axon::record_telemetry(cfg, db.get(), {
+        "diff", "shell", 3, 25, 100, 75, false, "shell_filtering"
+    });
+
+    auto metrics = axon::metrics_json(cfg, db.get());
+    EXPECT_EQ(metrics["requests"].get<int64_t>(), 1)
+        << "telemetry INSERT must survive a pre-layer-column database";
+    EXPECT_EQ(metrics["layers"]["shell_filtering"]["requests"].get<int64_t>(), 1);
+
+    db.reset();
+    fs::remove(db_path);
+}

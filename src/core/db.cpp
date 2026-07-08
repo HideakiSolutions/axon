@@ -131,7 +131,13 @@ void Database::run_migrations() {
          "  tokens_saved               BIGINT NOT NULL DEFAULT 0,"
          "  cache_hit                  BOOLEAN NOT NULL DEFAULT false"
          ")");
-    try { exec("ALTER TABLE telemetry_events ADD COLUMN layer VARCHAR NOT NULL DEFAULT 'unknown'"); } catch (...) {}
+    // DuckDB rejects ADD COLUMN with a NOT NULL constraint ("Adding columns
+    // with constraints not yet supported"), so the migration must stay
+    // nullable — with NOT NULL here the ALTER always failed and every DB
+    // created before this column silently lost ALL telemetry (the INSERT
+    // names `layer` and errored). Fresh DBs still get NOT NULL from the
+    // CREATE TABLE above.
+    try { exec("ALTER TABLE telemetry_events ADD COLUMN layer VARCHAR DEFAULT 'unknown'"); } catch (...) {}
     try { exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_created ON telemetry_events(created_at)"); } catch (...) {}
     try { exec("CREATE INDEX IF NOT EXISTS idx_telemetry_events_layer ON telemetry_events(layer)"); } catch (...) {}
 
