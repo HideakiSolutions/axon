@@ -5,7 +5,7 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.7] — 2026-07-08
 
 ### Fixed
 - Telemetry was permanently dead on any database created before the `layer` column: the schema migration used `ALTER TABLE … ADD COLUMN layer VARCHAR NOT NULL DEFAULT 'unknown'`, which DuckDB rejects ("Adding columns with constraints not yet supported"), the error was swallowed, and every subsequent telemetry INSERT (which names `layer`) failed silently — `/api/metrics` reported zeros forever on upgraded installs. The migration is now nullable (fresh DBs keep NOT NULL via CREATE TABLE), with a regression test that upgrades a pre-`layer` schema and asserts events are recorded.
