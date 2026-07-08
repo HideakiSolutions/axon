@@ -16,6 +16,10 @@ jobs:
   build:
     name: ${{ matrix.os }} (${{ matrix.compiler }})
     runs-on: ${{ matrix.os }}
+    # Backstop for platform-specific hangs: a normal run finishes in ~15min;
+    # the first Windows ctest run sat "in progress" for 55+ minutes (run
+    # 28977936807) because a smoke blocked forever under Git Bash.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -122,8 +126,10 @@ jobs:
       - name: Run unit tests
         # CTest aggregates every test registered via add_axon_test().
         # --output-on-failure so a regression surfaces in the workflow log
-        # without re-running.
-        run: ctest --test-dir build --output-on-failure
+        # without re-running. --timeout converts a hung test into a named
+        # failure instead of an opaque stuck job (longest healthy test runs
+        # in well under a minute).
+        run: ctest --test-dir build --output-on-failure --timeout 300
 
       - name: Smoke binary
         # bash on all three platforms — Git Bash resolves ./build/axon to
