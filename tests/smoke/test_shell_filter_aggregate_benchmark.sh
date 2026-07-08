@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Skip (ctest SKIP_RETURN_CODE 77) when optional dev tooling is absent.
+command -v rg >/dev/null 2>&1 || { echo "SKIP: rg is required for this test (CI installs it; locally: apt/brew install ripgrep)"; exit 77; }
+command -v jq >/dev/null 2>&1 || { echo "SKIP: jq is required for this test (CI installs it; locally: apt/brew install jq)"; exit 77; }
+
 axon_bin="$(realpath "${1:?axon binary path required}")"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 

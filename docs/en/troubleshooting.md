@@ -144,6 +144,11 @@ calls to it over localhost. A persistent lock error means the proxy path
 failed — usually because the lock holder is an older axon binary without a
 peer listener, or a non-serve process (e.g. a stuck `axon index`).
 
+`axon filter` and `axon artifact-retrieve` keep working under the lock: the
+filter stores CCR artifacts in the `.axon/ccr/` file sidecar when it cannot
+open the DB, and retrieval resolves DB → sidecar → lock-holding peer, so
+compressed shell output stays recoverable either way.
+
 **Fix:**
 ```bash
 # Find and kill the other process

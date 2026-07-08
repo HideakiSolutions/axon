@@ -112,7 +112,9 @@ fs::path find_model(const fs::path& binary_dir) {
         throw std::runtime_error(
             std::string("AXON_EMBEDDING_MODEL points to a non-existent file: ") + env_model);
     }
-    // 2. Default search order: next to binary, then project models/, then ~/.axon/models/
+    // 2. Default search order: install/build-relative models/, then ~/.axon/models/.
+    // Note: the *project's* ./models is only found for build-tree binaries
+    // (build/../models); installed binaries look next to their own package.
     std::vector<fs::path> candidates = {
         binary_dir / "../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
         binary_dir / "../../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
@@ -122,10 +124,11 @@ fs::path find_model(const fs::path& binary_dir) {
         if (fs::exists(p)) return fs::canonical(p);
     }
     throw std::runtime_error("Embedding model not found. Override with AXON_EMBEDDING_MODEL=<path>, "
-        "or download:\n"
+        "or download to a location on the search path (~/.axon/models/ works for "
+        "any install; <package>/models/ sits next to the binary's bin/ dir):\n"
         "  pip install huggingface_hub\n"
         "  huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF "
-        "nomic-embed-text-v1.5.Q4_K_M.gguf --local-dir ./models/");
+        "nomic-embed-text-v1.5.Q4_K_M.gguf --local-dir ~/.axon/models/");
 }
 
 } // namespace axon

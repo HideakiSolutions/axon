@@ -187,6 +187,7 @@ add_test(
     NAME test_docs_freshness
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_docs_freshness.sh
 )
+set_tests_properties(test_docs_freshness PROPERTIES SKIP_RETURN_CODE 77)
 
 add_test(
     NAME test_shell_guard_hook
@@ -197,3 +198,4 @@ add_test(
     NAME test_shell_filter_aggregate_benchmark
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_shell_filter_aggregate_benchmark.sh $<TARGET_FILE:axon>
 )
+set_tests_properties(test_shell_filter_aggregate_benchmark PROPERTIES SKIP_RETURN_CODE 77)

@@ -5,6 +5,12 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- `test_docs_freshness` and `test_shell_filter_aggregate_benchmark` now skip (ctest `SKIP_RETURN_CODE 77`) with an explicit message when optional dev tooling (`ripgrep`, `jq`) is absent, instead of failing with "command not found"; CONTRIBUTING documents the test-suite tooling.
+- The "embedding model not found" error now points at locations actually on the search path (`~/.axon/models/` for any install, `<package>/models/` next to the binary) — the old hint suggested `./models/`, which installed binaries never search; troubleshooting documents that `axon filter`/`artifact-retrieve` keep working under a DB lock via the `.axon/ccr/` sidecar.
+
 ## [1.2.7] — 2026-07-08
 
 ### Fixed

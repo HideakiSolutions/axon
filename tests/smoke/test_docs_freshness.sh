@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Skip (ctest SKIP_RETURN_CODE 77) when optional dev tooling is absent.
+command -v rg >/dev/null 2>&1 || { echo "SKIP: rg is required for this test (CI installs it; locally: apt/brew install ripgrep)"; exit 77; }
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
