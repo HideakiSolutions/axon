@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-// ── Fixture: every test runs against an isolated AXON_HOME so nothing here
+// ── Fixture: every test runs against an isolated AXON_REGISTRY_DIR so nothing here
 //    can touch the user's real ~/.axon/registry.json (the exact pollution
 //    this override exists to prevent: e2e runs left 140 dead entries there). ─
 
@@ -19,11 +19,11 @@ protected:
         home = fs::temp_directory_path() / ("axon_registry_test_" + std::to_string(::getpid()) +
                                             "_" + std::to_string(++counter));
         fs::create_directories(home);
-        ::setenv("AXON_HOME", home.c_str(), 1);
+        ::setenv("AXON_REGISTRY_DIR", home.c_str(), 1);
     }
 
     void TearDown() override {
-        ::unsetenv("AXON_HOME");
+        ::unsetenv("AXON_REGISTRY_DIR");
         fs::remove_all(home);
     }
 };

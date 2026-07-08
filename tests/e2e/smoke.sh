@@ -23,7 +23,7 @@ mkdir -p "${TMP_BASE}"
 # Hermetic registry: every `axon index`/`serve` below registers repos; without
 # this the runs permanently pollute the user's real ~/.axon/registry.json
 # (observed: 140 dead /tmp entries accumulated from past runs).
-export AXON_HOME="${TMP_BASE}/axon-home"
+export AXON_REGISTRY_DIR="${TMP_BASE}/axon-home"
 
 # Tracking
 PASS_COUNT=0

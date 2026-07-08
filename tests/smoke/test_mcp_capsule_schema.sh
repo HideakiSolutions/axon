@@ -23,7 +23,7 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
 # Hermetic registry: `axon index` below must not pollute ~/.axon/registry.json.
-export AXON_HOME="$tmpdir/axon-home"
+export AXON_REGISTRY_DIR="$tmpdir/axon-home"
 
 mkdir -p "$tmpdir/src/auth"
 cat > "$tmpdir/package.json" <<'JSON'
