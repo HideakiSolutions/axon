@@ -298,3 +298,64 @@ jobs:
             dist/**/*.vsix.sha256
           fail_on_unmatched_files: true
           generate_release_notes: false
+
+  # Post-publish convenience, never a release gate: rewrites the Homebrew
+  # formula in HideakiSolutions/homebrew-axon to the just-published version.
+  # continue-on-error because a failed bump must not redden a good release —
+  # the formula can always be bumped by hand (docs/packaging/homebrew/).
+  bump-homebrew-formula:
+    name: Bump Homebrew formula
+    needs: publish
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - name: Resolve tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: HideakiSolutions/homebrew-axon
+          token: ${{ secrets.RELEASES_PAT }}
+
+      - name: Rewrite formula (version, urls, sha256 per platform)
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          TAG="${{ steps.ver.outputs.tag }}"
+          BASE="https://github.com/HideakiSolutions/axon-releases/releases/download/${TAG}"
+          MAC_SHA=$(curl -fsSL "${BASE}/axon-${VERSION}-macos-arm64.tar.gz.sha256" | cut -d' ' -f1)
+          LIN_SHA=$(curl -fsSL "${BASE}/axon-${VERSION}-linux-x64.tar.gz.sha256" | cut -d' ' -f1)
+          python3 - "$VERSION" "$MAC_SHA" "$LIN_SHA" << 'PY'
+          import re, sys
+          version, mac_sha, lin_sha = sys.argv[1:4]
+          path = "Formula/axon.rb"
+          s = open(path).read()
+          s = re.sub(r'^(  version ")[^"]+(")', rf'\g<1>{version}\g<2>', s, flags=re.M)
+          s = re.sub(r'download/v[^/]+/axon-[^-]+(-[a-z0-9-]+\.tar\.gz)',
+                     rf'download/v{version}/axon-{version}\g<1>', s)
+          def set_sha(s, platform, sha):
+              pat = re.compile(
+                  r'(axon-[^"]*' + platform + r'\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}(")')
+              new, n = pat.subn(rf'\g<1>{sha}\g<2>', s)
+              assert n == 1, f"expected one sha256 for {platform}, replaced {n}"
+              return new
+          s = set_sha(s, "macos-arm64", mac_sha)
+          s = set_sha(s, "linux-x64", lin_sha)
+          open(path, "w").write(s)
+          print(open(path).read())
+          PY
+
+      - name: Commit and push
+        run: |
+          git config user.name "axon-release-bot"
+          git config user.email "noreply@hideakisolutions.com"
+          git add Formula/axon.rb
+          git diff --cached --quiet && { echo "formula already current"; exit 0; }
+          git commit -m "axon ${{ steps.ver.outputs.version }}"
+          git push
