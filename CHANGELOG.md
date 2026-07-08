@@ -5,7 +5,7 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.10] — 2026-07-08
 
 ### Added
 - Native filesystem watcher for `axon watch`: inotify on Linux and FSEvents on macOS replace polling as the default backend (`--backend=auto`), with automatic fallback to the portable poller when native init fails (`AXON_WATCH_FORCE_POLL=1` forces it; `--backend=native` fails hard for diagnostics; Windows stays on polling). The watch-set is pruned by the indexer's hard skip-list, so `node_modules`/`.git` churn no longer wakes the watcher; kernel event-queue overflow (`IN_Q_OVERFLOW`, `kFSEventStreamEventFlagMustScanSubDirs`) triggers a full `sync_project` rescan. Debounce, incremental reindex, prune and telemetry are shared with the poll path, keeping fallback behavior identical by construction. Covered by a hermetic unit suite (both backends parameterized, fallback and overflow seams) and e2e smoke runs on both CI platforms.
