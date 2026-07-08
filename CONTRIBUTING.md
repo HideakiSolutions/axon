@@ -28,6 +28,12 @@ GoogleTest is pulled via FetchContent; a full network round-trip happens on
 the first configure. The `AXON_BUILD_TESTS` option defaults ON when this
 project is top-level and OFF when embedded.
 
+Two smoke tests use optional dev tooling and **skip** (ctest reports
+`***Skipped`) when it is absent, so a plain toolchain still gets a green
+suite: `test_docs_freshness` needs `ripgrep`, and
+`test_shell_filter_aggregate_benchmark` needs `ripgrep` + `jq`. CI installs
+both; locally `apt/brew install ripgrep jq` runs them for real.
+
 ### CI / lint workflows
 
 | Workflow | Trigger | Scope |
