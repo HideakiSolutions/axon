@@ -33,6 +33,11 @@ Retrieve the original content for an Axon CCR artifact emitted by lossy compress
 
 Returns `artifact_id`, `kind`, `source_ref`, `content`, and `token_estimate`.
 
+Artifacts are looked up in the DuckDB index first, then in the file sidecar
+(`.axon/ccr/<artifact_id>.json`) — the sidecar is where `axon filter` stores
+artifacts while another process holds the index write lock, so compressed
+shell output stays recoverable in that scenario too.
+
 ---
 
 ### `get_overview`
@@ -439,8 +444,8 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 | `axon web --group=<name>` | Browser graph explorer over a named registry group |
 | `axon lsp` | Language Server Protocol stdio server for workspace symbols, document symbols, definitions, and references |
 | `axon watch [path] [--interval-ms=N] [--debounce-ms=N]` | Portable polling watcher for external edits; reindexes modified files and prunes deletions |
-| `axon artifact-retrieve <artifact_id>` | Print original content for a CCR artifact |
-| `axon filter <auto\|diff\|lint\|log\|grep\|json\|package\|test\|tsc\|text> [--budget=N] [--metrics=json]` | Filter stdin shell output with type-aware compression, CCR recovery markers, grep/rg grouping, log level/dedup summaries, JSON schema summaries, lint rule summaries, package-manager summaries, test failure summaries, TypeScript diagnostic grouping, safe passthrough, and optional JSON stderr metrics |
+| `axon artifact-retrieve <artifact_id>` | Print original content for a CCR artifact (looks up the DuckDB index, then the `.axon/ccr/` file sidecar, then the lock-holding peer process) |
+| `axon filter <auto\|diff\|lint\|log\|grep\|json\|package\|test\|tsc\|text> [--budget=N] [--metrics=json]` | Filter stdin shell output with type-aware compression, CCR recovery markers, grep/rg grouping, log level/dedup summaries, JSON schema summaries, lint rule summaries, package-manager summaries, test failure summaries, TypeScript diagnostic grouping, safe passthrough, and optional JSON stderr metrics; when another process holds the index lock, artifacts are stored in the `.axon/ccr/` file sidecar so output stays recoverable |
 | `axon status` | Show index summary for the current project |
 
 ### Project config (`.axon/config.toml`)

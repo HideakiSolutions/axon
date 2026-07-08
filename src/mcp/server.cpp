@@ -1364,14 +1364,22 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     }
 
     if (name == "artifact_retrieve") {
-        if (!ctx.db_ready()) return db_unavailable_result(ctx);
         std::string artifact_id = args.value("artifact_id", "");
         if (artifact_id.empty())
             return make_tool_result({{"error","artifact_id is required"}}, true);
 
-        auto artifact = ccr_retrieve_artifact(*ctx.db, artifact_id);
+        std::optional<CcrArtifact> artifact;
+        if (ctx.db_ready())
+            artifact = ccr_retrieve_artifact(*ctx.db, artifact_id);
+        // `axon filter` stores artifacts in the file sidecar when this
+        // process holds the DB lock, so check it after a DB miss — and even
+        // with no DB at all, sidecar artifacts remain retrievable.
         if (!artifact)
+            artifact = ccr_retrieve_artifact_file(ctx.cfg.axon_dir / "ccr", artifact_id);
+        if (!artifact) {
+            if (!ctx.db_ready()) return db_unavailable_result(ctx);
             return make_tool_result({{"error","artifact not found"},{"artifact_id",artifact_id}}, true);
+        }
 
         return make_tool_result({
             {"artifact_id", artifact->artifact_id},
@@ -1506,6 +1514,9 @@ void run_stdio(ServerContext& ctx) {
     // now; otherwise ensure_db_open registers us when it later succeeds.
     if (start_peer_listener(ctx) && ctx.db_ready())
         register_self_as_owner(ctx, ctx.peer_port);
+    if (!ctx.db_ready() && !ctx.db_error.empty())
+        std::cerr << "[axon] serve started without the index database ("
+                  << ctx.db_error << "); will retry on the first tool call\n";
 
     StdioEnvelope env;
     while (read_stdio_envelope(std::cin, env)) {

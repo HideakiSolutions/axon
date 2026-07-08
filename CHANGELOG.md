@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Peer-proxy for concurrent serves: the `axon serve` process holding the DuckDB write lock now runs a localhost peer listener (ephemeral port, token-gated `POST /rpc/tool`) and registers itself as the repo owner in `~/.axon/registry.json`; latecomer serves transparently forward DB-backed tool calls to it instead of returning lock errors, and promote themselves to owner when it exits.
 - `axon web` / `serve --http` participates in the same mechanism, so a long-running web server no longer locks MCP sessions out of the same repo.
+- CCR file sidecar store (`.axon/ccr/`, one JSON file per artifact, atomic write-to-temp + rename): `axon filter` keeps producing recoverable compressed output when another process holds the DuckDB write lock, instead of silently passing input through with `tokens_saved: 0`. `axon artifact-retrieve` resolves artifacts through a DB → sidecar → peer-proxy chain, and the MCP `artifact_retrieve` tool plus `GET /api/artifact/<id>` fall back to the sidecar after a DB miss.
 
 ### Changed
 - Registry writes are now atomic (write-to-temp + rename) so concurrent serves never read a half-written `registry.json`.

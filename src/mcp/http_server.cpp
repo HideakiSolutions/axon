@@ -685,10 +685,18 @@ static std::string handle_request(const std::string& method, const std::string& 
 
     // GET /api/artifact/<artifact_id>
     if (method == "GET" && path.rfind("/api/artifact/", 0) == 0) {
-        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
         std::string artifact_id = url_decode(path.substr(std::string("/api/artifact/").size()));
-        auto artifact = axon::ccr_retrieve_artifact(*ctx.db, artifact_id);
-        if (!artifact) return json{{"error","artifact not found"},{"artifact_id",artifact_id}}.dump();
+        std::optional<axon::CcrArtifact> artifact;
+        if (ctx.db_ready())
+            artifact = axon::ccr_retrieve_artifact(*ctx.db, artifact_id);
+        // Fall back to the file sidecar (populated by `axon filter` while
+        // another process held the DB lock).
+        if (!artifact)
+            artifact = axon::ccr_retrieve_artifact_file(ctx.cfg.axon_dir / "ccr", artifact_id);
+        if (!artifact) {
+            if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+            return json{{"error","artifact not found"},{"artifact_id",artifact_id}}.dump();
+        }
         return json{{"artifact", {{"artifact_id", artifact->artifact_id},
                                   {"kind", artifact->kind},
                                   {"source_ref", artifact->source_ref},
