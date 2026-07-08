@@ -148,7 +148,7 @@ target_link_libraries(test_objectives PRIVATE
 add_test(NAME test_objectives COMMAND test_objectives)
 
 # Registry tests — pure filesystem + JSON, no DuckDB/llama.cpp. Runs entirely
-# under an isolated AXON_HOME.
+# under an isolated AXON_REGISTRY_DIR.
 add_executable(test_registry unit/test_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/core/registry.cpp
 )

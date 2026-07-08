@@ -20,12 +20,14 @@ namespace axon {
 using json = nlohmann::json;
 
 std::filesystem::path registry_path() {
-    // AXON_HOME overrides the default ~/.axon — tests and sandboxes point it
-    // at a scratch dir so they never touch the user's real registry.
+    // AXON_REGISTRY_DIR overrides the default ~/.axon — tests and sandboxes
+    // point it at a scratch dir so they never touch the user's real registry.
+    // (Not AXON_HOME: the install wrappers already use that name to relocate
+    // the package root, so reusing it here would break every installed CLI.)
     std::filesystem::path axon_dir;
-    const char* axon_home = getenv("AXON_HOME");
-    if (axon_home && *axon_home) {
-        axon_dir = axon_home;
+    const char* reg_dir = getenv("AXON_REGISTRY_DIR");
+    if (reg_dir && *reg_dir) {
+        axon_dir = reg_dir;
     } else {
         const char* home = getenv("HOME");
         if (!home) home = "/tmp";

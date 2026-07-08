@@ -24,7 +24,7 @@ struct RegistryData {
     std::vector<std::pair<std::string, std::vector<std::string>>> groups;
 };
 
-// Returns path to the registry: $AXON_HOME/registry.json when AXON_HOME is
+// Returns path to the registry: $AXON_REGISTRY_DIR/registry.json when AXON_REGISTRY_DIR is
 // set (tests/sandboxes), else ~/.axon/registry.json (dir created if needed).
 std::filesystem::path registry_path();
 

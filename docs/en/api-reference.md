@@ -422,7 +422,7 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 | `LD_LIBRARY_PATH` | — | Only needed for source-tree runs if the binary cannot find DuckDB; release packages set RPATH/RUNPATH |
 | `AXON_EMBEDDING_MODEL` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
-| `AXON_HOME` | `~/.axon` | Directory holding the multi-repo `registry.json`; tests and sandboxes point it at a scratch dir so runs never touch the real registry |
+| `AXON_REGISTRY_DIR` | `~/.axon` | Directory holding the multi-repo `registry.json`; tests and sandboxes point it at a scratch dir so runs never touch the real registry |
 | `AXON_TELEMETRY` | off | Opt into local telemetry with `1`, `true`, `yes`, or `on` |
 | `AXON_TELEMETRY_ENDPOINT` | — | Optional HTTP endpoint for best-effort remote telemetry POSTs |
 | `AXON_COST_PER_M_INPUT_USD` | `3.0` | Cost basis for `/api/metrics` estimated input cost |

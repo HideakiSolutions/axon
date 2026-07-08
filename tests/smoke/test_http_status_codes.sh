@@ -20,7 +20,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Hermetic registry + sandboxed project root.
-export AXON_HOME="$tmpdir/axon-home"
+export AXON_REGISTRY_DIR="$tmpdir/axon-home"
 sandbox="$tmpdir/proj"
 mkdir -p "$sandbox/.git" "$sandbox/src"
 echo "ref: refs/heads/main" > "$sandbox/.git/HEAD"
