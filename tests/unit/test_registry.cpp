@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include "core/registry.hpp"
+#include "test_support.hpp"
 #include <cstdlib>
 #include <filesystem>
-#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -16,14 +16,15 @@ protected:
 
     void SetUp() override {
         static int counter = 0;
-        home = fs::temp_directory_path() / ("axon_registry_test_" + std::to_string(::getpid()) +
-                                            "_" + std::to_string(++counter));
+        home = fs::temp_directory_path() /
+               ("axon_registry_test_" + std::to_string(testsupport::pid()) + "_" +
+                std::to_string(++counter));
         fs::create_directories(home);
-        ::setenv("AXON_REGISTRY_DIR", home.c_str(), 1);
+        testsupport::set_env("AXON_REGISTRY_DIR", home.string());
     }
 
     void TearDown() override {
-        ::unsetenv("AXON_REGISTRY_DIR");
+        testsupport::unset_env("AXON_REGISTRY_DIR");
         fs::remove_all(home);
     }
 };
@@ -61,7 +62,7 @@ TEST_F(RegistryTest, PruneKeepsDeadRootWithLiveOwner) {
     // alive must be kept — pruning it would clobber live owner bookkeeping.
     fs::path gone = home / "gone-but-owned";
     axon::register_repo(gone.string(), "unused");
-    axon::set_repo_owner(gone.string(), (long long)::getpid(), 4242, "tok");
+    axon::set_repo_owner(gone.string(), (long long)testsupport::pid(), 4242, "tok");
 
     EXPECT_EQ(axon::prune_registry(), 0);
     auto reg = axon::load_registry();

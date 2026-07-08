@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "core/watcher.hpp"
+#include "test_support.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -14,7 +15,8 @@ using namespace std::chrono_literals;
 static fs::path make_temp_project() {
     static int counter = 0;
     auto p = fs::temp_directory_path() /
-             ("axon_watcher_test_" + std::to_string(::getpid()) + "_" + std::to_string(++counter));
+             ("axon_watcher_test_" + std::to_string(testsupport::pid()) + "_" +
+              std::to_string(++counter));
     fs::create_directories(p / "src");
     std::ofstream(p / "src/seed.ts") << "export const seed = 1;\n";
     return p;
@@ -117,12 +119,12 @@ INSTANTIATE_TEST_SUITE_P(Native, WatcherTest, ::testing::Values(axon::WatchBacke
 
 TEST(WatcherFactory, ForcePollViaEnv) {
     auto proj = make_temp_project();
-    ::setenv("AXON_WATCH_FORCE_POLL", "1", 1);
+    testsupport::set_env("AXON_WATCH_FORCE_POLL", "1");
     axon::Config cfg;
     cfg.project_root = proj;
     std::string backend;
     auto w = axon::make_watcher(cfg, axon::WatchBackend::Auto, 200, backend);
-    ::unsetenv("AXON_WATCH_FORCE_POLL");
+    testsupport::unset_env("AXON_WATCH_FORCE_POLL");
     ASSERT_TRUE(w);
     EXPECT_STREQ(w->backend_name(), "poll");
     EXPECT_EQ(backend, "poll");
@@ -132,12 +134,12 @@ TEST(WatcherFactory, ForcePollViaEnv) {
 
 TEST(WatcherFactory, FallbackOnNativeInitFailure) {
     auto proj = make_temp_project();
-    ::setenv("AXON_WATCH_FORCE_NATIVE_FAIL", "1", 1);
+    testsupport::set_env("AXON_WATCH_FORCE_NATIVE_FAIL", "1");
     axon::Config cfg;
     cfg.project_root = proj;
     std::string backend;
     auto w = axon::make_watcher(cfg, axon::WatchBackend::Auto, 200, backend);
-    ::unsetenv("AXON_WATCH_FORCE_NATIVE_FAIL");
+    testsupport::unset_env("AXON_WATCH_FORCE_NATIVE_FAIL");
     ASSERT_TRUE(w) << "auto must fall back to poll when native init fails";
     EXPECT_EQ(backend, "poll");
 
@@ -160,12 +162,12 @@ TEST(WatcherFactory, FallbackOnNativeInitFailure) {
 
 TEST(WatcherFactory, NativeModeFailsHardWhenForced) {
     auto proj = make_temp_project();
-    ::setenv("AXON_WATCH_FORCE_NATIVE_FAIL", "1", 1);
+    testsupport::set_env("AXON_WATCH_FORCE_NATIVE_FAIL", "1");
     axon::Config cfg;
     cfg.project_root = proj;
     std::string backend;
     auto w = axon::make_watcher(cfg, axon::WatchBackend::Native, 200, backend);
-    ::unsetenv("AXON_WATCH_FORCE_NATIVE_FAIL");
+    testsupport::unset_env("AXON_WATCH_FORCE_NATIVE_FAIL");
     EXPECT_EQ(w, nullptr) << "--backend=native must not silently fall back";
     fs::remove_all(proj);
 }
@@ -199,12 +201,12 @@ TEST(WatcherLatency, NativeDetectsFasterThanPollInterval) {
 
 TEST(WatcherFactory, ForcedOverflowSeamFlagsFirstBatch) {
     auto proj = make_temp_project();
-    ::setenv("AXON_WATCH_FORCE_OVERFLOW", "1", 1);
+    testsupport::set_env("AXON_WATCH_FORCE_OVERFLOW", "1");
     axon::Config cfg;
     cfg.project_root = proj;
     std::string backend;
     auto w = axon::make_watcher(cfg, axon::WatchBackend::Poll, 200, backend);
-    ::unsetenv("AXON_WATCH_FORCE_OVERFLOW");
+    testsupport::unset_env("AXON_WATCH_FORCE_OVERFLOW");
     ASSERT_TRUE(w);
 
     std::ofstream(proj / "src/overflow_probe.ts") << "export const probe = 1;\n";
