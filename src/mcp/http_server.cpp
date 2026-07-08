@@ -251,7 +251,7 @@ static std::string web_index_html() {
 
 static std::string handle_request(const std::string& method, const std::string& path,
                                   const std::string& query, const std::string& body,
-                                  ServerContext& ctx, const HttpConfig& cfg) {
+                                  ServerContext& ctx, const HttpConfig& cfg, int& http_status) {
     // Escape SQL strings
     auto sq = [](const std::string& s) {
         std::string out;
@@ -678,8 +678,14 @@ static std::string handle_request(const std::string& method, const std::string& 
         std::string pivots_param = url_decode(get_query_param(query, "pivots"));
         int budget = budget_str.empty() ? 8000 : std::stoi(budget_str);
 
-        if (q.empty() || !ctx.db_ready())
-            return json{{"error", "q parameter required and DB must be ready"}}.dump();
+        if (q.empty()) {
+            http_status = 400;
+            return json{{"error", "q parameter required"}}.dump();
+        }
+        if (!ctx.db_ready()) {
+            http_status = 503;
+            return json{{"error", "DB not ready. Run axon index first."}}.dump();
+        }
 
         std::vector<std::string> explicit_pivots;
         if (!pivots_param.empty()) {
@@ -733,10 +739,12 @@ static std::string handle_request(const std::string& method, const std::string& 
                 return capsule_to_json(*hit, "hit");
         }
 
-        if (!ctx.model_ready())
+        if (!ctx.model_ready()) {
+            http_status = 503;
             return json{
                 {"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}
                 .dump();
+        }
 
         auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model, ctx.graph,
                                               ctx.cfg.project_root, budget);
@@ -755,7 +763,11 @@ static std::string handle_request(const std::string& method, const std::string& 
         if (!artifact)
             artifact = axon::ccr_retrieve_artifact_file(ctx.cfg.axon_dir / "ccr", artifact_id);
         if (!artifact) {
-            if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
+            if (!ctx.db_ready()) {
+                http_status = 503;
+                return json{{"error", "DB not ready"}}.dump();
+            }
+            http_status = 404;
             return json{{"error", "artifact not found"}, {"artifact_id", artifact_id}}.dump();
         }
         return json{{"artifact",
@@ -894,6 +906,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             parse_request_line(request, method, path, query, body);
 
             std::string response_body;
+            int http_status = 200;
             auto start = std::chrono::steady_clock::now();
             // Serialize against the peer listener thread, which may be
             // executing a proxied tool call on the same ctx right now.
@@ -901,7 +914,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             if (method == "OPTIONS") {
                 response_body = "";
             } else {
-                response_body = handle_request(method, path, query, body, ctx, cfg);
+                response_body = handle_request(method, path, query, body, ctx, cfg, http_status);
             }
             if (path != "/api/metrics") {
                 int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -915,7 +928,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             }
             std::string content_type =
                 (path == "/" || path == "/index.html") ? "text/html" : "application/json";
-            build_response(client_fd, 200, response_body, content_type);
+            build_response(client_fd, http_status, response_body, content_type);
         }
         close(client_fd);
     }
