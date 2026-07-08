@@ -28,7 +28,11 @@ jobs:
             compiler: gcc
           - os: macos-14
             compiler: clang
-          - os: windows-latest
+          # windows-2022 deliberately matches release.yml: we test the same
+          # runner image + MSVC toolset the released binaries are built with.
+          # windows-latest (Server 2025 / VS18 toolset 14.51) hung every test
+          # executable at startup on the first attempt (run 28981004802).
+          - os: windows-2022
             compiler: msvc
     env:
       AXON_DUCKDB_VERSION: 1.2.2
@@ -110,18 +114,47 @@ jobs:
       - name: Build tests
         run: cmake --build build -j 2
 
-      - name: Add runtime DLL dirs to PATH (Windows)
-        # Windows has no RUNPATH: test executables resolve duckdb.dll and the
-        # llama/ggml DLLs through PATH. Register every build dir that emitted
-        # a DLL plus the staged duckdb lib dir before ctest runs.
+      - name: Stage runtime DLLs beside test binaries (Windows)
+        # Windows has no RUNPATH, and GITHUB_PATH prepends are clobbered here:
+        # ilammy/msvc-dev-cmd exports the entire VS environment (including
+        # Path) via GITHUB_ENV, which wins over GITHUB_PATH for later steps
+        # (observed in run 28981004802 — the appended dirs never reached the
+        # ctest step). The executable's own directory is always first in the
+        # DLL search order, so copy every runtime DLL next to the test exes
+        # and next to build/axon.exe instead.
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $dirs = Get-ChildItem -Path build -Filter *.dll -Recurse |
-              Where-Object { $_.FullName -notmatch '\\CMakeFiles\\' } |
-              ForEach-Object { $_.DirectoryName } | Sort-Object -Unique
-          $dirs += (Resolve-Path 'third_party\duckdb\lib').Path
-          $dirs | ForEach-Object { Add-Content -Path $env:GITHUB_PATH -Value $_ }
+          $targets = @("build\tests", "build")
+          $dlls = @(Get-ChildItem -Path build -Filter *.dll -Recurse |
+              Where-Object { $_.FullName -notmatch '\\(CMakeFiles|tests)\\' })
+          $dlls += Get-Item "third_party\duckdb\lib\duckdb.dll"
+          foreach ($t in $targets) {
+            foreach ($d in $dlls) { Copy-Item $d.FullName $t -Force }
+          }
+          Write-Host "Staged $($dlls.Count) DLLs into $($targets -join ', '):"
+          $dlls | ForEach-Object { Write-Host "  $($_.Name)" }
+
+      - name: Probe one test binary (Windows)
+        # Fast bounded diagnostic: if test exes cannot even start (missing
+        # DLL / runtime mismatch surfaces as a modal dialog = silent hang in
+        # CI), this names the problem in seconds instead of burning the ctest
+        # timeout budget 18 times.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "build\tests\test_compress.exe" `
+              -ArgumentList "--gtest_list_tests" -NoNewWindow -PassThru `
+              -RedirectStandardOutput probe.out -RedirectStandardError probe.err
+          if (-not $p.WaitForExit(60000)) {
+            $p.Kill()
+            Write-Host "PROBE: test_compress.exe HUNG after 60s"
+            exit 1
+          }
+          Write-Host "PROBE: exit=$($p.ExitCode)"
+          Get-Content probe.out -ErrorAction SilentlyContinue
+          Get-Content probe.err -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { exit 1 }
 
       - name: Run unit tests
         # CTest aggregates every test registered via add_axon_test().
@@ -129,7 +162,7 @@ jobs:
         # without re-running. --timeout converts a hung test into a named
         # failure instead of an opaque stuck job (longest healthy test runs
         # in well under a minute).
-        run: ctest --test-dir build --output-on-failure --timeout 300
+        run: ctest --test-dir build --output-on-failure --timeout 180
 
       - name: Smoke binary
         # bash on all three platforms — Git Bash resolves ./build/axon to
