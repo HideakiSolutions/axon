@@ -2,7 +2,7 @@
   "name": "axon-vscode",
   "displayName": "Axon",
   "description": "Axon language server and web explorer integration.",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "publisher": "hideakisolutions",
   "license": "MIT",
   "repository": {
