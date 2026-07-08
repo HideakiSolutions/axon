@@ -1,6 +1,7 @@
 #pragma once
 #include "config.hpp"
 #include "db.hpp"
+#include "skip_dirs.hpp"
 #include <filesystem>
 #include <functional>
 #include <vector>

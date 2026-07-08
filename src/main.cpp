@@ -9,6 +9,7 @@
 #include "core/embeddings.hpp"
 #include "core/shell_filter.hpp"
 #include "core/telemetry.hpp"
+#include "core/watcher.hpp"
 #include "mcp/server.hpp"
 #include "mcp/http_server.hpp"
 #include "mcp/peer.hpp"
@@ -59,8 +60,9 @@ Usage:
   axon web    [--port=7070] [--host=127.0.0.1] [--group=<name>] [--all]
                                         Start browser graph explorer + REST API
   axon lsp                              Start Language Server Protocol server (stdio)
-  axon watch [path] [--interval-ms=1000] [--debounce-ms=500]
-                                        Poll for external edits and incrementally reindex
+  axon watch [path] [--interval-ms=1000] [--debounce-ms=500] [--backend=auto|native|poll]
+                                        Watch for external edits and incrementally reindex
+                                        (native inotify/FSEvents with automatic poll fallback)
   axon capsule <query> [--no-cache]     Print context capsule for a query
   axon artifact-retrieve <artifact_id>   Retrieve original CCR artifact content
   axon filter <kind> [--budget=N] [--metrics=json]
@@ -278,18 +280,29 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── axon watch [path] [--interval-ms=N] [--debounce-ms=N] ─────────────
+    // ── axon watch [path] [--interval-ms=N] [--debounce-ms=N] [--backend=B] ─
     if (cmd == "watch") {
         std::string path;
         int interval_ms = 1000;
         int debounce_ms = 500;
+        axon::WatchBackend backend_pref = axon::WatchBackend::Auto;
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
             if (a.rfind("--interval-ms=", 0) == 0)
                 interval_ms = std::stoi(a.substr(14));
             else if (a.rfind("--debounce-ms=", 0) == 0)
                 debounce_ms = std::stoi(a.substr(14));
-            else if (path.empty())
+            else if (a.rfind("--backend=", 0) == 0) {
+                std::string b = a.substr(10);
+                if (b == "native")
+                    backend_pref = axon::WatchBackend::Native;
+                else if (b == "poll")
+                    backend_pref = axon::WatchBackend::Poll;
+                else if (b != "auto") {
+                    std::cerr << "Unknown --backend value: " << b << " (auto|native|poll)\n";
+                    return 1;
+                }
+            } else if (path.empty())
                 path = a;
         }
         if (interval_ms < 100) interval_ms = 100;
@@ -308,70 +321,46 @@ int main(int argc, char* argv[]) {
         signal(SIGTERM, stop_watch);
 #endif
 
-        struct Stamp {
-            int64_t mtime = 0;
-            uintmax_t size = 0;
-        };
-        auto stamp = [](const fs::path& p) {
-            std::error_code ec;
-            auto t = fs::last_write_time(p, ec);
-            auto s = fs::file_size(p, ec);
-            return Stamp{ec ? int64_t{0} : static_cast<int64_t>(t.time_since_epoch().count()),
-                         ec ? uintmax_t{0} : s};
-        };
-        auto snapshot = [&]() {
-            std::unordered_map<std::string, Stamp> out;
-            for (auto it = fs::recursive_directory_iterator(
-                     cfg.project_root, fs::directory_options::skip_permission_denied);
-                 it != fs::end(it); ++it) {
-                if (!it->is_regular_file()) continue;
-                auto ext = it->path().extension().string();
-                if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
-                if (!axon::language_from_extension(ext)) continue;
-                std::error_code ec;
-                auto rel = fs::relative(it->path(), cfg.project_root, ec);
-                if (!ec && !rel.empty() && rel.generic_string().rfind("..", 0) != 0)
-                    out[rel.generic_string()] = stamp(it->path());
-            }
-            return out;
-        };
+        std::string backend;
+        auto watcher = axon::make_watcher(cfg, backend_pref, interval_ms, backend);
+        if (!watcher) return 1;
 
-        auto seen = snapshot();
-        std::cout << "Watching " << cfg.project_root << " (poll " << interval_ms << "ms, debounce "
-                  << debounce_ms << "ms)\n";
+        std::cout << "Watching " << cfg.project_root << " (backend " << backend << ", poll "
+                  << interval_ms << "ms, debounce " << debounce_ms << "ms)\n";
         std::cout.flush();
 
         while (g_watch_running) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
-            auto next = snapshot();
-            std::vector<fs::path> changed;
-            bool deleted = false;
+            axon::WatchEvent ev;
+            if (!watcher->wait_for_changes(std::chrono::milliseconds(interval_ms), ev)) continue;
 
-            for (const auto& [path_key, st] : next) {
-                auto it = seen.find(path_key);
-                if (it == seen.end() || it->second.mtime != st.mtime || it->second.size != st.size)
-                    changed.emplace_back(path_key);
-            }
-            for (const auto& [path_key, st] : seen) {
-                if (!next.count(path_key)) deleted = true;
-            }
-            if (changed.empty() && !deleted) {
-                seen = std::move(next);
-                continue;
-            }
-
+            // Same debounce as the old poll loop, then drain whatever else
+            // settled during the window so one save-burst is one reindex.
             std::this_thread::sleep_for(std::chrono::milliseconds(debounce_ms));
+            axon::WatchEvent more;
+            while (watcher->wait_for_changes(std::chrono::milliseconds(0), more)) {
+                ev.merge(more);
+                more = axon::WatchEvent{};
+            }
+
             auto start = std::chrono::steady_clock::now();
-            auto stats = axon::index_files(cfg, *db, changed, deleted);
+            axon::IndexStats stats;
+            if (ev.overflow) {
+                // Kernel queue overflowed — events were lost; converge with a
+                // full sync instead of trusting the partial batch.
+                stats = axon::sync_project(cfg, *db);
+                std::cout << "(event overflow — full rescan) ";
+            } else {
+                stats = axon::index_files(cfg, *db, ev.changed, ev.deleted);
+            }
             std::cout << stats.files_indexed << " indexed, " << stats.files_skipped << " unchanged";
-            if (deleted) std::cout << ", " << stats.files_pruned << " pruned";
+            if (ev.deleted || ev.overflow) std::cout << ", " << stats.files_pruned << " pruned";
             std::cout << "\n";
             std::cout.flush();
             axon::record_telemetry(cfg, db.get(),
                                    {"watch", "cli", elapsed_ms(start), stats.symbols_found * 12,
                                     stats.files_indexed * 500, 0, false, "indexing"});
-            seen = snapshot();
         }
+        watcher->stop();
         std::cout << "Watch stopped.\n";
         return 0;
     }
