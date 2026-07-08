@@ -27,6 +27,10 @@
 #include <thread>
 #include <unordered_map>
 #include <nlohmann/json.hpp>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -132,6 +136,15 @@ static axon::mcp::ServerContext make_server_context(const char* binary_path,
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    // The MSVC CRT opens stdin/stdout in text mode, which rewrites \n as
+    // \r\n on write (and strips \r on read). That corrupts every byte-exact
+    // surface: artifact-retrieve must reproduce the stored artifact
+    // bit-for-bit, filter pipes arbitrary tool output, and the MCP/LSP
+    // framing carries explicit \r\n headers of its own.
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     if (argc < 2) {
         print_usage();
         return 1;
