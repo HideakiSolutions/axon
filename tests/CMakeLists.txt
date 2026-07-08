@@ -179,6 +179,11 @@ add_test(
 )
 
 add_test(
+    NAME test_cpp_header_impl
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_cpp_header_impl.sh $<TARGET_FILE:axon>
+)
+
+add_test(
     NAME test_docs_freshness
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_docs_freshness.sh
 )

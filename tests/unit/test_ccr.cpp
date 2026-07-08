@@ -108,3 +108,65 @@ TEST_F(CcrTest, RecoverableOutputFallsBackWhenMarkerRemovesSavings) {
     EXPECT_EQ(result.output_tokens, result.input_tokens);
     EXPECT_EQ(result.tokens_saved, 0);
 }
+
+class CcrFileStoreTest : public ::testing::Test {
+protected:
+    fs::path ccr_dir;
+
+    void SetUp() override {
+        auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        ccr_dir = fs::temp_directory_path() /
+                  ("axon_ccr_file_test_" + std::to_string(stamp));
+    }
+
+    void TearDown() override {
+        std::error_code ec;
+        fs::remove_all(ccr_dir, ec);
+    }
+};
+
+TEST_F(CcrFileStoreTest, FileStoreRoundTripsAndMatchesDbArtifactId) {
+    std::string content = "int f() {\n    return 42;\n}\n";
+    std::string id = axon::ccr_store_artifact_file(
+        ccr_dir, "shell_filter", "filter.grep:stdin", content, 12);
+
+    ASSERT_FALSE(id.empty());
+    // Same inputs must produce the same id as the DB store, so an artifact
+    // is addressable regardless of which store received it.
+    EXPECT_EQ(id, axon::ccr_artifact_id("shell_filter", "filter.grep:stdin", content));
+
+    auto artifact = axon::ccr_retrieve_artifact_file(ccr_dir, id);
+    ASSERT_TRUE(artifact.has_value());
+    EXPECT_EQ(artifact->artifact_id, id);
+    EXPECT_EQ(artifact->kind, "shell_filter");
+    EXPECT_EQ(artifact->source_ref, "filter.grep:stdin");
+    EXPECT_EQ(artifact->content, content);
+    EXPECT_EQ(artifact->token_estimate, 12);
+}
+
+TEST_F(CcrFileStoreTest, FileStoreMissingAndTraversalIdsReturnNullopt) {
+    EXPECT_FALSE(axon::ccr_retrieve_artifact_file(ccr_dir, "ccr_missing").has_value());
+    EXPECT_FALSE(axon::ccr_retrieve_artifact_file(ccr_dir, "../etc/passwd").has_value());
+    EXPECT_FALSE(axon::ccr_retrieve_artifact_file(ccr_dir, "").has_value());
+}
+
+TEST_F(CcrFileStoreTest, RecoverableOutputWorksWithFileStore) {
+    std::string original(4000, 'x');
+    std::string lossy = "# summary\nimportant line\n";
+
+    axon::CcrStoreFn store = [this](const std::string& k, const std::string& ref,
+                                    const std::string& content, int64_t tokens) {
+        return axon::ccr_store_artifact_file(ccr_dir, k, ref, content, tokens);
+    };
+    auto result = axon::ccr_make_recoverable_output(
+        store, "shell_filter", "filter.test:stdin", original, lossy, 1000);
+
+    ASSERT_TRUE(result.recoverable);
+    EXPECT_FALSE(result.artifact_id.empty());
+    EXPECT_NE(result.output.find("axon:ccr"), std::string::npos);
+    EXPECT_GT(result.tokens_saved, 0);
+
+    auto artifact = axon::ccr_retrieve_artifact_file(ccr_dir, result.artifact_id);
+    ASSERT_TRUE(artifact.has_value());
+    EXPECT_EQ(artifact->content, original);
+}

@@ -11,6 +11,7 @@
 #include "core/telemetry.hpp"
 #include "mcp/server.hpp"
 #include "mcp/http_server.hpp"
+#include "mcp/peer.hpp"
 #include "lsp/server.hpp"
 #include "version.hpp"
 #include <iostream>
@@ -504,17 +505,63 @@ int main(int argc, char* argv[]) {
             std::cerr << "Usage: axon artifact-retrieve <artifact_id>\n";
             return 1;
         }
+        std::string artifact_id = argv[2];
         auto cfg = load_config();
-        if (!fs::exists(cfg.db_path)) {
-            std::cerr << "No index found. Run `axon index` first.\n";
-            return 1;
-        }
-        auto db = open_database_or_report(cfg.db_path);
-        if (!db) return 1;
 
-        auto artifact = axon::ccr_retrieve_artifact(*db, argv[2]);
+        std::optional<axon::CcrArtifact> artifact;
+        bool db_locked = false;
+        if (fs::exists(cfg.db_path)) {
+            try {
+                axon::Database db(cfg.db_path);
+                artifact = axon::ccr_retrieve_artifact(db, artifact_id);
+            } catch (const std::exception&) {
+                // Typically another axon process holds the write lock; the
+                // sidecar and peer fallbacks below still allow recovery.
+                db_locked = true;
+            }
+        }
+
+        if (!artifact)
+            artifact = axon::ccr_retrieve_artifact_file(cfg.axon_dir / "ccr", artifact_id);
+
+        if (!artifact && db_locked) {
+            // The lock holder can read the DB row for us (#58 peer protocol).
+            axon::mcp::ServerContext ctx;
+            ctx.cfg = cfg;
+            std::string proxy_error;
+            auto proxied = axon::mcp::proxy_tool_call(
+                ctx, "artifact_retrieve", {{"artifact_id", artifact_id}}, proxy_error);
+            if (proxied) {
+                try {
+                    auto content = proxied->value("content", nlohmann::json::array());
+                    if (content.is_array() && !content.empty()) {
+                        auto payload = nlohmann::json::parse(
+                            content[0].value("text", "{}"), nullptr, false);
+                        if (payload.is_object() && !payload.contains("error")) {
+                            axon::CcrArtifact a;
+                            a.artifact_id = payload.value("artifact_id", artifact_id);
+                            a.kind = payload.value("kind", "");
+                            a.source_ref = payload.value("source_ref", "");
+                            a.content = payload.value("content", "");
+                            a.token_estimate = payload.value("token_estimate",
+                                                             static_cast<int64_t>(0));
+                            artifact = std::move(a);
+                        }
+                    }
+                } catch (const std::exception&) {}
+            }
+        }
+
         if (!artifact) {
-            std::cerr << "Artifact not found: " << argv[2] << "\n";
+            if (!fs::exists(cfg.db_path)) {
+                std::cerr << "No index found. Run `axon index` first.\n";
+            } else if (db_locked) {
+                std::cerr << "Artifact not found: " << artifact_id
+                          << " (index locked by another axon process; sidecar and"
+                             " peer lookups also missed)\n";
+            } else {
+                std::cerr << "Artifact not found: " << artifact_id << "\n";
+            }
             return 1;
         }
         std::cout << artifact->content;
@@ -544,46 +591,61 @@ int main(int argc, char* argv[]) {
         std::string ccr_artifact_id;
         if (filtered.changed) {
             auto cfg = load_config();
-            auto db = open_database_or_report(cfg.db_path);
+            // Quiet open: when another process (axon serve/web) holds the
+            // DuckDB lock, fall back to the file sidecar store instead of
+            // passing input through unfiltered — hooks run filter on every
+            // command, so the lock is the common case, not the exception.
+            std::unique_ptr<axon::Database> db;
+            try {
+                db = std::make_unique<axon::Database>(cfg.db_path);
+            } catch (const std::exception&) {
+                db = nullptr;
+            }
+            axon::CcrStoreFn store;
             if (db) {
-                auto make_recoverable = [&](const axon::ShellFilterResult& candidate) {
-                    return axon::ccr_make_recoverable_output(
-                        *db,
-                        "shell_filter",
-                        "filter." + candidate.command + ":stdin",
-                        input,
-                        candidate.output,
-                        candidate.input_tokens);
+                store = [&db](const std::string& k, const std::string& ref,
+                              const std::string& content, int64_t tokens) {
+                    return axon::ccr_store_artifact(*db, k, ref, content, tokens);
                 };
+            } else {
+                auto ccr_dir = cfg.axon_dir / "ccr";
+                store = [ccr_dir](const std::string& k, const std::string& ref,
+                                  const std::string& content, int64_t tokens) {
+                    return axon::ccr_store_artifact_file(ccr_dir, k, ref, content, tokens);
+                };
+            }
+            auto make_recoverable = [&](const axon::ShellFilterResult& candidate) {
+                return axon::ccr_make_recoverable_output(
+                    store,
+                    "shell_filter",
+                    "filter." + candidate.command + ":stdin",
+                    input,
+                    candidate.output,
+                    candidate.input_tokens);
+            };
 
-                auto recoverable = make_recoverable(filtered);
-                if (recoverable.recoverable &&
-                    recoverable.output_tokens > budget &&
-                    !recoverable.artifact_id.empty()) {
-                    int marker_tokens = estimate_tokens_cli(
-                        axon::ccr_marker(recoverable.artifact_id, filtered.input_tokens));
-                    int adjusted_budget = budget - marker_tokens;
-                    if (adjusted_budget > 0 && adjusted_budget < budget) {
-                        auto tighter = axon::filter_shell_output(kind, input, adjusted_budget);
-                        if (tighter.changed) {
-                            auto tighter_recoverable = make_recoverable(tighter);
-                            if (tighter_recoverable.recoverable)
-                                recoverable = std::move(tighter_recoverable);
-                        }
+            auto recoverable = make_recoverable(filtered);
+            if (recoverable.recoverable &&
+                recoverable.output_tokens > budget &&
+                !recoverable.artifact_id.empty()) {
+                int marker_tokens = estimate_tokens_cli(
+                    axon::ccr_marker(recoverable.artifact_id, filtered.input_tokens));
+                int adjusted_budget = budget - marker_tokens;
+                if (adjusted_budget > 0 && adjusted_budget < budget) {
+                    auto tighter = axon::filter_shell_output(kind, input, adjusted_budget);
+                    if (tighter.changed) {
+                        auto tighter_recoverable = make_recoverable(tighter);
+                        if (tighter_recoverable.recoverable)
+                            recoverable = std::move(tighter_recoverable);
                     }
                 }
+            }
 
-                if (recoverable.recoverable && recoverable.output_tokens <= budget) {
-                    filtered.output = std::move(recoverable.output);
-                    filtered.output_tokens = static_cast<int>(recoverable.output_tokens);
-                    filtered.tokens_saved = static_cast<int>(recoverable.tokens_saved);
-                    ccr_artifact_id = std::move(recoverable.artifact_id);
-                } else {
-                    filtered.output = input;
-                    filtered.output_tokens = filtered.input_tokens;
-                    filtered.tokens_saved = 0;
-                    filtered.changed = false;
-                }
+            if (recoverable.recoverable && recoverable.output_tokens <= budget) {
+                filtered.output = std::move(recoverable.output);
+                filtered.output_tokens = static_cast<int>(recoverable.output_tokens);
+                filtered.tokens_saved = static_cast<int>(recoverable.tokens_saved);
+                ccr_artifact_id = std::move(recoverable.artifact_id);
             } else {
                 filtered.output = input;
                 filtered.output_tokens = filtered.input_tokens;

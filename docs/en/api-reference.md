@@ -33,6 +33,11 @@ Retrieve the original content for an Axon CCR artifact emitted by lossy compress
 
 Returns `artifact_id`, `kind`, `source_ref`, `content`, and `token_estimate`.
 
+Artifacts are looked up in the DuckDB index first, then in the file sidecar
+(`.axon/ccr/<artifact_id>.json`) — the sidecar is where `axon filter` stores
+artifacts while another process holds the index write lock, so compressed
+shell output stays recoverable in that scenario too.
+
 ---
 
 ### `get_overview`
@@ -57,7 +62,7 @@ Which files depend on (or are depended on by) the given files — bidirectional 
 
 ### `get_callers`
 
-Locate a symbol by name, then return the list of files that import the file defining it.
+Locate a symbol by name, then return the list of files that import the file defining it — or a same-stem peer connected by an import edge (so a symbol defined in `foo.cpp` also counts importers of `foo.hpp`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -79,7 +84,7 @@ Signatures-only view (no function bodies) of one or more files.
 
 ### `get_tests_for`
 
-Test files (by path convention) that import/reference the given files.
+Test files (by path convention) that import/reference the given files or a same-stem peer (so tests including `foo.hpp` count as covering `foo.cpp`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -439,8 +444,8 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 | `axon web --group=<name>` | Browser graph explorer over a named registry group |
 | `axon lsp` | Language Server Protocol stdio server for workspace symbols, document symbols, definitions, and references |
 | `axon watch [path] [--interval-ms=N] [--debounce-ms=N]` | Portable polling watcher for external edits; reindexes modified files and prunes deletions |
-| `axon artifact-retrieve <artifact_id>` | Print original content for a CCR artifact |
-| `axon filter <auto\|diff\|lint\|log\|grep\|json\|package\|test\|tsc\|text> [--budget=N] [--metrics=json]` | Filter stdin shell output with type-aware compression, CCR recovery markers, grep/rg grouping, log level/dedup summaries, JSON schema summaries, lint rule summaries, package-manager summaries, test failure summaries, TypeScript diagnostic grouping, safe passthrough, and optional JSON stderr metrics |
+| `axon artifact-retrieve <artifact_id>` | Print original content for a CCR artifact (looks up the DuckDB index, then the `.axon/ccr/` file sidecar, then the lock-holding peer process) |
+| `axon filter <auto\|diff\|lint\|log\|grep\|json\|package\|test\|tsc\|text> [--budget=N] [--metrics=json]` | Filter stdin shell output with type-aware compression, CCR recovery markers, grep/rg grouping, log level/dedup summaries, JSON schema summaries, lint rule summaries, package-manager summaries, test failure summaries, TypeScript diagnostic grouping, safe passthrough, and optional JSON stderr metrics; when another process holds the index lock, artifacts are stored in the `.axon/ccr/` file sidecar so output stays recoverable |
 | `axon status` | Show index summary for the current project |
 
 ### Project config (`.axon/config.toml`)
