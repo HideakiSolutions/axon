@@ -52,18 +52,36 @@ public:
             return;
         }
 
-        std::promise<CFRunLoopRef> loop_promise;
-        auto loop_future = loop_promise.get_future();
-        runloop_thread_ = std::thread([this, &loop_promise]() {
-            loop_promise.set_value(CFRunLoopGetCurrent());
-            CFRunLoopRun();
+        // Schedule AND start the stream from inside the run-loop thread,
+        // before CFRunLoopRun. A loop with no sources returns immediately —
+        // scheduling from the outside raced that exit, leaving the stream on
+        // a dead loop and CFRunLoopStop dereferencing a freed CFRunLoopRef
+        // (segfaulted the whole test binary on macOS CI). The loop ref is
+        // retained because we use it from other threads after the race.
+        std::promise<bool> started_promise;
+        auto started = started_promise.get_future();
+        runloop_thread_ = std::thread([this, &started_promise]() {
+            runloop_ = CFRunLoopGetCurrent();
+            CFRetain(runloop_);
+            FSEventStreamScheduleWithRunLoop(stream_, runloop_, kCFRunLoopDefaultMode);
+            if (!FSEventStreamStart(stream_)) {
+                FSEventStreamInvalidate(stream_); // also unschedules
+                FSEventStreamRelease(stream_);
+                stream_ = nullptr;
+                started_promise.set_value(false);
+                return; // never entered CFRunLoopRun
+            }
+            started_promise.set_value(true);
+            CFRunLoopRun(); // the stream keeps the loop alive until stopped
         });
-        runloop_ = loop_future.get();
 
-        FSEventStreamScheduleWithRunLoop(stream_, runloop_, kCFRunLoopDefaultMode);
-        if (!FSEventStreamStart(stream_)) {
+        if (!started.get()) {
             error = "FSEventStreamStart failed";
-            teardown();
+            runloop_thread_.join();
+            if (runloop_) {
+                CFRelease(runloop_);
+                runloop_ = nullptr;
+            }
             return;
         }
         ok_ = true;
@@ -107,9 +125,12 @@ private:
             FSEventStreamRelease(stream_);
             stream_ = nullptr;
         }
-        if (runloop_) CFRunLoopStop(runloop_);
+        if (runloop_) CFRunLoopStop(runloop_); // wakes CFRunLoopRun → thread exits
         if (runloop_thread_.joinable()) runloop_thread_.join();
-        runloop_ = nullptr;
+        if (runloop_) {
+            CFRelease(runloop_);
+            runloop_ = nullptr;
+        }
     }
 
     static void callback(ConstFSEventStreamRef, void* info, size_t num_events, void* event_paths,
