@@ -294,6 +294,50 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
     }
 }
 
+// nlohmann's value() throws type_error 302 when a key is present but null —
+// a common agent mistake that leaked "[json.exception.type_error.302] ..."
+// through tool errors. Treat null / wrong-typed values as absent instead.
+static int64_t arg_int64(const json& args, const char* key, int64_t fallback) {
+    auto it = args.find(key);
+    if (it == args.end() || !it->is_number()) return fallback;
+    return it->get<int64_t>();
+}
+
+static std::string arg_str(const json& args, const char* key, const std::string& fallback) {
+    auto it = args.find(key);
+    if (it == args.end() || !it->is_string()) return fallback;
+    return it->get<std::string>();
+}
+
+// C/C++-style declaration/definition splits: a symbol defined in ccr.cpp is
+// consumed through ccr.hpp, so callers/tests of the .cpp must also count
+// importers of same-stem peers connected to it by an import edge (in either
+// direction). Returns the file itself plus those peers.
+static std::vector<int64_t> definition_surface(const ServerContext& ctx, int64_t file_id) {
+    std::vector<int64_t> ids{file_id};
+    auto stem_of = [](const std::string& path) {
+        auto base = path.substr(path.find_last_of("/\\") + 1);
+        auto dot = base.find_last_of('.');
+        return dot == std::string::npos ? base : base.substr(0, dot);
+    };
+    auto path_it = ctx.graph.id_to_path.find(file_id);
+    if (path_it == ctx.graph.id_to_path.end()) return ids;
+    const std::string stem = stem_of(path_it->second);
+
+    auto consider = [&](int64_t other) {
+        auto oit = ctx.graph.id_to_path.find(other);
+        if (oit == ctx.graph.id_to_path.end()) return;
+        if (stem_of(oit->second) != stem) return;
+        if (std::find(ids.begin(), ids.end(), other) == ids.end())
+            ids.push_back(other);
+    };
+    if (auto out = ctx.graph.outgoing.find(file_id); out != ctx.graph.outgoing.end())
+        for (int64_t o : out->second) consider(o);
+    if (auto in = ctx.graph.incoming.find(file_id); in != ctx.graph.incoming.end())
+        for (int64_t o : in->second) consider(o);
+    return ids;
+}
+
 static json db_unavailable_result(const ServerContext& ctx) {
     std::string detail = ctx.db_error.empty()
         ? "Axon index database is not initialized."
@@ -790,19 +834,28 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             int64_t file_id = sm.GetValue(1, i).GetValue<int64_t>();
             std::string callee_file = sm.GetValue(6, i).ToString();
 
-            // File-level callers: files that import the file containing the symbol.
-            // Edges are file-granular in the current schema, so this is the tightest
-            // lower bound on true caller set. The agent should narrow with get_skeleton.
+            // File-level callers: files that import the file containing the
+            // symbol — or a same-stem peer of it (declaration header for a
+            // symbol defined in a .cpp/.c). Edges are file-granular in the
+            // current schema, so this is the tightest lower bound on the true
+            // caller set. The agent should narrow with get_skeleton.
             json callers = json::array();
-            auto it = ctx.graph.incoming.find(file_id);
-            if (it != ctx.graph.incoming.end()) {
+            auto surface = definition_surface(ctx, file_id);
+            std::unordered_set<std::string> seen_callers;
+            for (int64_t sid : surface) {
+                auto it = ctx.graph.incoming.find(sid);
+                if (it == ctx.graph.incoming.end()) continue;
                 for (int64_t src_id : it->second) {
+                    if (std::find(surface.begin(), surface.end(), src_id) != surface.end())
+                        continue;   // ccr.cpp importing ccr.hpp is not a caller
                     auto pit = ctx.graph.id_to_path.find(src_id);
                     if (pit == ctx.graph.id_to_path.end()) continue;
+                    if (!seen_callers.insert(pit->second).second) continue;
                     callers.push_back(pit->second);
                     total_callers++;
                     if (total_callers >= limit) break;
                 }
+                if (total_callers >= limit) break;
             }
 
             // Symbol-level callers (populated when granularity=symbol)
@@ -842,7 +895,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         return make_tool_result({
             {"symbol_name",    sym_name},
             {"matches",        matches},
-            {"note", "caller_files: files importing the defining file. caller_symbols: symbol-level callers (populated when granularity=symbol). Use get_skeleton(caller_files) to narrow to specific call sites."}
+            {"note", "caller_files: files importing the defining file or a same-stem peer (e.g. the header declaring a symbol defined in a .cpp). caller_symbols: symbol-level callers (populated when granularity=symbol). Use get_skeleton(caller_files) to narrow to specific call sites."}
         });
     }
 
@@ -862,8 +915,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             }
 
             json tests = json::array();
-            auto in = ctx.graph.incoming.find(it->second);
-            if (in != ctx.graph.incoming.end()) {
+            // Include importers of same-stem peers (declaration headers), so
+            // tests that include foo.hpp count as covering foo.cpp.
+            for (int64_t sid : definition_surface(ctx, it->second)) {
+                auto in = ctx.graph.incoming.find(sid);
+                if (in == ctx.graph.incoming.end()) continue;
                 for (int64_t src_id : in->second) {
                     auto p2 = ctx.graph.id_to_path.find(src_id);
                     if (p2 == ctx.graph.id_to_path.end()) continue;
@@ -887,7 +943,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             {"per_file",     result},
             {"all_tests",    std::vector<std::string>(all_tests.begin(), all_tests.end())},
             {"total_tests",  (int)all_tests.size()},
-            {"note", "Tests are detected by path convention (_test.*, *.spec.*, /tests/, etc) among files that import the target. Check get_skeleton(tests) to confirm coverage."}
+            {"note", "Tests are detected by path convention (_test.*, *.spec.*, /tests/, etc) among files that import the target or a same-stem peer (e.g. the header declaring symbols defined in a .cpp). Check get_skeleton(tests) to confirm coverage."}
         });
     }
 
@@ -1240,8 +1296,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "session_start") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
-        std::string label = args.value("label", "");
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
+        std::string label = arg_str(args, "label", "");
         if (thread_id < 0)
             return make_tool_result({{"error","thread_id is required"}}, true);
         int64_t id = session_start(*ctx.db, thread_id, label);
@@ -1250,7 +1306,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "session_end") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t session_id = args.value("session_id", int64_t(-1));
+        int64_t session_id = arg_int64(args, "session_id", -1);
         bool compute_digest = args.value("compute_digest", true);
         if (session_id < 0)
             return make_tool_result({{"error","session_id is required"}}, true);
@@ -1260,9 +1316,9 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "turn_add") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t session_id = args.value("session_id", int64_t(-1));
-        std::string role    = args.value("role", "user");
-        std::string content = args.value("content", "");
+        int64_t session_id = arg_int64(args, "session_id", -1);
+        std::string role    = arg_str(args, "role", "user");
+        std::string content = arg_str(args, "content", "");
         if (session_id < 0 || content.empty())
             return make_tool_result({{"error","session_id and content are required"}}, true);
         int64_t id = turn_add(*ctx.db, ctx.model_ready() ? ctx.model.get() : nullptr,
@@ -1276,7 +1332,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
         std::string query = args.value("query", "");
         int limit         = args.value("limit", 5);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
         auto hits = turn_search(*ctx.db, *ctx.model, query, limit, thread_id);
         json result = json::array();
         for (const auto& h : hits)
@@ -1289,7 +1345,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "session_get") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t session_id = args.value("session_id", int64_t(-1));
+        int64_t session_id = arg_int64(args, "session_id", -1);
         int limit          = args.value("limit", 500);
         if (session_id < 0)
             return make_tool_result({{"error","session_id is required"}}, true);
@@ -1302,7 +1358,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "thread_get") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
         if (thread_id < 0)
             return make_tool_result({{"error","thread_id is required"}}, true);
         auto sessions = thread_get_sessions(*ctx.db, thread_id);
@@ -1316,12 +1372,14 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "anchor_link") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t turn_id   = args.value("turn_id",   int64_t(-1));
-        int64_t file_id   = args.value("file_id",   int64_t(-1));
-        int64_t symbol_id = args.value("symbol_id", int64_t(-1));
-        std::string kind  = args.value("kind", "mentions");
+        int64_t turn_id   = arg_int64(args, "turn_id",   -1);
+        int64_t file_id   = arg_int64(args, "file_id",   -1);
+        int64_t symbol_id = arg_int64(args, "symbol_id", -1);
+        std::string kind  = arg_str(args, "kind", "mentions");
         if (turn_id < 0)
             return make_tool_result({{"error","turn_id is required"}}, true);
+        if (file_id < 0 && symbol_id < 0)
+            return make_tool_result({{"error","file_id or symbol_id is required (an anchor needs a target)"}}, true);
         int64_t id = anchor_link(*ctx.db, turn_id, file_id, symbol_id, kind);
         return make_tool_result({{"anchor_id",id},{"turn_id",turn_id},
                                  {"file_id",file_id},{"symbol_id",symbol_id},{"kind",kind}});
@@ -1333,7 +1391,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
         std::string query = args.value("query", "");
         int limit         = args.value("limit", 5);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
 
         // Resolve optional file_paths to file_ids
         std::vector<int64_t> file_ids;

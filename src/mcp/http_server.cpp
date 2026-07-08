@@ -22,6 +22,7 @@
 #endif
 #include <csignal>    // SIGINT, signal() — available on all platforms
 #include <chrono>
+#include <unordered_set>
 #include <sstream>
 #include <iostream>
 
@@ -328,8 +329,11 @@ static std::string handle_request(const std::string& method, const std::string& 
                 }
             }
 
+            std::unordered_set<std::string> node_files;
+            for (const auto& n : nodes)
+                if (n.contains("path")) node_files.insert(n["path"].get<std::string>());
             json meta = {
-                {"files",   (int)nodes.size()},
+                {"files",   (int)node_files.size()},
                 {"symbols", (int)nodes.size()},
                 {"edges",   (int)edges.size()},
                 {"project", ctx.cfg.project_root.filename().string()}
@@ -652,35 +656,54 @@ static std::string handle_request(const std::string& method, const std::string& 
                 if (!pivot.empty()) explicit_pivots.push_back(pivot);
         }
 
+        auto capsule_to_json = [](const axon::ContextCapsule& c,
+                                  const char* cache_state) -> std::string {
+            json pivot_files = json::array();
+            for (const auto& f : c.pivot_files)
+                pivot_files.push_back({{"path", f.path}, {"content", f.content},
+                                       {"source_ref", f.source_ref},
+                                       {"expand_command", f.expand_command},
+                                       {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
+            json support_files = json::array();
+            for (const auto& f : c.support_files)
+                support_files.push_back({{"path", f.path}, {"content", f.content},
+                                         {"source_ref", f.source_ref},
+                                         {"expand_command", f.expand_command},
+                                         {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
+            json cap = {{"query",          c.query},
+                        {"pivot_files",    pivot_files},
+                        {"support_files",  support_files},
+                        {"token_estimate", c.token_estimate},
+                        {"compression", {{"input_tokens", c.compression_input_tokens},
+                                         {"output_tokens", c.compression_output_tokens},
+                                         {"tokens_saved", c.compression_tokens_saved}}},
+                        {"ccr_artifact_ids", c.ccr_artifact_ids},
+                        {"total_files",    c.total_files}};
+            if (cache_state) cap["cache"] = cache_state;
+            return json{{"capsule", cap}}.dump();
+        };
+
+        // Same cache policy as the MCP handler: only query-driven capsules are
+        // eligible (explicit pivots steer assembly and must not reuse entries
+        // generated for the implicit-pivot path). Hits don't need the model.
+        const std::string epoch = axon::current_project_epoch(*ctx.db);
+        const bool eligible_for_cache = explicit_pivots.empty();
+        std::string cache_key;
+        if (eligible_for_cache) {
+            cache_key = axon::compute_capsule_cache_key(q, budget, epoch);
+            if (auto hit = axon::capsule_cache_lookup(*ctx.db, cache_key, epoch))
+                return capsule_to_json(*hit, "hit");
+        }
+
         if (!ctx.model_ready())
             return json{{"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}.dump();
 
         auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model,
                                               ctx.graph, ctx.cfg.project_root, budget);
+        if (eligible_for_cache)
+            axon::capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
 
-        json pivot_files = json::array();
-        for (const auto& f : capsule.pivot_files)
-            pivot_files.push_back({{"path", f.path}, {"content", f.content},
-                                   {"source_ref", f.source_ref},
-                                   {"expand_command", f.expand_command},
-                                   {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
-
-        json support_files = json::array();
-        for (const auto& f : capsule.support_files)
-            support_files.push_back({{"path", f.path}, {"content", f.content},
-                                     {"source_ref", f.source_ref},
-                                     {"expand_command", f.expand_command},
-                                     {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
-
-        return json{{"capsule", {{"query",          capsule.query},
-                                 {"pivot_files",    pivot_files},
-                                 {"support_files",  support_files},
-                                 {"token_estimate", capsule.token_estimate},
-                                 {"compression", {{"input_tokens", capsule.compression_input_tokens},
-                                                  {"output_tokens", capsule.compression_output_tokens},
-                                                  {"tokens_saved", capsule.compression_tokens_saved}}},
-                                 {"ccr_artifact_ids", capsule.ccr_artifact_ids},
-                                 {"total_files",    capsule.total_files}}}}.dump();
+        return capsule_to_json(capsule, nullptr);
     }
 
     // GET /api/artifact/<artifact_id>
@@ -833,8 +856,9 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
                 int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - start).count();
                 int64_t tokens = static_cast<int64_t>(response_body.size() / 4);
+                bool cache_hit = response_body.find("\"cache\":\"hit\"") != std::string::npos;
                 axon::record_telemetry(ctx.cfg, ctx.db.get(), {
-                    path, "http", latency_ms, tokens, tokens * 4, tokens * 3, false, ""
+                    path, "http", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""
                 });
             }
             std::string content_type = (path == "/" || path == "/index.html") ? "text/html" : "application/json";

@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Registry writes are now atomic (write-to-temp + rename) so concurrent serves never read a half-written `registry.json`.
 
+### Fixed
+- `get_callers` and `get_tests_for` now see through C/C++ declaration/definition splits: a symbol defined in `foo.cpp` also counts importers of same-stem peers connected by an import edge (`foo.hpp`), instead of returning an empty caller/test list.
+- `GET /api/capsule` now uses the capsule cache (same eligibility rules as the MCP tool) and reports `"cache": "hit"`; HTTP telemetry records cache hits so `/api/metrics` attributes them to the cache layer.
+- `meta.files` in `GET /api/graph?mode=symbol` counted symbol nodes instead of distinct files.
+- Dialogue-layer tools no longer leak raw `[json.exception.type_error.302]` messages when an argument is present but `null`; `anchor_link` now requires `file_id` or `symbol_id` (an anchor needs a target).
+
 ## [1.2.5] — 2026-07-01
 
 ### Added

@@ -62,7 +62,7 @@ Which files depend on (or are depended on by) the given files — bidirectional 
 
 ### `get_callers`
 
-Locate a symbol by name, then return the list of files that import the file defining it.
+Locate a symbol by name, then return the list of files that import the file defining it — or a same-stem peer connected by an import edge (so a symbol defined in `foo.cpp` also counts importers of `foo.hpp`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -84,7 +84,7 @@ Signatures-only view (no function bodies) of one or more files.
 
 ### `get_tests_for`
 
-Test files (by path convention) that import/reference the given files.
+Test files (by path convention) that import/reference the given files or a same-stem peer (so tests including `foo.hpp` count as covering `foo.cpp`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
