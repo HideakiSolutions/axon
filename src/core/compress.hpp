@@ -7,7 +7,24 @@ namespace axon {
 
 enum class CapsuleCompression { Off, Body };
 
-enum class OutputKind { SourceCode, Json, Diff, Log, Markdown, PlainText, Binary };
+// First group: shapes the compression classifier can detect. Second group:
+// kinds forced by an explicit `axon filter <cmd>` whose specialized filter ran
+// (classify_output never returns these; they exist so metrics name the filter
+// that actually processed the output instead of lumping into plain_text).
+enum class OutputKind {
+    SourceCode,
+    Json,
+    Diff,
+    Log,
+    Markdown,
+    PlainText,
+    Binary,
+    Grep,
+    Tsc,
+    Test,
+    Package,
+    Lint
+};
 
 // Map "off" → Off, "body" → Body; anything else → Off (safe default).
 CapsuleCompression compression_from_string(const std::string& s);

@@ -43,9 +43,12 @@ OutputKind forced_kind_for_command(const std::string& command, const std::string
     if (command == "diff") return OutputKind::Diff;
     if (command == "log") return OutputKind::Log;
     if (command == "json") return OutputKind::Json;
-    if (command == "grep" || command == "text" || command == "tsc" || command == "test" ||
-        command == "package" || command == "lint")
-        return OutputKind::PlainText;
+    if (command == "grep") return OutputKind::Grep;
+    if (command == "tsc") return OutputKind::Tsc;
+    if (command == "test") return OutputKind::Test;
+    if (command == "package") return OutputKind::Package;
+    if (command == "lint") return OutputKind::Lint;
+    if (command == "text") return OutputKind::PlainText;
     return classify_output(input);
 }
 

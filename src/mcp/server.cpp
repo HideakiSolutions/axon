@@ -600,7 +600,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                                         compression == CapsuleCompression::Off;
         std::string cache_key;
         if (eligible_for_cache) {
-            cache_key = compute_capsule_cache_key(query, budget, epoch);
+            cache_key = compute_capsule_cache_key(query, budget, epoch, axon::VERSION);
             if (auto hit = capsule_cache_lookup(*ctx.db, cache_key, epoch)) {
                 json pf = json::array();
                 for (const auto& f : hit->pivot_files)

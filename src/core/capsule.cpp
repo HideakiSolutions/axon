@@ -632,10 +632,15 @@ std::string current_project_epoch(Database& db) {
 }
 
 std::string compute_capsule_cache_key(const std::string& query, int token_budget,
-                                      const std::string& epoch) {
+                                      const std::string& epoch, const std::string& version) {
     // Token budget is part of the key because a 4k-budget capsule and an
-    // 8k-budget capsule for the same query render differently.
-    std::string composite = query + "|" + std::to_string(token_budget) + "|" + epoch;
+    // 8k-budget capsule for the same query render differently. The binary
+    // version is part of the key because assembly logic changes across
+    // releases — a pre-upgrade entry must not outlive the code that built it
+    // (observed: a budget-violating capsule cached by 1.2.8 was still served
+    // by 1.2.9 until the index epoch happened to change).
+    std::string composite =
+        query + "|" + std::to_string(token_budget) + "|" + epoch + "|" + version;
     return blake3_hex(composite);
 }
 

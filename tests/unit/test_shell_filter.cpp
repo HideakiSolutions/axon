@@ -18,8 +18,8 @@ static std::string make_large_diff() {
 static std::string make_large_log() {
     std::string log;
     for (int i = 0; i < 160; ++i) {
-        log += "2026-06-30T10:00:" + std::to_string(i % 60) +
-               "Z INFO worker processed item " + std::to_string(i) + "\n";
+        log += "2026-06-30T10:00:" + std::to_string(i % 60) + "Z INFO worker processed item " +
+               std::to_string(i) + "\n";
     }
     log += "2026-06-30T10:02:41Z ERROR failed to persist final item\n";
     return log;
@@ -29,8 +29,8 @@ static std::string make_rich_log_output() {
     std::string log;
     for (int i = 0; i < 70; ++i) {
         log += "Jul 01 10:" + std::to_string(10 + (i % 40)) +
-               ":01 host systemd[1234]: Started app.slice worker scope " +
-               std::to_string(i) + ".\n";
+               ":01 host systemd[1234]: Started app.slice worker scope " + std::to_string(i) +
+               ".\n";
     }
     for (int i = 0; i < 30; ++i) {
         log += "Jul 01 10:40:" + std::to_string(10 + (i % 30)) +
@@ -49,30 +49,28 @@ static std::string make_large_grep() {
     std::string out;
     for (int file = 0; file < 8; ++file) {
         for (int line = 0; line < 12; ++line) {
-            out += "src/module" + std::to_string(file) + ".cpp:" +
-                   std::to_string(10 + line) +
-                   ": matched symbol with very long implementation detail payload payload payload payload payload payload payload\n";
+            out += "src/module" + std::to_string(file) + ".cpp:" + std::to_string(10 + line) +
+                   ": matched symbol with very long implementation detail payload payload payload "
+                   "payload payload payload payload\n";
         }
     }
     return out;
 }
 
 static std::string make_large_json() {
-    std::string out =
-        "{\n"
-        "  \"project\": \"axon\",\n"
-        "  \"secret\": \"do-not-repeat-this-value\",\n"
-        "  \"packages\": [\n";
+    std::string out = "{\n"
+                      "  \"project\": \"axon\",\n"
+                      "  \"secret\": \"do-not-repeat-this-value\",\n"
+                      "  \"packages\": [\n";
     for (int i = 0; i < 80; ++i) {
-        out += "    {\"name\":\"pkg-" + std::to_string(i) +
-               "\",\"version\":\"1.2." + std::to_string(i) +
+        out += "    {\"name\":\"pkg-" + std::to_string(i) + "\",\"version\":\"1.2." +
+               std::to_string(i) +
                "\",\"dependencies\":{\"duckdb\":\"^1.0.0\",\"tree-sitter\":\"^0.22.0\"}}";
         out += i == 79 ? "\n" : ",\n";
     }
-    out +=
-        "  ],\n"
-        "  \"metadata\": {\"build\":\"debug\",\"platform\":\"linux\",\"retries\":3}\n"
-        "}\n";
+    out += "  ],\n"
+           "  \"metadata\": {\"build\":\"debug\",\"platform\":\"linux\",\"retries\":3}\n"
+           "}\n";
     return out;
 }
 
@@ -84,13 +82,13 @@ static std::string make_large_tsc_output() {
             int col = 5 + (i % 4);
             std::string code = i % 3 == 0 ? "TS2322" : (i % 3 == 1 ? "TS2304" : "TS7006");
             out += "editors/vscode/src/module" + std::to_string(file) + ".ts(" +
-                   std::to_string(line) + "," + std::to_string(col) + "): error " +
-                   code + ": ";
+                   std::to_string(line) + "," + std::to_string(col) + "): error " + code + ": ";
             if (file == 0 && i == 0) {
                 out += "Short mismatch\n";
                 out += "  Type 'string' is not assignable to type 'number'.\n";
             } else {
-                out += "Type mismatch in generated fixture with a long explanation payload payload payload payload " +
+                out += "Type mismatch in generated fixture with a long explanation payload payload "
+                       "payload payload " +
                        std::to_string(i) + "\n";
             }
         }
@@ -100,9 +98,11 @@ static std::string make_large_tsc_output() {
 }
 
 static std::string make_large_pytest_output() {
-    std::string out = "\n==================================== ERRORS ====================================\n";
+    std::string out =
+        "\n==================================== ERRORS ====================================\n";
     for (int i = 0; i < 30; ++i) {
-        out += "________ ERROR collecting tests/unit/test_module_" + std::to_string(i) + ".py ________\n";
+        out += "________ ERROR collecting tests/unit/test_module_" + std::to_string(i) +
+               ".py ________\n";
         out += "ImportError while importing test module '/repo/tests/unit/test_module_" +
                std::to_string(i) + ".py'.\n";
         out += "Hint: make sure your test modules/packages have valid Python names.\n";
@@ -127,16 +127,16 @@ static std::string make_large_ctest_failure_output() {
     for (int i = 0; i < 40; ++i) {
         out += "    Start " + std::to_string(i + 1) + ": test_case_" + std::to_string(i) + "\n";
         if (i % 10 == 0) {
-            out += std::to_string(i + 1) + "/40 Test #" + std::to_string(i + 1) +
-                   ": test_case_" + std::to_string(i) + " .................***Failed    0.01 sec\n";
+            out += std::to_string(i + 1) + "/40 Test #" + std::to_string(i + 1) + ": test_case_" +
+                   std::to_string(i) + " .................***Failed    0.01 sec\n";
             out += "/repo/tests/unit/test_case.cpp:" + std::to_string(40 + i) + ": Failure\n";
             out += "Expected equality of these values:\n";
             out += "  actual_value\n";
             out += "  expected_value\n";
             out += "[  FAILED  ] Fixture.Case" + std::to_string(i) + "\n";
         } else {
-            out += std::to_string(i + 1) + "/40 Test #" + std::to_string(i + 1) +
-                   ": test_case_" + std::to_string(i) + " ................   Passed    0.01 sec\n";
+            out += std::to_string(i + 1) + "/40 Test #" + std::to_string(i + 1) + ": test_case_" +
+                   std::to_string(i) + " ................   Passed    0.01 sec\n";
         }
     }
     out += "90% tests passed, 4 tests failed out of 40\n";
@@ -161,16 +161,15 @@ static std::string make_large_package_output() {
 }
 
 static std::string make_package_error_output() {
-    std::string out =
-        "\n> axon-vscode@1.2.0 typecheck\n"
-        "> tsc -p ./ --noEmit\n"
-        "\n"
-        "npm ERR! code 127\n"
-        "npm ERR! path /repo/editors/vscode\n"
-        "sh: 1: tsc: not found\n";
+    std::string out = "\n> axon-vscode@1.2.0 typecheck\n"
+                      "> tsc -p ./ --noEmit\n"
+                      "\n"
+                      "npm ERR! code 127\n"
+                      "npm ERR! path /repo/editors/vscode\n"
+                      "sh: 1: tsc: not found\n";
     for (int i = 0; i < 60; ++i) {
-        out += "npm timing idealTree:node_modules/package-" + std::to_string(i) +
-               " Completed in " + std::to_string(i) + "ms\n";
+        out += "npm timing idealTree:node_modules/package-" + std::to_string(i) + " Completed in " +
+               std::to_string(i) + "ms\n";
     }
     return out;
 }
@@ -180,9 +179,9 @@ static std::string make_large_ruff_output() {
     for (int file = 0; file < 12; ++file) {
         for (int i = 0; i < 8; ++i) {
             std::string code = i % 3 == 0 ? "F401" : (i % 3 == 1 ? "E501" : "B006");
-            out += "src/module_" + std::to_string(file) + ".py:" +
-                   std::to_string(10 + i) + ":" + std::to_string(5 + i) + ": " +
-                   code + " lint message with repeated explanatory payload payload payload " +
+            out += "src/module_" + std::to_string(file) + ".py:" + std::to_string(10 + i) + ":" +
+                   std::to_string(5 + i) + ": " + code +
+                   " lint message with repeated explanatory payload payload payload " +
                    std::to_string(i) + "\n";
         }
     }
@@ -191,12 +190,13 @@ static std::string make_large_ruff_output() {
 }
 
 static std::string make_eslint_output() {
-    std::string out =
-        "/repo/src/app.ts\n"
-        "  10:5  error    Unexpected console statement  no-console\n"
-        "  11:7  warning  'value' is assigned a value but never used  @typescript-eslint/no-unused-vars\n";
+    std::string out = "/repo/src/app.ts\n"
+                      "  10:5  error    Unexpected console statement  no-console\n"
+                      "  11:7  warning  'value' is assigned a value but never used  "
+                      "@typescript-eslint/no-unused-vars\n";
     for (int i = 0; i < 40; ++i) {
-        out += "  " + std::to_string(20 + i) + ":3  error  Repeated lint failure payload payload payload  no-console\n";
+        out += "  " + std::to_string(20 + i) +
+               ":3  error  Repeated lint failure payload payload payload  no-console\n";
     }
     out += "\n"
            "/repo/src/other.ts\n"
@@ -297,11 +297,10 @@ TEST(ShellFilter, GrepOutputGroupsByFileAndSummarizesOmissions) {
 }
 
 TEST(ShellFilter, GrepOutputTruncatesVeryLongLines) {
-    std::string input =
-        "src/a.cpp:10:" + std::string(500, 'x') + "\n" +
-        "src/a.cpp:11:" + std::string(500, 'y') + "\n" +
-        "src/a.cpp:12:" + std::string(500, 'z') + "\n" +
-        "src/a.cpp:13:" + std::string(500, 'q') + "\n";
+    std::string input = "src/a.cpp:10:" + std::string(500, 'x') + "\n" +
+                        "src/a.cpp:11:" + std::string(500, 'y') + "\n" +
+                        "src/a.cpp:12:" + std::string(500, 'z') + "\n" +
+                        "src/a.cpp:13:" + std::string(500, 'q') + "\n";
     auto result = axon::filter_shell_output("rg", input, 220);
     EXPECT_TRUE(result.changed);
     EXPECT_NE(result.output.find("[truncated]"), std::string::npos);
@@ -349,7 +348,7 @@ TEST(ShellFilter, JsonOutputRespectsTightBudget) {
 TEST(ShellFilter, TscOutputGroupsDiagnosticsByFileAndCode) {
     auto result = axon::filter_shell_output("tsc", make_large_tsc_output(), 500);
     EXPECT_EQ(result.command, "tsc");
-    EXPECT_EQ(result.kind, axon::OutputKind::PlainText);
+    EXPECT_EQ(result.kind, axon::OutputKind::Tsc);
     EXPECT_TRUE(result.changed);
     EXPECT_GT(result.tokens_saved, 0);
     EXPECT_NE(result.output.find("# axon tsc summary"), std::string::npos);
@@ -384,11 +383,12 @@ TEST(ShellFilter, TscOutputRespectsTightBudget) {
 TEST(ShellFilter, TestOutputKeepsPytestFailuresAndSummary) {
     auto result = axon::filter_shell_output("pytest", make_large_pytest_output(), 700);
     EXPECT_EQ(result.command, "test");
-    EXPECT_EQ(result.kind, axon::OutputKind::PlainText);
+    EXPECT_EQ(result.kind, axon::OutputKind::Test);
     EXPECT_TRUE(result.changed);
     EXPECT_GT(result.tokens_saved, 0);
     EXPECT_NE(result.output.find("# axon test summary"), std::string::npos);
-    EXPECT_NE(result.output.find("ERROR collecting tests/unit/test_module_0.py"), std::string::npos);
+    EXPECT_NE(result.output.find("ERROR collecting tests/unit/test_module_0.py"),
+              std::string::npos);
     EXPECT_NE(result.output.find("ModuleNotFoundError"), std::string::npos);
     EXPECT_NE(result.output.find("short test summary info"), std::string::npos);
     EXPECT_LT(result.output_tokens, result.input_tokens);
@@ -427,7 +427,7 @@ TEST(ShellFilter, TestOutputRespectsTightBudget) {
 TEST(ShellFilter, PackageOutputSummarizesInstallOperations) {
     auto result = axon::filter_shell_output("npm", make_large_package_output(), 350);
     EXPECT_EQ(result.command, "package");
-    EXPECT_EQ(result.kind, axon::OutputKind::PlainText);
+    EXPECT_EQ(result.kind, axon::OutputKind::Package);
     EXPECT_TRUE(result.changed);
     EXPECT_GT(result.tokens_saved, 0);
     EXPECT_NE(result.output.find("# axon package summary"), std::string::npos);
@@ -474,7 +474,7 @@ TEST(ShellFilter, PackageOutputRespectsTightBudget) {
 TEST(ShellFilter, LintOutputGroupsRuffDiagnostics) {
     auto result = axon::filter_shell_output("ruff", make_large_ruff_output(), 420);
     EXPECT_EQ(result.command, "lint");
-    EXPECT_EQ(result.kind, axon::OutputKind::PlainText);
+    EXPECT_EQ(result.kind, axon::OutputKind::Lint);
     EXPECT_TRUE(result.changed);
     EXPECT_GT(result.tokens_saved, 0);
     EXPECT_NE(result.output.find("# axon lint summary"), std::string::npos);
@@ -512,4 +512,22 @@ TEST(ShellFilter, LintOutputRespectsTightBudget) {
     EXPECT_TRUE(result.changed);
     EXPECT_LE(result.output_tokens, 150);
     EXPECT_NE(result.output.find("# axon lint summary"), std::string::npos);
+}
+
+TEST(ShellFilter, SpecializedCommandsReportTheirOwnKind) {
+    // Metrics used to lump every specialized filter into plain_text; the kind
+    // must name the filter that actually ran.
+    EXPECT_EQ(axon::filter_shell_output("grep", make_large_grep(), 200).kind,
+              axon::OutputKind::Grep);
+    EXPECT_EQ(axon::filter_shell_output("tsc", make_large_tsc_output(), 200).kind,
+              axon::OutputKind::Tsc);
+    EXPECT_EQ(axon::filter_shell_output("test", make_large_pytest_output(), 200).kind,
+              axon::OutputKind::Test);
+    EXPECT_EQ(axon::filter_shell_output("package", make_large_package_output(), 200).kind,
+              axon::OutputKind::Package);
+    EXPECT_EQ(axon::filter_shell_output("lint", make_large_ruff_output(), 200).kind,
+              axon::OutputKind::Lint);
+    // "text" stays the generic classifier bucket.
+    EXPECT_EQ(axon::filter_shell_output("text", "plain words\n", 200).kind,
+              axon::OutputKind::PlainText);
 }
