@@ -450,6 +450,11 @@ ContextCapsule assemble_capsule(const std::string& query,
                 cf.content = skel;
                 cf.is_skeleton = true;
                 cf.token_estimate = estimate_tokens(skel);
+                // A signature-heavy file can skeletonize to more than the whole
+                // budget; appending it unchecked is how an 8k-budget capsule
+                // reached 11.7k tokens. Skip what doesn't fit and keep trying
+                // smaller candidates.
+                if (tokens_used + cf.token_estimate > token_budget) continue;
                 tokens_used += cf.token_estimate;
                 cap.support_files.push_back(std::move(cf));
             }
