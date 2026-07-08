@@ -22,6 +22,9 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
+# Hermetic registry: `axon index` below must not pollute ~/.axon/registry.json.
+export AXON_HOME="$tmpdir/axon-home"
+
 mkdir -p "$tmpdir/src/auth"
 cat > "$tmpdir/package.json" <<'JSON'
 {"name":"axon-mcp-capsule-smoke","private":true}

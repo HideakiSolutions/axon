@@ -24,7 +24,8 @@ struct RegistryData {
     std::vector<std::pair<std::string, std::vector<std::string>>> groups;
 };
 
-// Returns path to ~/.axon/registry.json (creates ~/.axon dir if needed)
+// Returns path to the registry: $AXON_HOME/registry.json when AXON_HOME is
+// set (tests/sandboxes), else ~/.axon/registry.json (dir created if needed).
 std::filesystem::path registry_path();
 
 // Load registry from disk; returns empty RegistryData if file doesn't exist
@@ -45,6 +46,11 @@ void clear_repo_owner(const std::string& root, long long pid);
 
 // Find a repo entry by root path; returns nullopt if absent
 std::optional<RepoEntry> find_repo(const std::string& root);
+
+// Remove entries whose root directory no longer exists and whose registered
+// owner process (if any) is dead; group memberships of pruned repos are
+// dropped too. Returns the number of entries removed (0 = registry untouched).
+int prune_registry();
 
 // Get all repos
 std::vector<RepoEntry> get_repos(const RegistryData& reg);

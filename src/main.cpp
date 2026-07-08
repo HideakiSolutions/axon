@@ -67,6 +67,7 @@ Usage:
                                         Filter stdin output (auto|diff|lint|log|grep|json|package|test|tsc|text)
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
+  axon registry prune                   Drop registry entries whose repo root is gone
   axon help                             Show this help
   axon --version | -V                   Print version and git SHA
 
@@ -783,6 +784,21 @@ int main(int argc, char* argv[]) {
         std::cout << "Symbols:  " << sm.GetValue<int64_t>(0, 0) << "\n";
         std::cout << "Edges:    " << em.GetValue<int64_t>(0, 0) << "\n";
         std::cout << "Embedded: " << embm.GetValue<int64_t>(0, 0) << " symbols\n";
+        return 0;
+    }
+
+    // ── axon registry prune ────────────────────────────────────────────────
+    if (cmd == "registry") {
+        std::string sub = argc > 2 ? argv[2] : "";
+        if (sub != "prune") {
+            std::cerr << "Usage: axon registry prune\n";
+            return 1;
+        }
+        auto before = axon::load_registry().repos.size();
+        int removed = axon::prune_registry();
+        std::cout << "Pruned " << removed << " dead " << (removed == 1 ? "entry" : "entries")
+                  << " (kept " << (before - removed) << ") in " << axon::registry_path().string()
+                  << "\n";
         return 0;
     }
 
