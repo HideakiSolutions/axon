@@ -5,6 +5,11 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- VS Code extension dev toolchain: cleared all 9 open Dependabot alerts (undici ×6 incl. SOCKS5 TLS-bypass and cross-origin routing, form-data CRLF injection, tmp path traversal, markdown-it quadratic DoS) by refreshing the lockfile and bumping `@vscode/vsce` 2.32 → 3.9.2. All were `development`-scope transitive dependencies of the packaging tool — nothing vulnerable ships inside the published `.vsix` (its only production dependency, `vscode-languageclient`, is unchanged). `npm audit`: 0 vulnerabilities; packaging re-validated end-to-end.
+
 ## [1.2.13] — 2026-07-09
 
 ### Added

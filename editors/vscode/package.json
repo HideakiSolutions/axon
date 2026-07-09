@@ -38,7 +38,7 @@
   "devDependencies": {
     "@types/node": "^20.14.10",
     "@types/vscode": "^1.92.0",
-    "@vscode/vsce": "^2.32.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.25.0",
     "typescript": "^5.5.4"
   },
@@ -71,7 +71,11 @@
         },
         "axon.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace communication with the Axon language server."
         }
