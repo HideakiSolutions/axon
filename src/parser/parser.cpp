@@ -1644,7 +1644,10 @@ std::optional<ParsedFile> parse_file(const std::filesystem::path& abs_path,
     TSNode root = ts_tree_root_node(tree);
 
     ParsedFile result;
-    result.path = std::filesystem::relative(abs_path, project_root).string();
+    // generic_string: the files table stores '/'-separated relative paths on
+    // every platform; a native (backslash) path here silently orphans this
+    // file's import edges when the second pass looks its id up by path.
+    result.path = std::filesystem::relative(abs_path, project_root).generic_string();
     result.language = lang;
     result.hash = hash;
 
