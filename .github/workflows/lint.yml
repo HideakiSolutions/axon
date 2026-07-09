@@ -34,10 +34,11 @@ jobs:
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format-15
       - name: Check formatting
-        # Back-catalog normalized (style: normalize src/ with clang-format 15);
-        # this is now a real gate and a required check on main.
+        # Back-catalog normalized (style: normalize src/ with clang-format 15,
+        # tests/ normalized 2026-07-09); this is a real gate and a required
+        # check on main.
         run: |
-          files=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \))
+          files=$(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \))
           fail=0
           for f in $files; do
             if ! diff -u "$f" <(clang-format-15 "$f") > /dev/null; then

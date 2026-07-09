@@ -14,9 +14,9 @@ using namespace std::chrono_literals;
 
 static fs::path make_temp_project() {
     static int counter = 0;
-    auto p = fs::temp_directory_path() /
-             ("axon_watcher_test_" + std::to_string(testsupport::pid()) + "_" +
-              std::to_string(++counter));
+    auto p =
+        fs::temp_directory_path() / ("axon_watcher_test_" + std::to_string(testsupport::pid()) +
+                                     "_" + std::to_string(++counter));
     fs::create_directories(p / "src");
     std::ofstream(p / "src/seed.ts") << "export const seed = 1;\n";
     return p;

@@ -21,26 +21,26 @@ namespace fs = std::filesystem;
 // language_from_extension() routes correctly. Path is unique per test.
 fs::path write_temp(const std::string& ext, const std::string& content) {
     static int counter = 0;
-    auto p = fs::temp_directory_path() /
-             ("axon_test_" + std::to_string(::getpid()) + "_" +
-              std::to_string(++counter) + "." + ext);
+    auto p = fs::temp_directory_path() / ("axon_test_" + std::to_string(::getpid()) + "_" +
+                                          std::to_string(++counter) + "." + ext);
     std::ofstream f(p);
     f << content;
     return p;
 }
 
 bool has_kind(const std::vector<axon::Symbol>& syms, const std::string& kind) {
-    for (const auto& s : syms) if (s.kind == kind) return true;
+    for (const auto& s : syms)
+        if (s.kind == kind) return true;
     return false;
 }
 
-const axon::Symbol* find_named(const std::vector<axon::Symbol>& syms,
-                               const std::string& name) {
-    for (const auto& s : syms) if (s.name == name) return &s;
+const axon::Symbol* find_named(const std::vector<axon::Symbol>& syms, const std::string& name) {
+    for (const auto& s : syms)
+        if (s.name == name) return &s;
     return nullptr;
 }
 
-}  // namespace
+} // namespace
 
 // ── Rust (W1.T03) ──────────────────────────────────────────────────────────
 TEST(ParserRust, TraitsEnumsModulesMacrosImpl) {
@@ -57,15 +57,16 @@ macro_rules! shout { () => { 42 }; }
     fs::remove(p);
     ASSERT_TRUE(pf.has_value());
 
-    EXPECT_TRUE(has_kind(pf->symbols, "trait"))   << "trait_item missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))    << "enum_item missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "module"))  << "mod_item missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "macro"))   << "macro_definition missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "impl"))    << "impl_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "trait")) << "trait_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "module")) << "mod_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "macro")) << "macro_definition missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "impl")) << "impl_item missed";
 
     // impl Trait for Type vs inherent impl: names must differ.
     int impl_count = 0;
-    for (const auto& s : pf->symbols) if (s.kind == "impl") impl_count++;
+    for (const auto& s : pf->symbols)
+        if (s.kind == "impl") impl_count++;
     EXPECT_GE(impl_count, 2);
 }
 
@@ -118,8 +119,8 @@ public class UserController {
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_TRUE(has_kind(pf->symbols, "sealed_class")) << "sealed modifier missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "record"))        << "record_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))          << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "record")) << "record_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
 
     auto* ctrl = find_named(pf->symbols, "UserController");
     ASSERT_NE(ctrl, nullptr);
@@ -140,8 +141,8 @@ foo() { echo hi; }
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_NE(find_named(pf->symbols, "AXON_FOO"), nullptr) << "export missed";
-    EXPECT_NE(find_named(pf->symbols, "LIMIT"),    nullptr) << "readonly missed";
-    EXPECT_NE(find_named(pf->symbols, "foo"),      nullptr) << "function missed";
+    EXPECT_NE(find_named(pf->symbols, "LIMIT"), nullptr) << "readonly missed";
+    EXPECT_NE(find_named(pf->symbols, "foo"), nullptr) << "function missed";
 }
 
 // ── Lua ────────────────────────────────────────────────────────────────────
@@ -167,15 +168,15 @@ end
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_TRUE(has_kind(pf->symbols, "function")) << "function_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "method"))   << "method_index_expression missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "method")) << "method_index_expression missed";
 
     bool saw_strings = false, saw_cjson = false;
     for (const auto& imp : pf->imports) {
         if (imp.to_specifier == "util.strings") saw_strings = true;
-        if (imp.to_specifier == "cjson")        saw_cjson = true;
+        if (imp.to_specifier == "cjson") saw_cjson = true;
     }
     EXPECT_TRUE(saw_strings) << "require() import missed";
-    EXPECT_TRUE(saw_cjson)   << "require() import missed";
+    EXPECT_TRUE(saw_cjson) << "require() import missed";
 }
 
 // ── Kotlin (W1.T11) ────────────────────────────────────────────────────────
@@ -200,8 +201,7 @@ class Box {
     // Extension function detection is grammar-shape-sensitive; we accept
     // either flag depending on which child shape tree-sitter-kotlin uses.
     EXPECT_TRUE(has_kind(pf->symbols, "extension_function") ||
-                has_kind(pf->symbols, "suspend_function") ||
-                has_kind(pf->symbols, "function"))
+                has_kind(pf->symbols, "suspend_function") || has_kind(pf->symbols, "function"))
         << "function emitted with no kind variant at all";
 }
 
@@ -223,7 +223,7 @@ async function loadAll() { return []; }
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "internal_module missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))      << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
     EXPECT_TRUE(has_kind(pf->symbols, "async_function"));
 
     auto* svc = find_named(pf->symbols, "UserService");
@@ -256,7 +256,7 @@ func (s *Service) Run() {}
     // The classifier descends into type_spec/type_alias and reads the inner
     // type kind; v0.5.0 collapsed all three onto kind="type".
     EXPECT_TRUE(has_kind(pf->symbols, "interface")) << "interface_type not classified";
-    EXPECT_TRUE(has_kind(pf->symbols, "struct"))    << "struct_type not classified";
+    EXPECT_TRUE(has_kind(pf->symbols, "struct")) << "struct_type not classified";
     // Method on receiver is captured via method_declaration.
     EXPECT_NE(find_named(pf->symbols, "Run"), nullptr);
 }
@@ -280,10 +280,10 @@ namespace MyApp {
     fs::remove(p);
     ASSERT_TRUE(pf.has_value());
 
-    EXPECT_TRUE(has_kind(pf->symbols, "property"))      << "property_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "record"))        << "record_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))          << "enum_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "namespace"))     << "namespace_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "property")) << "property_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "record")) << "record_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "namespace_declaration missed";
 
     auto* ctrl = find_named(pf->symbols, "UserController");
     ASSERT_NE(ctrl, nullptr);
@@ -317,7 +317,7 @@ interface Repository {}
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "namespace_definition missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "trait"))     << "trait_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "trait")) << "trait_declaration missed";
     EXPECT_TRUE(has_kind(pf->symbols, "interface")) << "interface_declaration missed";
 
     auto* ctrl = find_named(pf->symbols, "UserController");
@@ -361,11 +361,10 @@ enum Status { active, inactive }
     // grammar-bump task in docs/audit-2026-05-handoff.md; the assertion
     // here would become EXPECT_TRUE(has_kind(... "mixin")) at that point.
     EXPECT_TRUE(has_kind(pf->symbols, "extension")) << "extension_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))      << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
     // Factory or constructor must exist; some grammar shapes emit one or
     // the other depending on whether the body uses arrow syntax.
-    EXPECT_TRUE(has_kind(pf->symbols, "factory") ||
-                has_kind(pf->symbols, "constructor"))
+    EXPECT_TRUE(has_kind(pf->symbols, "factory") || has_kind(pf->symbols, "constructor"))
         << "neither factory nor constructor kind emitted";
 }
 
@@ -395,10 +394,10 @@ class Array {
     fs::remove(p);
     ASSERT_TRUE(pf.has_value());
 
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))       << "enum_specifier missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "union"))      << "union_specifier missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "namespace"))  << "namespace_definition missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "friend"))     << "friend_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_specifier missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "union")) << "union_specifier missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "namespace_definition missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "friend")) << "friend_declaration missed";
 
     // template_declaration parents have their parameter list folded into
     // the inner class's docstring via template_params_for. The folded text
@@ -452,9 +451,9 @@ in
     bool saw_pinned = false, saw_channel = false;
     for (const auto& e : pf->imports) {
         if (e.to_specifier == "./pinned.nix") saw_pinned = true;
-        if (e.to_specifier == "nixpkgs")      saw_channel = true;
+        if (e.to_specifier == "nixpkgs") saw_channel = true;
     }
-    EXPECT_TRUE(saw_pinned)  << "`import ./pinned.nix` did not produce import edge";
+    EXPECT_TRUE(saw_pinned) << "`import ./pinned.nix` did not produce import edge";
     EXPECT_TRUE(saw_channel) << "`import <nixpkgs>` did not strip angle brackets";
 }
 

@@ -400,6 +400,13 @@ int main(int argc, char* argv[]) {
                 http_all_repos = true;
         }
 
+        // Hygiene advisory only — cleaning stays an explicit user action
+        // (`axon registry prune`): auto-pruning at startup could drop the
+        // registration of a temporarily unmounted root (decision 2026-07-09).
+        if (int dead = axon::count_prunable(axon::load_registry()); dead > 0)
+            std::cerr << "[axon] registry: " << dead << " dead entr" << (dead == 1 ? "y" : "ies")
+                      << " (run 'axon registry prune' to clean)\n";
+
         auto ctx = make_server_context(argv[0]);
 
         if (use_http) {
