@@ -72,6 +72,14 @@ protected:
         return r->GetValue<int64_t>(0, 0);
     }
 
+    int64_t insert_file_with_skeleton(const std::string& rel_path, const std::string& content,
+                                      const std::string& skeleton) {
+        int64_t fid = insert_file(rel_path, content);
+        db->conn().Query("UPDATE files SET skeleton = '" + skeleton +
+                         "' WHERE id = " + std::to_string(fid));
+        return fid;
+    }
+
     int64_t insert_symbol_with_embedding(int64_t file_id, const std::string& name,
                                          const std::string& embed_text) {
         auto vec = model->embed(embed_text);
@@ -138,4 +146,81 @@ TEST_F(CapsuleBudgetTest, SymbolModeAugmentRespectsBudgetWithOversizedSupportSke
     EXPECT_LE(capsule.token_estimate, budget)
         << "capsule exceeded its token budget: support files must be fit-checked "
         << "before being appended";
+}
+
+// ── F12-C1: support skeletons come from the index, not a live re-parse ──────
+
+namespace {
+// Shared shape for the two skeleton-source tests: one semantic pivot, one
+// support file reachable in a single BFS hop, no symbol-level edges (so the
+// file-level augmentation path runs).
+struct SkeletonSourceFixture {
+    axon::DependencyGraph graph;
+    std::string support_src = "export function helperFn(x: number): number {\n"
+                              "  return x * 2;\n"
+                              "}\n";
+};
+} // namespace
+
+TEST_F(CapsuleBudgetTest, SupportSkeletonServedFromIndex) {
+    // The stored skeleton is deliberately different from what a live
+    // skeletonize of the on-disk content would produce — the capsule content
+    // proves which source was used. This is also the contract: skeletons
+    // reflect the INDEX (like every other capsule ingredient), not the disk.
+    SkeletonSourceFixture fx;
+    const std::string sentinel = "// SERVED_FROM_INDEX\n";
+
+    std::string pivot_src = "export function dispatchTask(job: string): void {}\n";
+    int64_t pivot_fid = insert_file("pivot.ts", pivot_src);
+    insert_symbol_with_embedding(pivot_fid, "dispatchTask", "dispatch a task to a worker");
+    int64_t sup_fid = insert_file_with_skeleton("helper.ts", fx.support_src, sentinel);
+
+    fx.graph.id_to_path[pivot_fid] = "pivot.ts";
+    fx.graph.id_to_path[sup_fid] = "helper.ts";
+    fx.graph.path_to_id["pivot.ts"] = pivot_fid;
+    fx.graph.path_to_id["helper.ts"] = sup_fid;
+    fx.graph.incoming[pivot_fid] = {sup_fid};
+    fx.graph.outgoing[sup_fid] = {pivot_fid};
+    fx.graph.file_byte_size[pivot_fid] = (int64_t)pivot_src.size();
+    fx.graph.file_byte_size[sup_fid] = (int64_t)fx.support_src.size();
+
+    auto capsule = axon::assemble_capsule("dispatch a task to a worker", {}, *db, *model, fx.graph,
+                                          proj, 2000, 0, axon::CapsuleCompression::Off);
+
+    const axon::CapsuleFile* sup = nullptr;
+    for (const auto& f : capsule.support_files)
+        if (f.path == "helper.ts") sup = &f;
+    ASSERT_NE(sup, nullptr) << "support file missing from the capsule";
+    EXPECT_EQ(sup->content, sentinel)
+        << "support skeleton must be served from files.skeleton, not re-parsed from disk";
+}
+
+TEST_F(CapsuleBudgetTest, SupportSkeletonFallsBackWhenIndexEmpty) {
+    // NULL skeleton column (pre-column DB, swallowed index-time exception):
+    // the old live path must run unchanged.
+    SkeletonSourceFixture fx;
+
+    std::string pivot_src = "export function dispatchTask(job: string): void {}\n";
+    int64_t pivot_fid = insert_file("pivot.ts", pivot_src);
+    insert_symbol_with_embedding(pivot_fid, "dispatchTask", "dispatch a task to a worker");
+    int64_t sup_fid = insert_file("helper.ts", fx.support_src); // skeleton stays NULL
+
+    fx.graph.id_to_path[pivot_fid] = "pivot.ts";
+    fx.graph.id_to_path[sup_fid] = "helper.ts";
+    fx.graph.path_to_id["pivot.ts"] = pivot_fid;
+    fx.graph.path_to_id["helper.ts"] = sup_fid;
+    fx.graph.incoming[pivot_fid] = {sup_fid};
+    fx.graph.outgoing[sup_fid] = {pivot_fid};
+    fx.graph.file_byte_size[pivot_fid] = (int64_t)pivot_src.size();
+    fx.graph.file_byte_size[sup_fid] = (int64_t)fx.support_src.size();
+
+    auto capsule = axon::assemble_capsule("dispatch a task to a worker", {}, *db, *model, fx.graph,
+                                          proj, 2000, 0, axon::CapsuleCompression::Off);
+
+    const axon::CapsuleFile* sup = nullptr;
+    for (const auto& f : capsule.support_files)
+        if (f.path == "helper.ts") sup = &f;
+    ASSERT_NE(sup, nullptr) << "support file missing from the capsule";
+    EXPECT_EQ(sup->content, axon::skeletonize(fx.support_src, axon::Language::TypeScript))
+        << "empty index skeleton must fall back to the live skeletonize";
 }
