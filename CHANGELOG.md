@@ -5,7 +5,7 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.12] — 2026-07-09
 
 ### Added
 - Native filesystem watcher for Windows: `axon watch --backend=auto` now uses ReadDirectoryChangesW (recursive, overlapped, dedicated producer thread) instead of falling back to polling. Overflow (`ERROR_NOTIFY_ENUM_DIR` or a zero-byte completion) triggers the same full-rescan path as `IN_Q_OVERFLOW`/`MustScanSubDirs`; skip-dirs are pruned with the shared predicate; the poll fallback and the `AXON_WATCH_FORCE_*` seams behave identically. The parameterized watcher suite runs the Native instantiation for real on the Windows CI job — including the detection-latency guarantee.
