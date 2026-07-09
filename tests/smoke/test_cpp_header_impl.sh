@@ -8,7 +8,9 @@
 set -euo pipefail
 
 axon_bin="${1:?axon binary path required}"
-case "$axon_bin" in /*) ;; *) axon_bin="$(pwd)/$axon_bin" ;; esac
+# Absolute paths include drive-letter forms (D:/... or D:\...) that ctest
+# passes on Windows runners — only prefix genuinely relative paths.
+case "$axon_bin" in /* | [A-Za-z]:[/\\]*) ;; *) axon_bin="$(pwd)/$axon_bin" ;; esac
 
 trap 'echo "[test_cpp_header_impl] FAILED at line $LINENO" >&2' ERR
 

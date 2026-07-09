@@ -14,8 +14,12 @@ serve_pid=""
 cleanup() {
   if [[ -n "$serve_pid" ]]; then
     kill "$serve_pid" 2>/dev/null || true
+    wait "$serve_pid" 2>/dev/null || true
   fi
-  rm -rf "$tmpdir"
+  # On Windows the serve's DuckDB handle can outlive the kill by a beat and
+  # open files cannot be deleted; retry once, then best-effort (ephemeral
+  # CI runner) — the assertions above already decided the test's outcome.
+  rm -rf "$tmpdir" 2>/dev/null || { sleep 1; rm -rf "$tmpdir" 2>/dev/null || true; }
 }
 trap cleanup EXIT
 
@@ -33,8 +37,15 @@ TS
 (cd "$sandbox" && "$axon_bin" index . > /dev/null 2>&1)
 
 port=$((20000 + RANDOM % 20000))
-(cd "$sandbox" && "$axon_bin" serve --http --port="$port" > "$tmpdir/serve.log" 2>&1) &
+# Launch the serve as a direct child (no subshell wrapper): $! must be the
+# real axon pid so cleanup's kill reaches the process that holds the DuckDB
+# lock — under MSYS, killing a wrapper subshell leaves the native exe alive.
+cd "$sandbox"
+"$axon_bin" serve --http --port="$port" > "$tmpdir/serve.log" 2>&1 &
 serve_pid=$!
+# Step back out: cleanup removes $tmpdir, and Windows cannot delete the
+# current directory of a live process.
+cd /
 
 for _ in $(seq 1 60); do
   curl -sf "http://127.0.0.1:${port}/api/overview" -o /dev/null 2>/dev/null && break

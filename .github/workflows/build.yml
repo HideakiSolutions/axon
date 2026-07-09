@@ -16,6 +16,10 @@ jobs:
   build:
     name: ${{ matrix.os }} (${{ matrix.compiler }})
     runs-on: ${{ matrix.os }}
+    # Backstop for platform-specific hangs: a normal run finishes in ~15min;
+    # the first Windows ctest run sat "in progress" for 55+ minutes (run
+    # 28977936807) because a smoke blocked forever under Git Bash.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +28,12 @@ jobs:
             compiler: gcc
           - os: macos-14
             compiler: clang
+          # windows-2022 deliberately matches release.yml: we test the same
+          # runner image + MSVC toolset the released binaries are built with.
+          # windows-latest (Server 2025 / VS18 toolset 14.51) hung every test
+          # executable at startup on the first attempt (run 28981004802).
+          - os: windows-2022
+            compiler: msvc
     env:
       AXON_DUCKDB_VERSION: 1.2.2
     steps:
@@ -42,6 +52,14 @@ jobs:
         run: |
           brew install cmake ninja ccache jq ripgrep
 
+      - name: Install build dependencies (Windows)
+        # cmake, ninja, jq and Git Bash ship on the runner image; ripgrep is
+        # needed by the docs-freshness and shell-filter benchmark smokes
+        # (they self-skip with exit 77 when rg is absent, but we want the
+        # coverage, not the skip).
+        if: runner.os == 'Windows'
+        run: choco install ripgrep -y --no-progress
+
       - name: Stage libduckdb.dylib (macOS)
         # The vendored third_party/duckdb/lib/libduckdb.so is Linux ELF; for
         # macOS we drop the matching universal .dylib (DuckDB ships x64+arm64
@@ -55,6 +73,24 @@ jobs:
           mkdir -p third_party/duckdb/lib
           unzip -o /tmp/duckdb.zip -d third_party/duckdb/lib/
           test -f third_party/duckdb/lib/libduckdb.dylib
+
+      - name: Stage duckdb.dll (Windows)
+        # Same pinned release the Linux .so / macOS .dylib come from; the zip
+        # carries duckdb.dll (runtime) + duckdb.lib (import lib) which
+        # CMakeLists's WIN32 branch expects under third_party/duckdb/lib.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = $env:AXON_DUCKDB_VERSION
+          Invoke-WebRequest -Uri "https://github.com/duckdb/duckdb/releases/download/v$ver/libduckdb-windows-amd64.zip" `
+            -OutFile "$env:TEMP\duckdb.zip"
+          New-Item -ItemType Directory -Force -Path third_party\duckdb\lib | Out-Null
+          Expand-Archive -Path "$env:TEMP\duckdb.zip" -DestinationPath third_party\duckdb\lib -Force
+          if (-not (Test-Path "third_party\duckdb\lib\duckdb.dll")) { exit 1 }
+
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Cache third_party
         uses: actions/cache@v6
@@ -78,13 +114,60 @@ jobs:
       - name: Build tests
         run: cmake --build build -j 2
 
+      - name: Stage runtime DLLs beside test binaries (Windows)
+        # Windows has no RUNPATH, and GITHUB_PATH prepends are clobbered here:
+        # ilammy/msvc-dev-cmd exports the entire VS environment (including
+        # Path) via GITHUB_ENV, which wins over GITHUB_PATH for later steps
+        # (observed in run 28981004802 — the appended dirs never reached the
+        # ctest step). The executable's own directory is always first in the
+        # DLL search order, so copy every runtime DLL next to the test exes
+        # and next to build/axon.exe instead.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $targets = @("build\tests", "build")
+          $dlls = @(Get-ChildItem -Path build -Filter *.dll -Recurse |
+              Where-Object { $_.FullName -notmatch '\\(CMakeFiles|tests)\\' })
+          $dlls += Get-Item "third_party\duckdb\lib\duckdb.dll"
+          foreach ($t in $targets) {
+            foreach ($d in $dlls) { Copy-Item $d.FullName $t -Force }
+          }
+          Write-Host "Staged $($dlls.Count) DLLs into $($targets -join ', '):"
+          $dlls | ForEach-Object { Write-Host "  $($_.Name)" }
+
+      - name: Probe one test binary (Windows)
+        # Fast bounded diagnostic: if test exes cannot even start (missing
+        # DLL / runtime mismatch surfaces as a modal dialog = silent hang in
+        # CI), this names the problem in seconds instead of burning the ctest
+        # timeout budget 18 times.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "build\tests\test_compress.exe" `
+              -ArgumentList "--gtest_list_tests" -NoNewWindow -PassThru `
+              -RedirectStandardOutput probe.out -RedirectStandardError probe.err
+          if (-not $p.WaitForExit(60000)) {
+            $p.Kill()
+            Write-Host "PROBE: test_compress.exe HUNG after 60s"
+            exit 1
+          }
+          Write-Host "PROBE: exit=$($p.ExitCode)"
+          Get-Content probe.out -ErrorAction SilentlyContinue
+          Get-Content probe.err -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { exit 1 }
+
       - name: Run unit tests
         # CTest aggregates every test registered via add_axon_test().
         # --output-on-failure so a regression surfaces in the workflow log
-        # without re-running.
-        run: ctest --test-dir build --output-on-failure
+        # without re-running. --timeout converts a hung test into a named
+        # failure instead of an opaque stuck job (longest healthy test runs
+        # in well under a minute).
+        run: ctest --test-dir build --output-on-failure --timeout 180
 
       - name: Smoke binary
+        # bash on all three platforms — Git Bash resolves ./build/axon to
+        # axon.exe on Windows, so the same invocation stays portable.
+        shell: bash
         run: |
           ./build/axon --version
           ./build/axon help
@@ -109,6 +192,8 @@ jobs:
           name: axon-${{ matrix.os }}
           path: |
             build/axon
+            build/axon.exe
             third_party/duckdb/lib/libduckdb.*
+            third_party/duckdb/lib/duckdb.dll
             editors/vscode/*.vsix
           retention-days: 7

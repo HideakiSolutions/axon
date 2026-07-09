@@ -107,6 +107,11 @@ target_link_libraries(test_telemetry PRIVATE
     duckdb_lib
     GTest::gtest_main
 )
+if(WIN32)
+    # telemetry.cpp's try_post_http speaks winsock; the axon target links
+    # ws2_32 for the same reason (root CMakeLists WIN32 branch).
+    target_link_libraries(test_telemetry PRIVATE ws2_32)
+endif()
 add_test(NAME test_telemetry COMMAND test_telemetry)
 
 # Dialogue Layer tests require DuckDB (cannot use the parser-only axon_parser_objs target).

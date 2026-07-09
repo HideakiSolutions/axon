@@ -153,7 +153,7 @@ int index_routes(const Config& cfg, Database& db) {
         if (!it->is_regular_file()) continue;
 
         auto abs = it->path();
-        auto rel = fs::relative(abs, cfg.project_root).string();
+        auto rel = fs::relative(abs, cfg.project_root).generic_string();
         auto ext = abs.extension().string();
         if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
 

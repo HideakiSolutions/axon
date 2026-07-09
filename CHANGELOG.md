@@ -5,6 +5,11 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### CI
+- `build.yml` now builds and tests on `windows-2022` (MSVC + Ninja, same runner image and toolset as `release.yml`) alongside ubuntu-22.04 and macos-14: full ctest suite plus the bash smokes under Git Bash, with the staged `duckdb.dll` and every build-emitted DLL copied beside the test executables (Windows has no RUNPATH, and GITHUB_PATH prepends are clobbered by the exported MSVC environment). Windows product code was previously release-built but never test-covered — the FSEvents lesson (PR #69/#70) applied to the remaining platform.
+
 ## [1.2.10] — 2026-07-08
 
 ### Added

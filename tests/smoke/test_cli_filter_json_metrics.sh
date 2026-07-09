@@ -13,7 +13,9 @@
 set -euo pipefail
 
 axon_bin="${1:?axon binary path required}"
-case "$axon_bin" in /*) ;; *) axon_bin="$(pwd)/$axon_bin" ;; esac
+# Absolute paths include drive-letter forms (D:/... or D:\...) that ctest
+# passes on Windows runners — only prefix genuinely relative paths.
+case "$axon_bin" in /* | [A-Za-z]:[/\\]*) ;; *) axon_bin="$(pwd)/$axon_bin" ;; esac
 
 trap 'echo "[test_cli_filter_json_metrics] FAILED at line $LINENO" >&2' ERR
 
@@ -73,6 +75,20 @@ if grep -q '"type":"axon_filter_metrics"' "$tmpdir/human.err"; then
 fi
 
 # ── Hold the index lock with a stdio serve (peer listener active) ──────────
+# The locked-index sections drive a long-lived serve whose stdin is a FIFO
+# held open on fd 9. MSYS/Git Bash emulates FIFOs over named pipes and the
+# native-exe-reading-from-FIFO arrangement is not reliable there, so on
+# Windows we stop after section 1 (unlocked DuckDB store + retrieve, already
+# asserted above) and leave lock/sidecar/peer-proxy coverage to Linux/macOS.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "[test_cli_filter_json_metrics] SKIP locked-index sections on Windows:" \
+         "FIFO-backed serve stdin is unreliable under Git Bash; sections 2-3" \
+         "covered on Linux/macOS"
+    exit 0
+    ;;
+esac
+
 fifo="$tmpdir/serve-stdin.fifo"
 mkfifo "$fifo"
 "$axon_bin" serve < "$fifo" > "$tmpdir/serve.log" 2>&1 &
