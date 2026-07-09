@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- Capsule assembly fetches support-file skeletons in a single batched query instead of one `SELECT … WHERE id = ?` per file. Profiling the residual after the index-skeleton change showed those N single-row round-trips — not the BFS or string work — were the whole augment cost (196 support files = 196 queries ≈ 100 ms on a 6.6k-symbol repo). One `WHERE id IN (…)` collapses them to ~5 ms; capsule-miss assembly on that repo drops from ~246 ms to ~95 ms. Same rows, same fallback semantics — purely fewer round-trips.
+
 ### Fixed
 - Heap-buffer-overflow indexing Swift files: the vendored Swift tree-sitter scanner allocated its state with `calloc(0, …)` (a zero-element buffer), so every access to the scanner's hash-count state ran past the allocation. Harmless-looking in release builds (it landed in allocator padding) but a latent heap-corruption/crash risk, and the reason the ASAN/UBSAN nightly was red. Now `calloc(1, …)`.
 
