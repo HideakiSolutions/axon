@@ -5,7 +5,7 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.15] — 2026-07-09
 
 ### Added
 - `axon metrics [--json]`: the per-layer telemetry aggregate (retrieval/cache/ccr/compression/shell_filtering — requests, tokens sent/saved, average latency) that `serve --http` exposes at `/api/metrics`, now available straight from the CLI without standing up the HTTP server. The savings pipeline had no CLI consumer; this gives it one. Human table by default, raw JSON with `--json`.
