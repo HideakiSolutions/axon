@@ -5,7 +5,7 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.13] — 2026-07-09
 
 ### Added
 - `axon registry prune` also zeroes stale owner bookkeeping: a live repo whose registered owner process died without running `clear_repo_owner` (crash, SIGKILL) kept pointing peers at a gone endpoint. `axon serve`/`web` startup now prints a one-line advisory when the registry holds prunable dead entries — cleaning stays an explicit user action, because auto-pruning at startup could drop the registration (and group memberships) of a temporarily unmounted root.
