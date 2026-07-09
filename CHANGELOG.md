@@ -5,10 +5,15 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.11] — 2026-07-09
+
+### Fixed
+- Windows: stdio now opens in binary mode. The MSVC CRT's text mode rewrote every `\n` as `\r\n` on write, so `artifact-retrieve` returned CCR artifacts that no longer matched the stored bytes; `filter` pipes and the MCP/LSP framing are protected by the same fix.
+- Windows: the parser stored native backslash-separated relative paths while the files table stores `/`-separated ones, so the second-pass edge resolution never found the parsed file and silently dropped every import edge — `get_callers`, `get_tests_for` and the impact graph all returned empty on Windows. Route discovery had the same native-path bug.
+- Dialogue: `session_get` and the session-digest key-turn scan now break timestamp ties by the append-monotonic turn id — five rapid `turn_add` calls could come back reordered (surfaced as a macOS CI flake in `ObjTest.TurnsReturnedInChronologicalOrder`).
 
 ### CI
-- `build.yml` now builds and tests on `windows-2022` (MSVC + Ninja, same runner image and toolset as `release.yml`) alongside ubuntu-22.04 and macos-14: full ctest suite plus the bash smokes under Git Bash, with the staged `duckdb.dll` and every build-emitted DLL copied beside the test executables (Windows has no RUNPATH, and GITHUB_PATH prepends are clobbered by the exported MSVC environment). Windows product code was previously release-built but never test-covered — the FSEvents lesson (PR #69/#70) applied to the remaining platform.
+- `build.yml` now builds and tests on `windows-2022` (MSVC + Ninja, same runner image and toolset as `release.yml`) alongside ubuntu-22.04 and macos-14: full ctest suite plus the bash smokes under Git Bash, with the staged `duckdb.dll` and every build-emitted DLL copied beside the test executables (Windows has no RUNPATH, and GITHUB_PATH prepends are clobbered by the exported MSVC environment). Windows product code was previously release-built but never test-covered — the FSEvents lesson (PR #69/#70) applied to the remaining platform. The `windows-2022 (msvc)` check is required on `main`. Smokes that depend on FIFO-backed serve stdin skip declaratively on Windows; a 60s-bounded probe step and job/ctest timeouts convert exe-cannot-start hangs into named failures.
 
 ## [1.2.10] — 2026-07-08
 
