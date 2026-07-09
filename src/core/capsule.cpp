@@ -49,6 +49,22 @@ struct PivotMatch {
     int64_t file_id;
 };
 
+// Precomputed skeleton for a file id, folded into the language lookup the
+// callers already paid for. Returns false only when the id is absent.
+// skeleton_out comes back empty when the index has none (pre-column DB, a
+// swallowed index-time exception, or a genuinely signature-less file);
+// language_out lets the caller fall back to a live skeletonize without a
+// second query.
+static bool fetch_file_skeleton(Database& db, int64_t file_id, std::string& language_out,
+                                std::string& skeleton_out) {
+    auto res = db.conn().Query("SELECT language, COALESCE(skeleton, '') FROM files WHERE id = " +
+                               std::to_string(file_id));
+    if (res->HasError() || res->RowCount() == 0) return false;
+    language_out = res->GetValue(0, 0).ToString();
+    skeleton_out = res->GetValue(1, 0).ToString();
+    return true;
+}
+
 // Returns top-K matches preserving WHICH symbol matched (not just file).
 // File deduplication happens at caller's discretion.
 static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_text, Database& db,
@@ -433,16 +449,19 @@ ContextCapsule assemble_capsule(const std::string& query,
                     }
                 if (already) continue;
 
-                auto lang_res = db.conn().Query("SELECT language FROM files WHERE id = " +
-                                                std::to_string(node.file_id));
-                auto& lm = *lang_res;
-                if (lm.RowCount() == 0) continue;
-                auto lopt = lang_from_string(lm.GetValue(0, 0).ToString());
-                auto abs = project_root / node.path;
-                auto content = read_file(abs);
-                if (content.empty()) continue;
-                std::string skel = lopt ? skeletonize(content, *lopt)
-                                        : content.substr(0, std::min(content.size(), size_t(300)));
+                // The index already holds this file's skeleton (computed at
+                // index time); re-parsing it live was 80% of a capsule miss
+                // on a 6.6k-symbol repo. Empty = the index has none — fall
+                // back to the old live path.
+                std::string lang_str, skel;
+                if (!fetch_file_skeleton(db, node.file_id, lang_str, skel)) continue;
+                if (skel.empty()) {
+                    auto lopt = lang_from_string(lang_str);
+                    auto content = read_file(project_root / node.path);
+                    if (content.empty()) continue;
+                    skel = lopt ? skeletonize(content, *lopt)
+                                : content.substr(0, std::min(content.size(), size_t(300)));
+                }
                 CapsuleFile cf;
                 cf.path = node.path;
                 cf.source_ref = node.path;
@@ -500,11 +519,12 @@ ContextCapsule assemble_capsule(const std::string& query,
         bool use_full = (full_tokens <= pivot_budget_each);
 
         std::string body = use_full ? content : [&]() -> std::string {
-            auto lang_res = db.conn().Query("SELECT language FROM files WHERE id = " +
-                                            std::to_string(node.file_id));
-            auto& lm = *lang_res;
-            if (lm.RowCount() == 0) return content;
-            auto lo = lang_from_string(lm.GetValue(0, 0).ToString());
+            // Oversized pivot: serve the index's precomputed skeleton; the
+            // full content is already in hand for the live fallback.
+            std::string lang_str, skel;
+            if (!fetch_file_skeleton(db, node.file_id, lang_str, skel)) return content;
+            if (!skel.empty()) return skel;
+            auto lo = lang_from_string(lang_str);
             return lo ? skeletonize(content, *lo)
                       : content.substr(0, std::min(content.size(), size_t(300)));
         }();
@@ -520,22 +540,20 @@ ContextCapsule assemble_capsule(const std::string& query,
         capsule.pivot_files.push_back(std::move(cf));
     }
 
-    // 4. Support files — skeletonized
+    // 4. Support files — skeletonized from the index (live fallback when the
+    // index holds none — same contract as the symbol-mode augment above).
     for (const auto& node : traversal.support_files) {
         if (tokens_used >= token_budget) break;
 
-        auto lang_res = db.conn().Query("SELECT language FROM files WHERE id = " +
-                                        std::to_string(node.file_id));
-        auto& lang_mat = *lang_res;
-        if (lang_mat.RowCount() == 0) continue;
-
-        auto lang_opt = lang_from_string(lang_mat.GetValue(0, 0).ToString());
-        auto abs = project_root / node.path;
-        auto content = read_file(abs);
-        if (content.empty()) continue;
-
-        std::string skeleton = lang_opt ? skeletonize(content, *lang_opt)
-                                        : content.substr(0, std::min(content.size(), size_t(300)));
+        std::string lang_str, skeleton;
+        if (!fetch_file_skeleton(db, node.file_id, lang_str, skeleton)) continue;
+        if (skeleton.empty()) {
+            auto lang_opt = lang_from_string(lang_str);
+            auto content = read_file(project_root / node.path);
+            if (content.empty()) continue;
+            skeleton = lang_opt ? skeletonize(content, *lang_opt)
+                                : content.substr(0, std::min(content.size(), size_t(300)));
+        }
 
         CapsuleFile cf;
         cf.path = node.path;

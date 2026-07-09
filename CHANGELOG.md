@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- Capsule assembly no longer re-parses support files with tree-sitter at query time: the file-level augment/support loops now serve the skeleton precomputed at index time (`files.skeleton`, the same source the `get_skeleton` tool already reads), falling back to the live parse only when the index holds none. Measured on a capsule miss (K=25 per repo): assembly median 680ms → 246ms (−64%) on a 6.6k-symbol repo and 198ms → 81ms (−59%) on this repo; the re-parse stage itself dropped 543ms → 102ms and 92ms → 8ms. Contract note: capsule skeletons now reflect the index (like every other capsule ingredient and every cache hit already did); full pivot bodies keep reading the disk.
+
 ### Added
 - `capsule_cache_prune`: entries stranded on an old index epoch are now reaped after every (re)index that moved the epoch (full index, incremental `index-paths`, watch-driven sync). They were unreachable by construction — lookups require an exact epoch match — but accumulated in the table forever; the schema comment even promised a prune that never existed.
 
