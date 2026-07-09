@@ -129,10 +129,11 @@ WATCH_STATUS=$( cd "$WATCH_DIR" && "$AXON" status )
 assert_contains "Files:" "$WATCH_STATUS" "watch leaves index readable after modify/delete"
 assert_contains "pruned" "$(cat "$WATCH_LOG" 2>/dev/null || true)" "watch prunes deleted file"
 
-# Native backend selected on auto (this is what the two CI platforms prove).
+# Native backend selected on auto (this is what the three CI platforms prove).
 case "$(uname)" in
   Linux)  NATIVE_BACKEND="inotify" ;;
   Darwin) NATIVE_BACKEND="fsevents" ;;
+  MINGW*|MSYS*|CYGWIN*) NATIVE_BACKEND="win32" ;;
   *)      NATIVE_BACKEND="poll" ;;
 esac
 assert_contains "backend ${NATIVE_BACKEND}" "$(cat "$WATCH_LOG" 2>/dev/null || true)" \

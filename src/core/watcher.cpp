@@ -19,6 +19,8 @@ std::unique_ptr<Watcher> make_poll_watcher(const Config& cfg, int interval_ms);
 std::unique_ptr<Watcher> make_inotify_watcher(const Config& cfg, std::string& error);
 #elif defined(__APPLE__)
 std::unique_ptr<Watcher> make_fsevents_watcher(const Config& cfg, std::string& error);
+#elif defined(_WIN32)
+std::unique_ptr<Watcher> make_win32_watcher(const Config& cfg, std::string& error);
 #endif
 
 namespace {
@@ -70,6 +72,8 @@ std::unique_ptr<Watcher> make_watcher(const Config& cfg, WatchBackend pref, int 
             native = make_inotify_watcher(cfg, error);
 #elif defined(__APPLE__)
             native = make_fsevents_watcher(cfg, error);
+#elif defined(_WIN32)
+            native = make_win32_watcher(cfg, error);
 #else
             error = "no native backend on this platform";
 #endif

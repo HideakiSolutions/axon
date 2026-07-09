@@ -308,7 +308,7 @@ Shell output filtering starts with `axon filter <auto|diff|lint|log|grep|json|pa
 axon watch [path] --interval-ms=1000 --debounce-ms=500 --backend=auto|native|poll
 ```
 
-`watch` uses a native backend by default — inotify on Linux, FSEvents on macOS — and falls back to portable polling automatically when native init fails (Windows uses polling). It calls the same incremental indexer as `axon index-paths`; kernel event-queue overflow triggers a full rescan. Claude hooks remain the fastest path for Claude Code edits; watch mode covers external editors, git checkouts, generators, and manual deletes.
+`watch` uses a native backend by default — inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows — and falls back to portable polling automatically when native init fails. It calls the same incremental indexer as `axon index-paths`; kernel event-queue overflow triggers a full rescan. Claude hooks remain the fastest path for Claude Code edits; watch mode covers external editors, git checkouts, generators, and manual deletes.
 
 ### VS Code
 
