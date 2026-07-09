@@ -89,3 +89,36 @@ TEST_F(RegistryTest, PruneDropsGroupMembersOfPrunedRepos) {
 TEST_F(RegistryTest, PruneOnEmptyRegistryIsNoop) {
     EXPECT_EQ(axon::prune_registry(), 0);
 }
+
+TEST_F(RegistryTest, PruneClearsDeadOwnerOnLiveRoot) {
+    // A crashed/SIGKILLed serve never runs clear_repo_owner, leaving stale
+    // owner bookkeeping on a perfectly live repo. Prune must keep the entry
+    // but zero the owner fields. 2147483647 exceeds Linux's default pid_max
+    // and is not a valid (multiple-of-4) Windows pid.
+    fs::path live = home / "live-repo";
+    fs::create_directories(live);
+    axon::register_repo(live.string(), "unused");
+    axon::set_repo_owner(live.string(), 2147483647LL, 4242, "tok");
+
+    EXPECT_EQ(axon::prune_registry(), 0) << "live root must not be removed";
+
+    auto reg = axon::load_registry();
+    ASSERT_EQ(reg.repos.size(), 1u);
+    EXPECT_EQ(reg.repos[0].owner_pid, 0);
+    EXPECT_EQ(reg.repos[0].owner_port, 0);
+    EXPECT_TRUE(reg.repos[0].owner_token.empty());
+}
+
+TEST_F(RegistryTest, CountPrunableMatchesPruneSemantics) {
+    fs::path live = home / "live-repo";
+    fs::create_directories(live);
+    axon::register_repo(live.string(), "unused");          // live root → kept
+    axon::register_repo((home / "gone-a").string(), "un"); // dead → prunable
+    axon::register_repo((home / "gone-b").string(), "un"); // dead but owned by a
+                                                           // live process → kept
+    axon::set_repo_owner((home / "gone-b").string(), (long long)testsupport::pid(), 1, "t");
+
+    EXPECT_EQ(axon::count_prunable(axon::load_registry()), 1);
+    EXPECT_EQ(axon::prune_registry(), 1);
+    EXPECT_EQ(axon::count_prunable(axon::load_registry()), 0);
+}

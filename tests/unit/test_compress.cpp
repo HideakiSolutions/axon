@@ -17,13 +17,13 @@ static int est_tokens(const std::string& s) {
 // ── compression_from_string ───────────────────────────────────────────────────
 
 TEST(CompressionFromString, KnownValues) {
-    EXPECT_EQ(axon::compression_from_string("off"),  axon::CapsuleCompression::Off);
+    EXPECT_EQ(axon::compression_from_string("off"), axon::CapsuleCompression::Off);
     EXPECT_EQ(axon::compression_from_string("body"), axon::CapsuleCompression::Body);
 }
 
 TEST(CompressionFromString, UnknownDefaultsOff) {
-    EXPECT_EQ(axon::compression_from_string(""),        axon::CapsuleCompression::Off);
-    EXPECT_EQ(axon::compression_from_string("BODY"),    axon::CapsuleCompression::Off);
+    EXPECT_EQ(axon::compression_from_string(""), axon::CapsuleCompression::Off);
+    EXPECT_EQ(axon::compression_from_string("BODY"), axon::CapsuleCompression::Off);
     EXPECT_EQ(axon::compression_from_string("unknown"), axon::CapsuleCompression::Off);
 }
 
@@ -31,31 +31,27 @@ TEST(CompressionFromString, UnknownDefaultsOff) {
 
 TEST(ClassifyOutput, LanguageHintMeansSourceCode) {
     std::string text = "plain words without obvious syntax\n";
-    EXPECT_EQ(axon::classify_output(text, axon::Language::Python),
-              axon::OutputKind::SourceCode);
+    EXPECT_EQ(axon::classify_output(text, axon::Language::Python), axon::OutputKind::SourceCode);
 }
 
 TEST(ClassifyOutput, DetectsCoreTextShapes) {
     EXPECT_EQ(axon::classify_output("{\"ok\":true}\n"), axon::OutputKind::Json);
 
-    std::string diff =
-        "diff --git a/a.cpp b/a.cpp\n"
-        "--- a/a.cpp\n"
-        "+++ b/a.cpp\n"
-        "@@ -1 +1 @@\n"
-        "-old\n"
-        "+new\n";
+    std::string diff = "diff --git a/a.cpp b/a.cpp\n"
+                       "--- a/a.cpp\n"
+                       "+++ b/a.cpp\n"
+                       "@@ -1 +1 @@\n"
+                       "-old\n"
+                       "+new\n";
     EXPECT_EQ(axon::classify_output(diff), axon::OutputKind::Diff);
 
-    std::string log =
-        "2026-06-30T10:00:00Z INFO boot\n"
-        "2026-06-30T10:00:01Z WARN slow path\n";
+    std::string log = "2026-06-30T10:00:00Z INFO boot\n"
+                      "2026-06-30T10:00:01Z WARN slow path\n";
     EXPECT_EQ(axon::classify_output(log), axon::OutputKind::Log);
 
-    std::string md =
-        "# Title\n"
-        "## Section\n"
-        "body\n";
+    std::string md = "# Title\n"
+                     "## Section\n"
+                     "body\n";
     EXPECT_EQ(axon::classify_output(md), axon::OutputKind::Markdown);
 }
 
@@ -78,7 +74,7 @@ TEST(CompressBody, SmallInputReturnedUnchanged) {
 
 TEST(CompressBody, ExactlyAtBudgetReturnedUnchanged) {
     // 4 chars = 1 token; craft a string that sits exactly at the limit.
-    std::string src(400, 'x');  // 400 chars → 100 tokens
+    std::string src(400, 'x'); // 400 chars → 100 tokens
     std::string result = axon::compress_body(src, std::nullopt, 100);
     EXPECT_EQ(result, src) << "At-budget input must be byte-identical to source";
 }
@@ -107,11 +103,10 @@ TEST(CompressBody, LargeInputFitsInBudget) {
     std::string result = axon::compress_body(src, std::nullopt, budget);
     int result_tokens = est_tokens(result);
 
-    EXPECT_LE(result_tokens, budget + 4)  // small overshoot tolerance for marker line
-        << "Compressed output should fit within budget (got " << result_tokens
-        << " tokens, budget " << budget << ")";
-    EXPECT_LT(result_tokens, full_tokens)
-        << "Compressed output must be smaller than original";
+    EXPECT_LE(result_tokens, budget + 4) // small overshoot tolerance for marker line
+        << "Compressed output should fit within budget (got " << result_tokens << " tokens, budget "
+        << budget << ")";
+    EXPECT_LT(result_tokens, full_tokens) << "Compressed output must be smaller than original";
 }
 
 TEST(CompressBody, DeclarationLinePreserved) {
@@ -152,9 +147,9 @@ TEST(CompressBody, InvalidUtf8DoesNotThrow) {
     // is actually attempted (not the early-return path).
     std::string src;
     src += "void broken() {\n";
-    src += std::string(400, 'a');   // padding to force compression
-    src += '\xFF';                   // invalid UTF-8 leader
-    src += '\xFE';                   // invalid continuation
+    src += std::string(400, 'a'); // padding to force compression
+    src += '\xFF';                // invalid UTF-8 leader
+    src += '\xFE';                // invalid continuation
     src += "\n    return;\n}\n";
     EXPECT_NO_THROW({
         std::string r = axon::compress_body(src, std::nullopt, 20);
@@ -168,7 +163,7 @@ TEST(CompressBody, BinaryLikeBlobDoesNotThrow) {
     std::string blob;
     blob.resize(2000);
     for (size_t i = 0; i < blob.size(); ++i)
-        blob[i] = (char)(i & 0xFF);  // full 0-255 byte cycle
+        blob[i] = (char)(i & 0xFF); // full 0-255 byte cycle
     EXPECT_NO_THROW({
         std::string r = axon::compress_body(blob, std::nullopt, 30);
         EXPECT_FALSE(r.empty());

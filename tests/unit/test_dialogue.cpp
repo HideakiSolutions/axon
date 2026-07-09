@@ -10,15 +10,14 @@ namespace fs = std::filesystem;
 
 static fs::path make_temp_db() {
     static int counter = 0;
-    auto p = fs::temp_directory_path() /
-             ("axon_dialogue_test_" + std::to_string(::getpid()) + "_" +
-              std::to_string(++counter) + ".duckdb");
+    auto p = fs::temp_directory_path() / ("axon_dialogue_test_" + std::to_string(::getpid()) + "_" +
+                                          std::to_string(++counter) + ".duckdb");
     return p;
 }
 
 class DialogueTest : public ::testing::Test {
 protected:
-    fs::path   db_path;
+    fs::path db_path;
     std::unique_ptr<axon::Database> db;
 
     void SetUp() override {
@@ -52,9 +51,9 @@ TEST_F(DialogueTest, ThreadCreateIdempotent) {
 }
 
 TEST_F(DialogueTest, ThreadMultipleKinds) {
-    axon::thread_create(*db, "alice",    "person");
+    axon::thread_create(*db, "alice", "person");
     axon::thread_create(*db, "project-x", "project");
-    axon::thread_create(*db, "perf",    "topic");
+    axon::thread_create(*db, "perf", "topic");
 
     auto threads = axon::thread_list(*db);
     EXPECT_EQ(threads.size(), 3u);
@@ -89,7 +88,7 @@ TEST_F(DialogueTest, TurnAddAndRetrieve) {
     int64_t tid = axon::thread_create(*db, "t");
     int64_t sid = axon::session_start(*db, tid, "s");
 
-    int64_t id1 = axon::turn_add(*db, nullptr, sid, "user",      "Hello from user");
+    int64_t id1 = axon::turn_add(*db, nullptr, sid, "user", "Hello from user");
     int64_t id2 = axon::turn_add(*db, nullptr, sid, "assistant", "Hello back");
     EXPECT_GT(id1, 0);
     EXPECT_GT(id2, 0);
@@ -97,9 +96,9 @@ TEST_F(DialogueTest, TurnAddAndRetrieve) {
 
     auto turns = axon::session_get(*db, sid);
     ASSERT_EQ(turns.size(), 2u);
-    EXPECT_EQ(turns[0].role,    "user");
+    EXPECT_EQ(turns[0].role, "user");
     EXPECT_EQ(turns[0].content, "Hello from user");
-    EXPECT_EQ(turns[1].role,    "assistant");
+    EXPECT_EQ(turns[1].role, "assistant");
     EXPECT_EQ(turns[1].content, "Hello back");
 }
 
@@ -125,14 +124,13 @@ TEST_F(DialogueTest, AutoAnchorNoFilesNoSymbols) {
 
 TEST_F(DialogueTest, AutoAnchorDetectsFilePath) {
     // Insert a file into the files table so auto_anchor can find it
-    db->conn().Query(
-        "INSERT INTO files (id, path, language, hash, byte_size) VALUES "
-        "(nextval('seq_id'), 'src/auth/token.ts', 'typescript', 'abc', 100)");
+    db->conn().Query("INSERT INTO files (id, path, language, hash, byte_size) VALUES "
+                     "(nextval('seq_id'), 'src/auth/token.ts', 'typescript', 'abc', 100)");
 
     int64_t tid = axon::thread_create(*db, "t");
     int64_t sid = axon::session_start(*db, tid, "s");
-    int64_t tid2 = axon::turn_add(*db, nullptr, sid, "user",
-                                  "The file auth/token.ts needs a TTL of 7 days.");
+    int64_t tid2 =
+        axon::turn_add(*db, nullptr, sid, "user", "The file auth/token.ts needs a TTL of 7 days.");
     auto anchors = axon::turn_get_anchors(*db, tid2);
     EXPECT_GE(anchors.size(), 1u);
 
@@ -144,22 +142,22 @@ TEST_F(DialogueTest, AutoAnchorDetectsFilePath) {
 
 TEST_F(DialogueTest, AutoAnchorDetectsSymbolName) {
     // Insert a file and a symbol
-    db->conn().Query(
-        "INSERT INTO files (id, path, language, hash, byte_size) VALUES "
-        "(nextval('seq_id'), 'src/auth.ts', 'typescript', 'abc', 100)");
+    db->conn().Query("INSERT INTO files (id, path, language, hash, byte_size) VALUES "
+                     "(nextval('seq_id'), 'src/auth.ts', 'typescript', 'abc', 100)");
     auto fres = db->conn().Query("SELECT id FROM files WHERE path = 'src/auth.ts'");
     int64_t fid = fres->GetValue<int64_t>(0, 0);
 
-    db->conn().Query(
-        "INSERT INTO symbols (id, file_id, name, kind, start_line, end_line) VALUES "
-        "(nextval('seq_id'), " + std::to_string(fid) + ", 'validateToken', 'function', 10, 30)");
+    db->conn().Query("INSERT INTO symbols (id, file_id, name, kind, start_line, end_line) VALUES "
+                     "(nextval('seq_id'), " +
+                     std::to_string(fid) + ", 'validateToken', 'function', 10, 30)");
     // Create an edge so the symbol appears in top-500 cache used by auto_anchor
     auto sres = db->conn().Query("SELECT id FROM symbols WHERE name = 'validateToken'");
     int64_t sid_sym = sres->GetValue<int64_t>(0, 0);
     db->conn().Query(
         "INSERT INTO edges (id, from_file, to_file, from_symbol, to_symbol, kind) VALUES "
-        "(nextval('seq_id'), " + std::to_string(fid) + ", " + std::to_string(fid) +
-        ", " + std::to_string(sid_sym) + ", " + std::to_string(sid_sym) + ", 'calls')");
+        "(nextval('seq_id'), " +
+        std::to_string(fid) + ", " + std::to_string(fid) + ", " + std::to_string(sid_sym) + ", " +
+        std::to_string(sid_sym) + ", 'calls')");
 
     int64_t tid = axon::thread_create(*db, "t");
     int64_t session_id = axon::session_start(*db, tid, "s");
@@ -176,9 +174,8 @@ TEST_F(DialogueTest, AutoAnchorDetectsSymbolName) {
 // ── Manual anchor ─────────────────────────────────────────────────────────────
 
 TEST_F(DialogueTest, ManualAnchorLink) {
-    db->conn().Query(
-        "INSERT INTO files (id, path, language, hash, byte_size) VALUES "
-        "(nextval('seq_id'), 'src/main.ts', 'typescript', 'abc', 100)");
+    db->conn().Query("INSERT INTO files (id, path, language, hash, byte_size) VALUES "
+                     "(nextval('seq_id'), 'src/main.ts', 'typescript', 'abc', 100)");
     auto fres = db->conn().Query("SELECT id FROM files WHERE path = 'src/main.ts'");
     int64_t fid = fres->GetValue<int64_t>(0, 0);
 
@@ -201,7 +198,7 @@ TEST_F(DialogueTest, ManualAnchorLink) {
 TEST_F(DialogueTest, SessionEndComputesDigest) {
     int64_t tid = axon::thread_create(*db, "t");
     int64_t sid = axon::session_start(*db, tid, "review");
-    axon::turn_add(*db, nullptr, sid, "user",      "What's the auth flow?");
+    axon::turn_add(*db, nullptr, sid, "user", "What's the auth flow?");
     axon::turn_add(*db, nullptr, sid, "assistant", "It uses JWT with 7-day TTL.");
     axon::session_end(*db, sid, nullptr, true);
 
@@ -219,22 +216,22 @@ TEST_F(DialogueTest, LoadSymbolNameCacheEmpty) {
 }
 
 TEST_F(DialogueTest, LoadSymbolNameCacheWithSymbols) {
-    db->conn().Query(
-        "INSERT INTO files (id, path, language, hash, byte_size) VALUES "
-        "(nextval('seq_id'), 'a.ts', 'typescript', 'x', 10)");
+    db->conn().Query("INSERT INTO files (id, path, language, hash, byte_size) VALUES "
+                     "(nextval('seq_id'), 'a.ts', 'typescript', 'x', 10)");
     auto fr = db->conn().Query("SELECT id FROM files WHERE path = 'a.ts'");
     int64_t fid = fr->GetValue<int64_t>(0, 0);
 
-    db->conn().Query(
-        "INSERT INTO symbols (id, file_id, name, kind, start_line, end_line) VALUES "
-        "(nextval('seq_id'), " + std::to_string(fid) + ", 'myFunction', 'function', 1, 10)");
+    db->conn().Query("INSERT INTO symbols (id, file_id, name, kind, start_line, end_line) VALUES "
+                     "(nextval('seq_id'), " +
+                     std::to_string(fid) + ", 'myFunction', 'function', 1, 10)");
     auto sr = db->conn().Query("SELECT id FROM symbols WHERE name = 'myFunction'");
     int64_t sid_sym = sr->GetValue<int64_t>(0, 0);
 
     db->conn().Query(
         "INSERT INTO edges (id, from_file, to_file, from_symbol, to_symbol, kind) VALUES "
-        "(nextval('seq_id'), " + std::to_string(fid) + ", " + std::to_string(fid) +
-        ", " + std::to_string(sid_sym) + ", " + std::to_string(sid_sym) + ", 'calls')");
+        "(nextval('seq_id'), " +
+        std::to_string(fid) + ", " + std::to_string(fid) + ", " + std::to_string(sid_sym) + ", " +
+        std::to_string(sid_sym) + ", 'calls')");
 
     auto cache = axon::load_symbol_name_cache(*db, 500);
     EXPECT_TRUE(cache.count("myFunction") > 0);

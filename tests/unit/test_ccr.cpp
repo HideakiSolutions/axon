@@ -9,8 +9,7 @@ namespace fs = std::filesystem;
 
 static fs::path make_temp_db() {
     auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path() /
-           ("axon_ccr_test_" + std::to_string(stamp) + ".duckdb");
+    return fs::temp_directory_path() / ("axon_ccr_test_" + std::to_string(stamp) + ".duckdb");
 }
 
 class CcrTest : public ::testing::Test {
@@ -41,8 +40,7 @@ TEST_F(CcrTest, ArtifactIdIsDeterministicAndContentSensitive) {
 
 TEST_F(CcrTest, StoreAndRetrieveRoundTripsOriginalContent) {
     std::string content = "int f() {\n    int x = 1;\n    return x;\n}\n";
-    std::string id = axon::ccr_store_artifact(
-        *db, "capsule_body", "src/a.cpp:1-4", content, 12);
+    std::string id = axon::ccr_store_artifact(*db, "capsule_body", "src/a.cpp:1-4", content, 12);
 
     auto artifact = axon::ccr_retrieve_artifact(*db, id);
     ASSERT_TRUE(artifact.has_value());
@@ -78,8 +76,8 @@ TEST_F(CcrTest, RecoverableOutputStoresOriginalAndPrependsMarker) {
     std::string original(4000, 'x');
     std::string lossy = "# summary\nimportant line\n";
 
-    auto result = axon::ccr_make_recoverable_output(
-        *db, "shell_filter", "filter.test:stdin", original, lossy, 1000);
+    auto result = axon::ccr_make_recoverable_output(*db, "shell_filter", "filter.test:stdin",
+                                                    original, lossy, 1000);
 
     ASSERT_TRUE(result.recoverable);
     EXPECT_FALSE(result.artifact_id.empty());
@@ -99,8 +97,8 @@ TEST_F(CcrTest, RecoverableOutputFallsBackWhenMarkerRemovesSavings) {
     std::string original = "short original output\n";
     std::string lossy = "short summary\n";
 
-    auto result = axon::ccr_make_recoverable_output(
-        *db, "shell_filter", "filter.test:stdin", original, lossy, 6);
+    auto result = axon::ccr_make_recoverable_output(*db, "shell_filter", "filter.test:stdin",
+                                                    original, lossy, 6);
 
     EXPECT_FALSE(result.recoverable);
     EXPECT_TRUE(result.artifact_id.empty());
@@ -115,8 +113,7 @@ protected:
 
     void SetUp() override {
         auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        ccr_dir = fs::temp_directory_path() /
-                  ("axon_ccr_file_test_" + std::to_string(stamp));
+        ccr_dir = fs::temp_directory_path() / ("axon_ccr_file_test_" + std::to_string(stamp));
     }
 
     void TearDown() override {
@@ -127,8 +124,8 @@ protected:
 
 TEST_F(CcrFileStoreTest, FileStoreRoundTripsAndMatchesDbArtifactId) {
     std::string content = "int f() {\n    return 42;\n}\n";
-    std::string id = axon::ccr_store_artifact_file(
-        ccr_dir, "shell_filter", "filter.grep:stdin", content, 12);
+    std::string id =
+        axon::ccr_store_artifact_file(ccr_dir, "shell_filter", "filter.grep:stdin", content, 12);
 
     ASSERT_FALSE(id.empty());
     // Same inputs must produce the same id as the DB store, so an artifact
@@ -158,8 +155,8 @@ TEST_F(CcrFileStoreTest, RecoverableOutputWorksWithFileStore) {
                                     const std::string& content, int64_t tokens) {
         return axon::ccr_store_artifact_file(ccr_dir, k, ref, content, tokens);
     };
-    auto result = axon::ccr_make_recoverable_output(
-        store, "shell_filter", "filter.test:stdin", original, lossy, 1000);
+    auto result = axon::ccr_make_recoverable_output(store, "shell_filter", "filter.test:stdin",
+                                                    original, lossy, 1000);
 
     ASSERT_TRUE(result.recoverable);
     EXPECT_FALSE(result.artifact_id.empty());

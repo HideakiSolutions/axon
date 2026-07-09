@@ -49,8 +49,15 @@ std::optional<RepoEntry> find_repo(const std::string& root);
 
 // Remove entries whose root directory no longer exists and whose registered
 // owner process (if any) is dead; group memberships of pruned repos are
-// dropped too. Returns the number of entries removed (0 = registry untouched).
+// dropped too. Kept entries whose registered owner died (live root, dead
+// pid) get their owner fields zeroed. Returns the number of entries removed
+// (0 + no dead owners = registry untouched).
 int prune_registry();
+
+// How many entries prune_registry() would remove right now. Read-only —
+// serve startup prints an advisory from this instead of auto-pruning
+// (a temporarily unmounted root must not lose its registration).
+int count_prunable(const RegistryData& reg);
 
 // Get all repos
 std::vector<RepoEntry> get_repos(const RegistryData& reg);

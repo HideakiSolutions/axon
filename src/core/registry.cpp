@@ -187,19 +187,45 @@ static bool process_alive(long long pid) {
 #endif
 }
 
+int count_prunable(const RegistryData& reg) {
+    int dead = 0;
+    for (const auto& r : reg.repos) {
+        bool root_exists = std::filesystem::exists(r.root);
+        bool owner_alive = r.owner_pid != 0 && process_alive(r.owner_pid);
+        if (!root_exists && !owner_alive) dead++;
+    }
+    return dead;
+}
+
 int prune_registry() {
     auto reg = load_registry();
     std::vector<RepoEntry> kept;
     kept.reserve(reg.repos.size());
     int removed = 0;
+    int owners_cleared = 0;
     for (auto& r : reg.repos) {
         bool root_exists = std::filesystem::exists(r.root);
         bool owner_alive = r.owner_pid != 0 && process_alive(r.owner_pid);
         if (root_exists || owner_alive) {
+            // A dead owner on a live root is stale bookkeeping (the process
+            // exited without clear_repo_owner — crash, SIGKILL): zero it so
+            // status/peers don't chase a gone endpoint. Serve takeover also
+            // handles this lazily; prune just makes the registry honest now.
+            if (r.owner_pid != 0 && !owner_alive) {
+                r.owner_pid = 0;
+                r.owner_port = 0;
+                r.owner_token.clear();
+                owners_cleared++;
+            }
             kept.push_back(std::move(r));
         } else {
             removed++;
         }
+    }
+    if (removed == 0 && owners_cleared > 0) {
+        reg.repos = std::move(kept);
+        save_registry(reg);
+        return 0;
     }
     if (removed == 0) return 0;
 
