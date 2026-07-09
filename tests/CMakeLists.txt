@@ -54,6 +54,7 @@ add_axon_test(test_watcher
     ${CMAKE_SOURCE_DIR}/src/core/watcher_poll.cpp
     ${CMAKE_SOURCE_DIR}/src/core/watcher_inotify.cpp
     ${CMAKE_SOURCE_DIR}/src/core/watcher_fsevents.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/watcher_win32.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skip_dirs.cpp
 )
 if(APPLE)

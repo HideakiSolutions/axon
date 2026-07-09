@@ -172,7 +172,7 @@ TEST(WatcherFactory, NativeModeFailsHardWhenForced) {
     fs::remove_all(proj);
 }
 
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
 // Native detection must beat the polling interval — the reason this backend
 // exists. Poll needs ~interval_ms; native should see the event well before.
 TEST(WatcherLatency, NativeDetectsFasterThanPollInterval) {

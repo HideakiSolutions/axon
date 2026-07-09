@@ -36,7 +36,7 @@ public:
     // Wake a blocked wait_for_changes and make every later call return false.
     virtual void stop() = 0;
 
-    virtual const char* backend_name() const = 0; // "inotify" | "fsevents" | "poll"
+    virtual const char* backend_name() const = 0; // "inotify" | "fsevents" | "win32" | "poll"
 };
 
 // Auto: try the platform's native backend, fall back to polling with a
