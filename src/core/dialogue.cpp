@@ -121,7 +121,7 @@ static std::string build_digest(Database& db, int64_t session_id) {
     auto tr = db.conn().Query("SELECT t.id, t.role, t.content"
                               " FROM turns t"
                               " WHERE t.session_id = " +
-                              std::to_string(session_id) + " ORDER BY t.ts ASC");
+                              std::to_string(session_id) + " ORDER BY t.ts ASC, t.id ASC");
     if (tr->HasError() || tr->RowCount() == 0) {
         return "[SESSION: " + label + " | " + started_at + " → " + ended_at + "]\n" + anchors_line +
                "\n(no turns)";
@@ -200,7 +200,7 @@ void session_end(Database& db, int64_t session_id, EmbeddingModel* model, bool c
 std::vector<Turn> session_get(Database& db, int64_t session_id, int limit) {
     auto res = db.conn().Query("SELECT id, session_id, role, content, CAST(ts AS VARCHAR)"
                                " FROM turns WHERE session_id = " +
-                               std::to_string(session_id) + " ORDER BY ts ASC LIMIT " +
+                               std::to_string(session_id) + " ORDER BY ts ASC, id ASC LIMIT " +
                                std::to_string(limit));
     if (res->HasError()) throw std::runtime_error("session_get: " + res->GetError());
 
