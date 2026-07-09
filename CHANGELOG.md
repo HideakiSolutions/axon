@@ -5,7 +5,7 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.14] — 2026-07-09
 
 ### Performance
 - Capsule assembly no longer re-parses support files with tree-sitter at query time: the file-level augment/support loops now serve the skeleton precomputed at index time (`files.skeleton`, the same source the `get_skeleton` tool already reads), falling back to the live parse only when the index holds none. Measured on a capsule miss (K=25 per repo): assembly median 680ms → 246ms (−64%) on a 6.6k-symbol repo and 198ms → 81ms (−59%) on this repo; the re-parse stage itself dropped 543ms → 102ms and 92ms → 8ms. Contract note: capsule skeletons now reflect the index (like every other capsule ingredient and every cache hit already did); full pivot bodies keep reading the disk.
