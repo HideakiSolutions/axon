@@ -151,6 +151,28 @@ TEST_F(ObjTest, CapsuleFileTraceabilitySurvivesCacheRoundTrip) {
     EXPECT_NE(hit->support_files[0].expand_command.find("get_context_capsule"), std::string::npos);
 }
 
+TEST_F(ObjTest, CapsuleCachePruneReapsForeignEpochsOnly) {
+    // Entries keyed to another epoch are unreachable forever (lookup requires
+    // an exact epoch match) — before the prune they just accumulated.
+    axon::ContextCapsule cap;
+    cap.query = "q";
+    cap.token_estimate = 1;
+    axon::capsule_cache_insert(*db, "key-old", "epoch-A", cap);
+    axon::capsule_cache_insert(*db, "key-older", "epoch-A2", cap);
+    axon::capsule_cache_insert(*db, "key-cur", "epoch-B", cap);
+
+    EXPECT_EQ(axon::capsule_cache_prune(*db, "epoch-B"), 2);
+
+    EXPECT_FALSE(axon::capsule_cache_lookup(*db, "key-old", "epoch-A").has_value());
+    EXPECT_TRUE(axon::capsule_cache_lookup(*db, "key-cur", "epoch-B").has_value());
+
+    // Idempotent: nothing foreign left to reap.
+    EXPECT_EQ(axon::capsule_cache_prune(*db, "epoch-B"), 0);
+
+    auto count = db->conn().Query("SELECT COUNT(*) FROM capsule_cache");
+    EXPECT_EQ(count->GetValue<int64_t>(0, 0), 1);
+}
+
 // ── Pending embed tracking: turns sem modelo → embedding IS NULL ──────────────
 
 TEST_F(ObjTest, TurnsAddedWithoutModelHaveNullEmbedding) {

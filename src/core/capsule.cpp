@@ -713,4 +713,16 @@ void capsule_cache_insert(Database& db, const std::string& key, const std::strin
     }
 }
 
+int capsule_cache_prune(Database& db, const std::string& current_epoch) {
+    auto res = db.conn().Query("DELETE FROM capsule_cache WHERE epoch != '" +
+                               sql_quote(current_epoch) + "'");
+    if (res->HasError()) {
+        std::cerr << "[capsule_cache] prune failed (non-fatal): " << res->GetError() << "\n";
+        return 0;
+    }
+    // DuckDB reports a DELETE as a single-row result holding the count.
+    if (res->RowCount() == 0) return 0;
+    return (int)res->GetValue<int64_t>(0, 0);
+}
+
 } // namespace axon

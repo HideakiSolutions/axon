@@ -116,9 +116,9 @@ void Database::run_migrations() {
 
     // Capsule cache (W2.T01). Keyed by BLAKE3(query + project_epoch) where
     // project_epoch = max(files.indexed_at). When the index changes, the
-    // epoch shifts and old entries become unreachable — they sit dead in the
-    // table until the periodic prune below reaps them. Cache hits avoid the
-    // expensive embedding + ranking + skeletonization roundtrip.
+    // epoch shifts and old entries become unreachable — capsule_cache_prune
+    // reaps them after every (re)index that moved the epoch. Cache hits avoid
+    // the expensive embedding + ranking + skeletonization roundtrip.
     exec("CREATE TABLE IF NOT EXISTS capsule_cache ("
          "  query_hash  VARCHAR PRIMARY KEY,"
          "  epoch       VARCHAR NOT NULL,"
