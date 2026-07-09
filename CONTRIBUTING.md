@@ -38,10 +38,32 @@ both; locally `apt/brew install ripgrep jq` runs them for real.
 
 | Workflow | Trigger | Scope |
 |----------|---------|-------|
-| `.github/workflows/build.yml`   | push/PR to main+develop | matrix build (ubuntu-22.04 + macos-14) + ctest |
-| `.github/workflows/lint.yml`    | push/PR to main+develop | shellcheck + clang-format-15 (advisory) |
+| `.github/workflows/build.yml`   | push/PR to main+develop | matrix build + ctest on ubuntu-22.04, macos-14, windows-2022 (all three required on `main`) |
+| `.github/workflows/lint.yml`    | push/PR to main+develop | shellcheck + clang-format-15 over `src/` and `tests/` (required) |
+| `.github/workflows/sanitizers.yml` | nightly + push to develop | ASAN + UBSAN over the gtest units (`ctest -LE smoke`) |
 | `.github/workflows/release.yml` | tag push (`v*.*.*`)     | multi-target tarball + GitHub Release |
 | `.github/workflows/ci.yml`      | push/PR                 | shellcheck only — kept for compatibility |
+
+### Native filesystem watchers
+
+`axon watch` has a native backend per platform — inotify (Linux), FSEvents
+(macOS), ReadDirectoryChangesW (Windows) — behind a shared `Watcher`
+interface, with a portable poll fallback. All three are exercised **for real**
+by the parameterized `test_watcher` suite (`INSTANTIATE_TEST_SUITE_P(Native,
+…)`) on their own CI platform, including the "native beats the poll interval"
+latency guarantee — so the win32 backend is covered hermetically on
+`windows-2022` the same way inotify/FSEvents are on Linux/macOS.
+
+If you have a physical Windows box and want to field-validate beyond CI:
+
+```bash
+# From Git Bash / MSYS on Windows:
+axon watch . --backend=native      # expect: "backend win32"
+#   then, in another shell, touch/edit/delete .ts/.py files under the tree
+#   and a nested new subdirectory — the watcher should log reindex/prune
+axon watch . --backend=poll        # fallback parity check (same reindex/prune)
+AXON_WATCH_FORCE_OVERFLOW=1 axon watch .   # forces the full-rescan path
+```
 
 ## Adding a Language Parser
 
