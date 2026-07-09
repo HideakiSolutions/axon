@@ -195,6 +195,37 @@ LD_LIBRARY_PATH=/path/to/duckdb/lib /path/to/axon/build/axon serve
 
 ---
 
+### axon MCP tools stop responding after upgrading or killing a serve
+
+**Symptom:** After installing a new axon build (or after an `axon serve`
+process was killed), the `mcp__axon__*` tools disappear or error out for the
+rest of the session, even though `axon --version` on the command line already
+reports the new version.
+
+**Why:** an MCP server is loaded once when the session starts and runs for the
+session's lifetime. The binary is memory-mapped at spawn — replacing the file
+on disk (or swapping the dist directory) does not touch the running process,
+and killing that process does **not** make Claude Code respawn it mid-session.
+The client marks the server disconnected and the tools go away until it is
+reconnected.
+
+**Fix:** reconnect the MCP server, then the tools return on the current
+binary:
+
+- In Claude Code, run `/mcp` and reconnect the `axon` server, **or** start a
+  fresh session (a new session spawns the server from the current binary).
+- To verify which binary a running serve is on: `ls -l /proc/<pid>/exe` for
+  each `pgrep -f "axon serve"` (an inode marked `(deleted)`, or a path under an
+  old `axon-dist-backup-*`, means it is a stale process still on the previous
+  version).
+
+**Note for the CLI:** the `axon` CLI (`capsule`, `skeleton`, `registry prune`,
+`filter`, …) runs the on-disk binary every invocation, so it always reflects
+the installed version immediately — only the long-lived MCP/serve process is
+pinned to its spawn-time binary.
+
+---
+
 ### Write-through hooks not firing
 
 **Symptom:** Files edited in Claude Code are not reindexed.
