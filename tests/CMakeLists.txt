@@ -271,3 +271,18 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_shell_filter_aggregate_benchmark.sh $<TARGET_FILE:axon>
 )
 set_tests_properties(test_shell_filter_aggregate_benchmark PROPERTIES SKIP_RETURN_CODE 77)
+
+# The bash smokes drive the built `axon` binary through subprocesses (serve,
+# FIFOs, HTTP, kill timing) — behavior tests, not memory tests. They are
+# covered on three platforms by build.yml; the `smoke` label lets the ASAN/
+# UBSAN nightly exclude them (`ctest -LE smoke`) so it sanitizes the
+# deterministic gtest units without the fragility of a whole serve under ASAN.
+set_tests_properties(
+    test_cli_filter_json_metrics
+    test_mcp_capsule_schema
+    test_cpp_header_impl
+    test_http_status_codes
+    test_docs_freshness
+    test_shell_guard_hook
+    test_shell_filter_aggregate_benchmark
+    PROPERTIES LABELS smoke)

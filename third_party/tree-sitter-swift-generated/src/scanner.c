@@ -234,7 +234,11 @@ struct ScannerState {
 };
 
 void *tree_sitter_swift_external_scanner_create() {
-    return calloc(0, sizeof(struct ScannerState));
+    // axon patch: upstream generated calloc(0, ...) — the count is the first
+    // arg, so this allocated a zero-element buffer and every read/write of
+    // state->ongoing_raw_str_hash_count was a heap-buffer-overflow (caught by
+    // the ASAN nightly in eat_raw_str_part). Allocate one ScannerState.
+    return calloc(1, sizeof(struct ScannerState));
 }
 
 void tree_sitter_swift_external_scanner_destroy(void *payload) {
