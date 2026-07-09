@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `axon metrics [--json]`: the per-layer telemetry aggregate (retrieval/cache/ccr/compression/shell_filtering — requests, tokens sent/saved, average latency) that `serve --http` exposes at `/api/metrics`, now available straight from the CLI without standing up the HTTP server. The savings pipeline had no CLI consumer; this gives it one. Human table by default, raw JSON with `--json`.
+
 ### Performance
 - Capsule assembly fetches support-file skeletons in a single batched query instead of one `SELECT … WHERE id = ?` per file. Profiling the residual after the index-skeleton change showed those N single-row round-trips — not the BFS or string work — were the whole augment cost (196 support files = 196 queries ≈ 100 ms on a 6.6k-symbol repo). One `WHERE id IN (…)` collapses them to ~5 ms; capsule-miss assembly on that repo drops from ~246 ms to ~95 ms. Same rows, same fallback semantics — purely fewer round-trips.
 

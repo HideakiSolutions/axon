@@ -73,6 +73,7 @@ Usage:
                                         Filter stdin output (auto|diff|lint|log|grep|json|package|test|tsc|text)
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
+  axon metrics [--json]                 Show per-layer telemetry (token savings, latency)
   axon registry prune                   Drop registry entries whose repo root is gone
   axon help                             Show this help
   axon --version | -V                   Print version and git SHA
@@ -793,6 +794,47 @@ int main(int argc, char* argv[]) {
         std::cout << "Symbols:  " << sm.GetValue<int64_t>(0, 0) << "\n";
         std::cout << "Edges:    " << em.GetValue<int64_t>(0, 0) << "\n";
         std::cout << "Embedded: " << embm.GetValue<int64_t>(0, 0) << " symbols\n";
+        return 0;
+    }
+
+    // ── axon metrics [--json] ──────────────────────────────────────────────
+    // The per-layer telemetry aggregate that `serve --http` exposes at
+    // /api/metrics, but from the CLI so it has a consumer without standing up
+    // the HTTP server. Human table by default; --json prints the raw object.
+    if (cmd == "metrics") {
+        bool as_json = false;
+        for (int i = 2; i < argc; i++)
+            if (std::string(argv[i]) == "--json") as_json = true;
+
+        auto cfg = load_config();
+        std::unique_ptr<axon::Database> db;
+        if (fs::exists(cfg.db_path)) {
+            db = open_database_or_report(cfg.db_path);
+            if (!db) return 1;
+        }
+        auto metrics = axon::metrics_json(cfg, db.get());
+
+        if (as_json) {
+            std::cout << metrics.dump(2) << "\n";
+            return 0;
+        }
+
+        if (!metrics.value("telemetry_enabled", false)) {
+            std::cout << "Telemetry is disabled (opt-in). Enable with "
+                         "`telemetry = true` in .axon/config.toml or AXON_TELEMETRY=1.\n";
+            return 0;
+        }
+        std::cout << "Telemetry (per layer):\n";
+        printf("  %-16s %8s %10s %12s %8s\n", "layer", "requests", "tokens_out", "tokens_saved",
+               "avg_ms");
+        for (const auto& layer : {"retrieval", "cache", "ccr", "compression", "shell_filtering"}) {
+            auto it = metrics.find("layers");
+            if (it == metrics.end() || !it->contains(layer)) continue;
+            const auto& L = (*it)[layer];
+            printf("  %-16s %8lld %10lld %12lld %8.1f\n", layer, (long long)L.value("requests", 0),
+                   (long long)L.value("tokens_sent", 0), (long long)L.value("tokens_saved", 0),
+                   L.value("average_latency_ms", 0.0));
+        }
         return 0;
     }
 
