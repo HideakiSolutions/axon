@@ -5,6 +5,14 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Heap-buffer-overflow indexing Swift files: the vendored Swift tree-sitter scanner allocated its state with `calloc(0, …)` (a zero-element buffer), so every access to the scanner's hash-count state ran past the allocation. Harmless-looking in release builds (it landed in allocator padding) but a latent heap-corruption/crash risk, and the reason the ASAN/UBSAN nightly was red. Now `calloc(1, …)`.
+
+### CI
+- The sanitizer nightly built only one test target yet ran the whole ctest suite, so every axon-binary smoke failed with "No such file or directory" independent of any sanitizer result. It now builds the full suite and runs the deterministic gtest units under ASAN/UBSAN (`ctest -LE smoke`), excluding the subprocess bash smokes already covered on three platforms by `build.yml`.
+
 ## [1.2.14] — 2026-07-09
 
 ### Performance
