@@ -1,4 +1,5 @@
 #include "indexer.hpp"
+#include "capsule.hpp"
 #include "skeleton.hpp"
 #include "../parser/parser.hpp"
 #include <filesystem>
@@ -506,6 +507,15 @@ static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root)
     return (int)victims.size();
 }
 
+// Capsule-cache entries are keyed to the index epoch; any (re)index that
+// changed or pruned files moved the epoch and stranded the old entries
+// forever (lookups require an exact epoch match). Reap them at the choke
+// points every index path funnels through.
+static void reap_stale_capsule_cache(Database& db, const IndexStats& stats) {
+    if (stats.files_indexed == 0 && stats.files_pruned == 0) return;
+    capsule_cache_prune(db, current_project_epoch(db));
+}
+
 IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_progress,
                          bool force) {
     IndexStats stats;
@@ -599,6 +609,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     // Prune deleted and newly-ignored files
     stats.files_pruned = sweep_deleted(conn, cfg.project_root);
 
+    reap_stale_capsule_cache(db, stats);
     return stats;
 }
 
@@ -692,12 +703,14 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
 
     if (prune) stats.files_pruned = sweep_deleted(conn, cfg.project_root);
 
+    reap_stale_capsule_cache(db, stats);
     return stats;
 }
 
 IndexStats sync_project(const Config& cfg, Database& db, ProgressCallback cb) {
     auto stats = index_project(cfg, db, cb);
     stats.files_pruned = sweep_deleted(db.conn(), cfg.project_root);
+    reap_stale_capsule_cache(db, stats);
     return stats;
 }
 

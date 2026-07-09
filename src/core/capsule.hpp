@@ -77,4 +77,10 @@ std::optional<ContextCapsule> capsule_cache_lookup(Database& db, const std::stri
 void capsule_cache_insert(Database& db, const std::string& key, const std::string& epoch,
                           const ContextCapsule& capsule);
 
+// Reap cache entries stranded on another epoch — lookups require an exact
+// epoch match, so any row whose epoch differs from the current one is
+// unreachable forever. Called after every (re)index that moved the epoch.
+// Best-effort like the insert; returns rows deleted (0 on error).
+int capsule_cache_prune(Database& db, const std::string& current_epoch);
+
 } // namespace axon

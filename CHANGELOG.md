@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `capsule_cache_prune`: entries stranded on an old index epoch are now reaped after every (re)index that moved the epoch (full index, incremental `index-paths`, watch-driven sync). They were unreachable by construction — lookups require an exact epoch match — but accumulated in the table forever; the schema comment even promised a prune that never existed.
+
 ### Security
 - VS Code extension dev toolchain: cleared all 9 open Dependabot alerts (undici ×6 incl. SOCKS5 TLS-bypass and cross-origin routing, form-data CRLF injection, tmp path traversal, markdown-it quadratic DoS) by refreshing the lockfile and bumping `@vscode/vsce` 2.32 → 3.9.2. All were `development`-scope transitive dependencies of the packaging tool — nothing vulnerable ships inside the published `.vsix` (its only production dependency, `vscode-languageclient`, is unchanged). `npm audit`: 0 vulnerabilities; packaging re-validated end-to-end.
 
