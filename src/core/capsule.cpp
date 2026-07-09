@@ -9,6 +9,8 @@
 #include <sstream>
 #include <algorithm>
 #include <iostream>
+#include <chrono>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace axon {
@@ -63,6 +65,33 @@ static bool fetch_file_skeleton(Database& db, int64_t file_id, std::string& lang
     language_out = res->GetValue(0, 0).ToString();
     skeleton_out = res->GetValue(1, 0).ToString();
     return true;
+}
+
+// Batch variant: one query for a whole set of file ids, returned as
+// id -> {language, skeleton}. The per-file loops fetched skeletons one row at
+// a time, and those N single-row round-trips — not the BFS or the string work —
+// were the entire augment residual after the index-skeleton change (F13-2
+// profile on a 6.6k-symbol repo: ~100ms of selects vs ~0.1ms of BFS). One
+// IN-list query collapses them.
+static std::unordered_map<int64_t, std::pair<std::string, std::string>>
+fetch_file_skeletons(Database& db, const std::vector<int64_t>& file_ids) {
+    std::unordered_map<int64_t, std::pair<std::string, std::string>> out;
+    if (file_ids.empty()) return out;
+    std::ostringstream ids;
+    for (size_t i = 0; i < file_ids.size(); i++) {
+        if (i) ids << ",";
+        ids << file_ids[i];
+    }
+    auto res = db.conn().Query("SELECT id, language, COALESCE(skeleton, '') "
+                               "FROM files WHERE id IN (" +
+                               ids.str() + ")");
+    if (res->HasError()) return out;
+    auto& mat = *res;
+    out.reserve(mat.RowCount());
+    for (duckdb::idx_t i = 0; i < mat.RowCount(); i++)
+        out.emplace(mat.GetValue<int64_t>(0, i),
+                    std::make_pair(mat.GetValue(1, i).ToString(), mat.GetValue(2, i).ToString()));
+    return out;
 }
 
 // Returns top-K matches preserving WHICH symbol matched (not just file).
@@ -438,6 +467,11 @@ ContextCapsule assemble_capsule(const std::string& query,
             auto traversal =
                 bfs_from_pivots(graph, pivot_ids, 2, token_budget - cap.token_estimate);
             int tokens_used = cap.token_estimate;
+            std::vector<int64_t> sup_ids;
+            sup_ids.reserve(traversal.support_files.size());
+            for (const auto& node : traversal.support_files)
+                sup_ids.push_back(node.file_id);
+            auto sup_skels = fetch_file_skeletons(db, sup_ids);
             for (const auto& node : traversal.support_files) {
                 if (tokens_used >= token_budget) break;
                 // Skip files already rendered as pivots
@@ -453,8 +487,10 @@ ContextCapsule assemble_capsule(const std::string& query,
                 // index time); re-parsing it live was 80% of a capsule miss
                 // on a 6.6k-symbol repo. Empty = the index has none — fall
                 // back to the old live path.
-                std::string lang_str, skel;
-                if (!fetch_file_skeleton(db, node.file_id, lang_str, skel)) continue;
+                auto sk_it = sup_skels.find(node.file_id);
+                if (sk_it == sup_skels.end()) continue;
+                const std::string& lang_str = sk_it->second.first;
+                std::string skel = sk_it->second.second;
                 if (skel.empty()) {
                     auto lopt = lang_from_string(lang_str);
                     auto content = read_file(project_root / node.path);
@@ -542,11 +578,19 @@ ContextCapsule assemble_capsule(const std::string& query,
 
     // 4. Support files — skeletonized from the index (live fallback when the
     // index holds none — same contract as the symbol-mode augment above).
+    // One batched fetch instead of a per-file SELECT (F13-2).
+    std::vector<int64_t> support_ids;
+    support_ids.reserve(traversal.support_files.size());
+    for (const auto& node : traversal.support_files)
+        support_ids.push_back(node.file_id);
+    auto support_skels = fetch_file_skeletons(db, support_ids);
     for (const auto& node : traversal.support_files) {
         if (tokens_used >= token_budget) break;
 
-        std::string lang_str, skeleton;
-        if (!fetch_file_skeleton(db, node.file_id, lang_str, skeleton)) continue;
+        auto sk_it = support_skels.find(node.file_id);
+        if (sk_it == support_skels.end()) continue;
+        const std::string& lang_str = sk_it->second.first;
+        std::string skeleton = sk_it->second.second;
         if (skeleton.empty()) {
             auto lang_opt = lang_from_string(lang_str);
             auto content = read_file(project_root / node.path);
