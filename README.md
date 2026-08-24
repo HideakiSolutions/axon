@@ -300,6 +300,11 @@ The built-in page renders the indexed graph directly from `/api/graph`. The comp
 
 Telemetry is local and off by default. Enable it with `AXON_TELEMETRY=1` or `telemetry = true` in `.axon/config.toml`; events are stored in DuckDB and exposed through `/api/metrics`. Totals remain backward-compatible, and `layers` separates savings for `retrieval`, `shell_filtering`, `compression`, `cache`, `ccr`, and `unknown`. Remote POST is attempted only when `AXON_TELEMETRY_ENDPOINT` is set, and failures are ignored.
 
+The operational policy keeps telemetry disabled until the registered project
+owner explicitly approves an aggregate-only local collection. Prompts, paths,
+content, secrets, and remote export remain out of scope; see
+[`docs/telemetry-policy.md`](docs/telemetry-policy.md).
+
 Shell output filtering starts with `axon filter <auto|diff|lint|log|grep|json|package|test|tsc|text> [--budget=N] [--metrics=json]`, which reads stdin, classifies output before compression, and passes through unchanged when filtering is unsafe or does not save tokens. `grep`/`rg`-style output is grouped by file with per-file omissions and long-line truncation, `log` output counts levels, deduplicates repeated messages, and keeps important/error edge lines, JSON output is parsed into a schema/shape summary that strips raw values, `lint` output groups diagnostics by file and rule, `package` output collapses repeated npm/pnpm/yarn install operations while keeping errors and summaries, `test` output keeps failure blocks and final summaries, and `tsc`/TypeScript compiler diagnostics are grouped by file and diagnostic code. Lossy shell summaries are emitted with an `axon:ccr` marker and `ccr_artifact_id` stderr field; use `axon artifact-retrieve <id>` to recover the exact original stdin. Default metrics are human-readable on stderr; pass `--metrics=json` for machine-readable command metrics. When `AXON_TELEMETRY=1` and a project DB exists, savings are recorded in the `shell_filtering` layer.
 
 ### Watch mode
@@ -389,11 +394,22 @@ brew tap HideakiSolutions/axon
 brew install axon
 ```
 
-After installation, wire axon into a Claude Code project (installs Grep/Glob, raw shell-output, build, auto-index, and write-through hooks + injects the workflow guide):
+After installation, wire axon into a Claude Code project (installs Grep/Glob, raw shell-output, build, auto-index, write-through, and bounded queue-drain hooks + injects the workflow guide):
 
 ```bash
 axon-setup /path/to/your-project
 ```
+
+The queue fallback is project-local: it only attempts a drain after the queue
+reaches its configured age or size threshold, serializes with a per-project
+lock, and never sweeps every repository in the local Axon registry.
+
+When a legacy mixed queue is routed with
+`scripts/maintenance/route_pending_writes.py --apply`, entries without a
+registered owner are retained as dated quarantine evidence. Later routing runs
+automatically recover only quarantined paths that both still exist and belong
+to a registered project; temporary, deleted, and unknown paths stay
+quarantined rather than being reintroduced into an index queue.
 
 ### Direct download (no Homebrew)
 

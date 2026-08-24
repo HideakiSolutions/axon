@@ -110,6 +110,10 @@ cp "$SCRIPTS_DIR/hooks/axon-post-edit.sh" "$HOOKS_DIR/axon-post-edit.sh"
 chmod +x "$HOOKS_DIR/axon-post-edit.sh"
 echo "[axon] ✓ Hook post-edit: $HOOKS_DIR/axon-post-edit.sh"
 
+cp "$SCRIPTS_DIR/hooks/axon-queue-drain.sh" "$HOOKS_DIR/axon-queue-drain.sh"
+chmod +x "$HOOKS_DIR/axon-queue-drain.sh"
+echo "[axon] ✓ Queue drain fallback: $HOOKS_DIR/axon-queue-drain.sh"
+
 cp "$SCRIPTS_DIR/hooks/axon-build-guard.sh" "$HOOKS_DIR/axon-build-guard.sh"
 chmod +x "$HOOKS_DIR/axon-build-guard.sh"
 echo "[axon] ✓ Hook build-guard: $HOOKS_DIR/axon-build-guard.sh"

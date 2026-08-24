@@ -267,6 +267,31 @@ add_test(
 )
 
 add_test(
+    NAME test_auto_index_project_key
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_auto_index_project_key.sh
+)
+
+add_test(
+    NAME test_post_edit_project_boundary
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_post_edit_project_boundary.sh
+)
+
+add_test(
+    NAME test_route_pending_writes
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_route_pending_writes.sh
+)
+
+add_test(
+    NAME test_queue_drain
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_queue_drain.sh
+)
+
+add_test(
+    NAME test_queue_drain_registry_scope
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_queue_drain_registry_scope.sh
+)
+
+add_test(
     NAME test_shell_filter_aggregate_benchmark
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_shell_filter_aggregate_benchmark.sh $<TARGET_FILE:axon>
 )
@@ -284,5 +309,10 @@ set_tests_properties(
     test_http_status_codes
     test_docs_freshness
     test_shell_guard_hook
+    test_auto_index_project_key
+    test_post_edit_project_boundary
+    test_route_pending_writes
+    test_queue_drain
+    test_queue_drain_registry_scope
     test_shell_filter_aggregate_benchmark
     PROPERTIES LABELS smoke)

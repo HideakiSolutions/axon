@@ -58,7 +58,7 @@ get_tests_for(files=[arquivos editados])
 
 Hook PostToolUse (`axon-post-edit.sh`) cobre toda mudança no filesystem e o MCP server reconcilia antes de cada tool call — **não é preciso chamar `run_pipeline` entre edições**:
 
-- **Write / Edit / MultiEdit / NotebookEdit** → path entra em `.axon/pending-writes.txt`; drain re-indexa + embeda na próxima tool call.
+- **Write / Edit / MultiEdit / NotebookEdit** → path entra em `.axon/pending-writes.txt`; drain re-indexa + embeda na próxima tool call. Se o cliente ficar ocioso, o fallback automático do próprio projeto drena apenas quando a fila atinge o limiar de idade ou tamanho configurado.
 - **Bash** (rm, mv, git checkout, scripts) → toca `.axon/sync-requested`; walk + BLAKE3-skip + prune detecta deletes/renames/gerados.
 
 ## Build constraints — sempre `-j2`
