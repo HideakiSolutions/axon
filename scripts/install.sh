@@ -8,10 +8,11 @@
 #   1. ~/.claude/hooks/axon-guard.sh       — hook PreToolUse global (bloqueia Grep/Glob)
 #   2. ~/.claude/hooks/axon-auto-index.sh  — hook UserPromptSubmit (sweep horário de deletados)
 #   3. ~/.claude/hooks/axon-post-edit.sh   — hook PostToolUse (write-through síncrono após Write/Edit)
-#   4. ~/.claude/hooks/axon-build-guard.sh — hook PreToolUse (bloqueia make/ninja com -j alto)
-#   5. ~/.claude/hooks/axon-shell-guard.sh — hook PreToolUse (bloqueia shell output bruto ruidoso)
-#   6. <project>/.claude/CLAUDE.md         — instruções de uso do axon
-#   7. <project>/.claude/settings.json     — registra hooks para Grep, Glob, Bash, UserPromptSubmit, PostToolUse
+#   4. ~/.claude/hooks/axon-queue-drain.sh — fallback limitado para clientes ociosos
+#   5. ~/.claude/hooks/axon-build-guard.sh — hook PreToolUse (bloqueia make/ninja com -j alto)
+#   6. ~/.claude/hooks/axon-shell-guard.sh — hook PreToolUse (bloqueia shell output bruto ruidoso)
+#   7. <project>/.claude/CLAUDE.md         — instruções de uso do axon
+#   8. <project>/.claude/settings.json     — registra hooks para Grep, Glob, Bash, UserPromptSubmit, PostToolUse
 
 set -euo pipefail
 

@@ -5,6 +5,23 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.16] — 2026-08-28
+
+### Added
+- Bounded queue draining for idle clients: post-edit hooks now trigger a project-scoped worker when the pending queue reaches its age or size threshold, while the synchronous MCP drain remains the source of truth.
+- Native PowerShell post-edit and queue-drain hooks for Windows, installed alongside the existing Claude Code hooks and included in Windows release packages.
+
+### Fixed
+- macOS and Git Bash/Windows queue routing no longer depend on Linux-only `flock`, GNU `touch -d`, or POSIX-form registry paths. Bash queue writers recover dead owners without evicting a live worker, preserve edits through `sync-requested` on lock timeout, and reject paths outside the indexed project.
+- Queue-drain packaging now includes the hook and template directories in the Windows stage.
+- VS Code packages derive the VSIX filename from the manifest version instead of emitting the stale `axon-vscode-1.2.5.vsix` name.
+
+### Security
+- VS Code extension runtime upgraded to `vscode-languageclient` 10.1.0 and vulnerable transitive dependencies refreshed. Both full `npm audit` and production-only `npm audit --omit=dev` report zero vulnerabilities.
+
+### CI
+- Added portable queue concurrency, dead-owner recovery, project-boundary, Unicode/space path, timeout, registry-scope, and Windows PowerShell smoke coverage.
+
 ## [1.2.15] — 2026-07-09
 
 ### Added

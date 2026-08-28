@@ -103,6 +103,21 @@ jobs:
           echo "tag=${tag}"     >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      - name: Validate release version surfaces
+        shell: bash
+        run: |
+          version="${{ steps.ver.outputs.version }}"
+          cmake_version="$(sed -nE 's/^project\(axon VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
+          extension_version="$(node -p 'require("./editors/vscode/package.json").version')"
+          test -n "${version}"
+          test "${cmake_version}" = "${version}"
+          test "${extension_version}" = "${version}"
+          grep -F "## [${version}]" CHANGELOG.md >/dev/null
+          ./build/axon --version | grep -F "axon ${version} " >/dev/null
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            test -f "editors/vscode/axon-vscode-${version}.vsix"
+          fi
+
       - name: Stage release tree (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -152,6 +167,10 @@ jobs:
         run: |
           stage="$(cat .stage-name)"
           "${stage}/bin/axon" --version
+          test -x "${stage}/install.sh"
+          test -f "${stage}/hooks/axon-post-edit.sh"
+          test -f "${stage}/hooks/axon-queue-drain.sh"
+          test -f "${stage}/templates/CLAUDE.md"
 
       - name: Stage release tree (Windows)
         if: runner.os == 'Windows'
@@ -171,6 +190,8 @@ jobs:
           Copy-Item "scripts\README.package.md" "$stage\README.md"
           Copy-Item "LICENSE","CHANGELOG.md"  "$stage\"
           Copy-Item "scripts\install.ps1"                 "$stage\install.ps1"
+          Copy-Item "scripts\hooks"                       "$stage\hooks" -Recurse
+          Copy-Item "scripts\templates"                   "$stage\templates" -Recurse
           $stage | Out-File -Encoding ascii .stage-name
 
       - name: Validate staged package is self-contained (Windows)
@@ -178,6 +199,16 @@ jobs:
         shell: pwsh
         run: |
           $stage = (Get-Content .stage-name -Raw).Trim()
+          @(
+            "$stage\install.ps1",
+            "$stage\hooks\axon-post-edit.ps1",
+            "$stage\hooks\axon-queue-drain.ps1",
+            "$stage\templates\CLAUDE.md"
+          ) | ForEach-Object {
+            if (-not (Test-Path $_ -PathType Leaf)) {
+              throw "[release] staged package is missing required file: $_"
+            }
+          }
           # Run axon.exe from an isolated copy of bin\ with a minimal PATH so its
           # DLLs can only resolve from bin\ itself. A package missing any runtime
           # DLL (including the transitive llama -> ggml chain) fails here instead

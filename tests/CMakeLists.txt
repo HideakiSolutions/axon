@@ -291,6 +291,15 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_queue_drain_registry_scope.sh
 )
 
+if(WIN32)
+    add_test(
+        NAME test_windows_queue_hooks
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_windows_queue_hooks.ps1
+    )
+    set_tests_properties(test_windows_queue_hooks PROPERTIES LABELS smoke)
+endif()
+
 add_test(
     NAME test_shell_filter_aggregate_benchmark
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_shell_filter_aggregate_benchmark.sh $<TARGET_FILE:axon>

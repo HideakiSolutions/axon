@@ -23,8 +23,52 @@ if [[ "$count" -lt "$MAX_LINES" && "$age" -lt "$MAX_AGE_SECONDS" ]]; then
 fi
 
 key=$(printf '%s' "$ROOT" | cksum | awk '{print $1}')
-exec 9>"${TMPDIR:-/tmp}/axon-queue-drain-${key}.lock"
-flock -n 9 || { echo '[axon-queue-drain] already running' >&2; exit 0; }
+lock_token="$$-$(date +%s)-${RANDOM:-0}"
+lock_dir="${TMPDIR:-/tmp}/axon-queue-drain-${key}.lock"
+lock_owner="$lock_dir/owner-$$-$lock_token"
+
+# Called indirectly by signal/EXIT traps.
+# shellcheck disable=SC2317
+release_lock() {
+  rmdir "$lock_owner" 2>/dev/null || true
+  rmdir "$lock_dir" 2>/dev/null || true
+}
+
+acquire_lock() {
+  if mkdir "$lock_dir" 2>/dev/null; then
+    mkdir "$lock_owner"
+    return 0
+  fi
+
+  local existing_owner="" owner_name="" owner_pid=""
+  existing_owner=$(find "$lock_dir" -mindepth 1 -maxdepth 1 -type d -name 'owner-*' -print 2>/dev/null | head -n 1)
+  # An empty directory is the atomic mkdir/owner handoff window. It is never
+  # reclaimed: this avoids confusing a newly-created lock with an orphan.
+  [ -n "$existing_owner" ] || return 1
+  owner_name=${existing_owner##*/}
+  owner_pid=${owner_name#owner-}
+  owner_pid=${owner_pid%%-*}
+  case "$owner_pid" in ''|*[!0-9]*) owner_pid="" ;; esac
+  if [ -n "$owner_pid" ] && kill -0 "$owner_pid" 2>/dev/null; then
+    return 1
+  fi
+
+  # The exact owner is a non-empty child directory. Only one reclaimer can
+  # remove it; losers stop before touching the canonical directory. A cleanup
+  # can never remove a successor because rmdir refuses its non-empty lock.
+  rmdir "$existing_owner" 2>/dev/null || return 1
+  rmdir "$lock_dir" 2>/dev/null || return 1
+  if mkdir "$lock_dir" 2>/dev/null; then
+    mkdir "$lock_owner"
+    return 0
+  fi
+  return 1
+}
+
+acquire_lock || { echo '[axon-queue-drain] already running' >&2; exit 0; }
+trap release_lock EXIT
+trap 'release_lock; exit 130' INT
+trap 'release_lock; exit 143' TERM
 request='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_overview","arguments":{"limit":1}}}'
 
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
