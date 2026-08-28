@@ -255,6 +255,49 @@ function invoke() {
     EXPECT_EQ(call->argument_count, 2);
 }
 
+TEST(ParserJava, CallSitesCaptureCallNodeNameAndReceiver) {
+    auto p = write_temp("java", R"JAVA(
+class Beta { static void run(String left, String right) {} }
+class Caller {
+    void invoke() { Beta.run("left", "right"); }
+}
+)JAVA");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    auto call = std::find_if(pf->calls.begin(), pf->calls.end(), [](const axon::CallSite& value) {
+        return value.callee_name == "run";
+    });
+    ASSERT_NE(call, pf->calls.end());
+    EXPECT_EQ(call->caller_name, "invoke");
+    EXPECT_EQ(call->qualifier, "Beta");
+    EXPECT_EQ(call->argument_count, 2);
+}
+
+TEST(ParserPython, CallSitesCaptureAttributeReceiverAndArgumentCount) {
+    auto p = write_temp("py", R"PY(
+class Beta:
+    @staticmethod
+    def run(left, right):
+        pass
+
+def invoke():
+    Beta.run("left", "right")
+)PY");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    auto call = std::find_if(pf->calls.begin(), pf->calls.end(), [](const axon::CallSite& value) {
+        return value.callee_name == "run";
+    });
+    ASSERT_NE(call, pf->calls.end());
+    EXPECT_EQ(call->caller_name, "invoke");
+    EXPECT_EQ(call->qualifier, "Beta");
+    EXPECT_EQ(call->argument_count, 2);
+}
+
 // ── Go (W1.T04) ────────────────────────────────────────────────────────────
 TEST(ParserGo, InterfacesAndStructsClassified) {
     auto p = write_temp("go", R"GO(

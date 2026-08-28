@@ -274,6 +274,14 @@ static std::string rightmost_identifier(TSNode node, const std::string& src) {
 }
 
 static std::string extract_callee_name(TSNode call_node, const std::string& src) {
+    // Some grammars (notably Java method_invocation) expose the method name
+    // directly on the call node rather than through a `function` child.
+    TSNode direct_name = ts_node_child_by_field_name(call_node, "name", 4);
+    if (!ts_node_is_null(direct_name)) {
+        std::string name = rightmost_identifier(direct_name, src);
+        if (!name.empty()) return name;
+    }
+
     TSNode fn = call_target_node(call_node);
     if (ts_node_is_null(fn)) return "";
 
@@ -307,10 +315,17 @@ static std::string extract_callee_name(TSNode call_node, const std::string& src)
 
 static std::string extract_callee_qualifier(TSNode call_node, const std::string& src) {
     TSNode fn = call_target_node(call_node);
+    static constexpr std::pair<const char*, uint32_t> fields[] = {
+        {"object", 6}, {"receiver", 8}, {"scope", 5},      {"argument", 8},
+        {"value", 5},  {"operand", 7},  {"expression", 10}};
+
+    // Java and a few other grammars attach the receiver to the call node.
+    for (const auto& [field, length] : fields) {
+        TSNode qualifier = ts_node_child_by_field_name(call_node, field, length);
+        if (!ts_node_is_null(qualifier)) return rightmost_identifier(qualifier, src);
+    }
     if (ts_node_is_null(fn)) return "";
 
-    static constexpr std::pair<const char*, uint32_t> fields[] = {
-        {"object", 6}, {"receiver", 8}, {"scope", 5}, {"argument", 8}, {"value", 5}};
     for (const auto& [field, length] : fields) {
         TSNode qualifier = ts_node_child_by_field_name(fn, field, length);
         if (!ts_node_is_null(qualifier)) return rightmost_identifier(qualifier, src);
