@@ -8,10 +8,11 @@
       1. %USERPROFILE%\.claude\hooks\axon-guard.ps1       -- PreToolUse hook (blocks Grep/Glob)
       2. %USERPROFILE%\.claude\hooks\axon-auto-index.ps1  -- UserPromptSubmit hook (hourly sync)
       3. %USERPROFILE%\.claude\hooks\axon-post-edit.ps1   -- PostToolUse hook (write-through)
-      4. %USERPROFILE%\.claude\hooks\axon-build-guard.ps1 -- PreToolUse hook (blocks high -j builds)
-      5. %USERPROFILE%\.claude\hooks\axon-shell-guard.ps1 -- PreToolUse hook (blocks noisy raw shell output)
-      6. <project>\.claude\CLAUDE.md                      -- axon workflow guide
-      7. <project>\.claude\settings.json                  -- registers hooks for Claude Code
+      4. %USERPROFILE%\.claude\hooks\axon-queue-drain.ps1 -- bounded drain for idle clients
+      5. %USERPROFILE%\.claude\hooks\axon-build-guard.ps1 -- PreToolUse hook (blocks high -j builds)
+      6. %USERPROFILE%\.claude\hooks\axon-shell-guard.ps1 -- PreToolUse hook (blocks noisy raw shell output)
+      7. <project>\.claude\CLAUDE.md                      -- axon workflow guide
+      8. <project>\.claude\settings.json                  -- registers hooks for Claude Code
 
 .PARAMETER ProjectPath
     Path to the project to configure. Defaults to current directory.
@@ -84,20 +85,15 @@ if (Test-Path `$index) {
 "@ | Set-Content -Path (Join-Path $HooksDir "axon-auto-index.ps1") -Encoding UTF8
 Write-Host "[axon] v Hook auto-index: $HooksDir\axon-auto-index.ps1"
 
-# axon-post-edit.ps1 -- queues edited files for write-through reindex
-@"
-# axon-post-edit: PostToolUse hook -- append edited paths to pending-writes.txt
-`$input_json = `$input | ConvertFrom-Json
-`$tool = `$input_json.tool_name
-`$index = Join-Path (Get-Location) ".axon\index.duckdb"
-if (-not (Test-Path `$index)) { exit 0 }
-if (`$tool -match "^(Write|Edit|MultiEdit|NotebookEdit|Bash)`$") {
-    `$pending = Join-Path (Get-Location) ".axon\pending-writes.txt"
-    `$path = `$input_json.tool_input.file_path
-    if (`$path) { `$path | Add-Content `$pending }
+$postEditSource = Join-Path $ScriptDir "hooks\axon-post-edit.ps1"
+$queueDrainSource = Join-Path $ScriptDir "hooks\axon-queue-drain.ps1"
+if (-not (Test-Path $postEditSource) -or -not (Test-Path $queueDrainSource)) {
+    throw "PowerShell queue hooks are missing from the Axon package"
 }
-"@ | Set-Content -Path (Join-Path $HooksDir "axon-post-edit.ps1") -Encoding UTF8
+Copy-Item $postEditSource (Join-Path $HooksDir "axon-post-edit.ps1") -Force
+Copy-Item $queueDrainSource (Join-Path $HooksDir "axon-queue-drain.ps1") -Force
 Write-Host "[axon] v Hook post-edit: $HooksDir\axon-post-edit.ps1"
+Write-Host "[axon] v Queue drain fallback: $HooksDir\axon-queue-drain.ps1"
 
 # axon-build-guard.ps1 -- blocks high-parallelism builds
 @'
@@ -188,7 +184,7 @@ $settings = @{
             @{ matcher = ""; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-auto-index.ps1`""; timeout = 5 }) }
         )
         PostToolUse = @(
-            @{ matcher = "Write|Edit|MultiEdit|NotebookEdit|Bash"; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-post-edit.ps1`""; timeout = 10 }) }
+            @{ matcher = "Write|Edit|MultiEdit|NotebookEdit|Bash"; hooks = @(@{ type = "command"; command = "powershell -NoProfile -File `"$HooksDir\axon-post-edit.ps1`" -AxonBin `"$AxonBin`""; timeout = 10 }) }
         )
     }
 } | ConvertTo-Json -Depth 10

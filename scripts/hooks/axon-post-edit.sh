@@ -30,12 +30,49 @@ log() { command -v axon_log &>/dev/null && axon_log "axon-post-edit" "$@"; }
 [ ! -d "$AXON_DIR" ] && exit 0
 command -v jq &>/dev/null || exit 0
 
-# Append a path to the queue under flock, rotating if it has grown unbounded.
+# Append a path under a portable atomic-directory lock, rotating the queue if
+# it has grown unbounded.
 # Triggered by Write/Edit/MultiEdit/NotebookEdit handlers below.
 append_to_queue() {
   local file="$1"
+  local lock_dir="$QUEUE.lock.d"
   (
-    flock -x 9
+    local attempts=0 owner_pid="" existing_owner="" owner_name=""
+    local token
+    token="$$-$(date +%s)-${RANDOM:-0}"
+    local owner_dir="$lock_dir/owner-$$-$token"
+    local max_attempts="${AXON_QUEUE_LOCK_WAIT_ATTEMPTS:-500}"
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+      owner_pid=""
+      existing_owner=$(find "$lock_dir" -mindepth 1 -maxdepth 1 -type d -name 'owner-*' -print 2>/dev/null | head -n 1)
+      if [ -n "$existing_owner" ]; then
+        owner_name=${existing_owner##*/}
+        owner_pid=${owner_name#owner-}
+        owner_pid=${owner_pid%%-*}
+      fi
+      case "$owner_pid" in ''|*[!0-9]*) owner_pid="" ;; esac
+      if [ -n "$existing_owner" ] && { [ -z "$owner_pid" ] || ! kill -0 "$owner_pid" 2>/dev/null; }; then
+        if rmdir "$existing_owner" 2>/dev/null; then
+          rmdir "$lock_dir" 2>/dev/null || true
+        fi
+      fi
+      attempts=$((attempts + 1))
+      if [ "$attempts" -ge "$max_attempts" ]; then
+        return 1
+      fi
+      sleep 0.01
+    done
+    mkdir "$owner_dir"
+    # Called indirectly by signal/EXIT traps.
+    # shellcheck disable=SC2317
+    release_queue_lock() {
+      rmdir "$owner_dir" 2>/dev/null || true
+      rmdir "$lock_dir" 2>/dev/null || true
+    }
+    trap release_queue_lock EXIT
+    trap 'release_queue_lock; exit 130' INT
+    trap 'release_queue_lock; exit 143' TERM
+
     if [ -f "$QUEUE" ]; then
       local size
       size=$(stat -c%s "$QUEUE" 2>/dev/null || stat -f%z "$QUEUE" 2>/dev/null || echo 0)
@@ -45,7 +82,7 @@ append_to_queue() {
       fi
     fi
     printf '%s\n' "$file" >> "$QUEUE"
-  ) 9> "$QUEUE.lock" 2>/dev/null || true
+  )
 }
 
 # A queue belongs to exactly one indexed project. A hook may be invoked from a
@@ -55,6 +92,13 @@ queue_owned_file() {
   local candidate="$1"
   case "$candidate" in
     /*) ;;
+    [A-Za-z]:[\\/]*)
+      # Claude Code on native Windows can send a drive-qualified path to a
+      # hook running under Git Bash. Normalize the candidate to the same POSIX
+      # namespace as the project root before enforcing the boundary.
+      command -v cygpath >/dev/null 2>&1 || return 1
+      candidate="$(cygpath -u "$candidate")" || return 1
+      ;;
     *) candidate="$PROJECT_ROOT/$candidate" ;;
   esac
   local parent base resolved
@@ -63,7 +107,13 @@ queue_owned_file() {
   resolved="$(cd "$parent" 2>/dev/null && pwd -P)/$base"
   case "$resolved" in
     "$PROJECT_ROOT"/*)
-      append_to_queue "$resolved"
+      if ! append_to_queue "$resolved"; then
+        # Do not lose the edit: the next MCP tool call will perform a full
+        # BLAKE3-skip sync even though this individual path could not queue.
+        touch "$SYNC_MARKER" 2>/dev/null || true
+        log "queue-lock-timeout" "$(jq -n --arg f "$resolved" '{file:$f,reason:"lock-timeout"}')"
+        return 1
+      fi
       printf '%s' "$resolved"
       return 0
       ;;
