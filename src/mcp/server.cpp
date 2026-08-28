@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <vector>
 
 namespace {
 inline std::string sql_escape(const std::string& s) {
@@ -34,6 +35,38 @@ inline std::string sql_escape(const std::string& s) {
         out += c;
     }
     return out;
+}
+
+std::vector<std::string> normalized_tags(const nlohmann::json& args) {
+    std::vector<std::string> tags;
+    if (!args.contains("tags") || !args["tags"].is_array()) return tags;
+
+    std::unordered_set<std::string> seen;
+    for (const auto& item : args["tags"]) {
+        if (!item.is_string()) continue;
+        std::string tag = item.get<std::string>();
+        auto first = std::find_if_not(tag.begin(), tag.end(), [](unsigned char ch) {
+            return std::isspace(ch);
+        });
+        auto last = std::find_if_not(tag.rbegin(), tag.rend(), [](unsigned char ch) {
+                        return std::isspace(ch);
+                    }).base();
+        if (first >= last) continue;
+        tag = std::string(first, last);
+        if (seen.insert(tag).second) tags.push_back(std::move(tag));
+    }
+    return tags;
+}
+
+std::string sql_string_list(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    out << "(";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i) out << ",";
+        out << "'" << sql_escape(values[i]) << "'";
+    }
+    out << ")";
+    return out.str();
 }
 } // namespace
 
@@ -99,13 +132,16 @@ static json tools_list() {
                  {"properties",
                   {{"files", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
               {{"name", "search_memory"},
-               {"description", "Semantic search over saved observations."},
+               {"description",
+                "Semantic search over saved observations, optionally requiring all supplied "
+                "tags."},
                {"inputSchema",
                 {{"type", "object"},
                  {"required", {"query"}},
                  {"properties",
                   {{"query", {{"type", "string"}}},
-                   {"limit", {{"type", "integer"}, {"default", 5}}}}}}}},
+                   {"limit", {{"type", "integer"}, {"default", 5}}},
+                   {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
               {{"name", "save_observation"},
                {"description", "Persist a text observation for future retrieval."},
                {"inputSchema",
@@ -815,6 +851,9 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         std::string q = args.value("query", "");
         int limit = args.value("limit", 5);
+        if (limit < 1) limit = 1;
+        if (limit > 100) limit = 100;
+        const auto tags = normalized_tags(args);
         auto qvec = ctx.model->embed(q);
 
         std::ostringstream vs;
@@ -825,20 +864,34 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         }
         vs << "]";
 
-        std::string sql = "SELECT content, file_path, created_at FROM observations "
-                          "WHERE embedding IS NOT NULL "
-                          "ORDER BY array_cosine_similarity(embedding, " +
-                          vs.str() + "::FLOAT[" + std::to_string(ctx.model->dims()) +
-                          "]) DESC LIMIT " + std::to_string(limit);
+        std::string sql =
+            "SELECT o.content, o.file_path, o.created_at, "
+            "       (SELECT list(ot.tag ORDER BY ot.tag) FROM observation_tags ot "
+            "        WHERE ot.observation_id = o.id) AS tags "
+            "FROM observations o WHERE o.embedding IS NOT NULL ";
+        if (!tags.empty()) {
+            sql += "AND (SELECT COUNT(DISTINCT otf.tag) FROM observation_tags otf "
+                   "     WHERE otf.observation_id = o.id AND otf.tag IN " +
+                   sql_string_list(tags) + ") = " + std::to_string(tags.size()) + " ";
+        }
+        sql += "ORDER BY array_cosine_similarity(o.embedding, " + vs.str() + "::FLOAT[" +
+               std::to_string(ctx.model->dims()) + "]) DESC LIMIT " + std::to_string(limit);
 
         auto res = ctx.db->conn().Query(sql);
         auto& mat = *res;
 
         json result = json::array();
         for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
+            json result_tags = json::array();
+            auto tag_value = mat.GetValue(3, i);
+            if (!tag_value.IsNull()) {
+                for (const auto& tag : duckdb::ListValue::GetChildren(tag_value))
+                    result_tags.push_back(tag.GetValue<std::string>());
+            }
             result.push_back({{"content", mat.GetValue(0, i).ToString()},
                               {"file_path", mat.GetValue(1, i).ToString()},
-                              {"created_at", mat.GetValue(2, i).ToString()}});
+                              {"created_at", mat.GetValue(2, i).ToString()},
+                              {"tags", std::move(result_tags)}});
         }
         return make_tool_result(result);
     }
@@ -848,6 +901,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         std::string content = args.value("content", "");
         std::string file_path = args.value("file_path", "");
+        const auto tags = normalized_tags(args);
+
+        auto id_result = ctx.db->conn().Query("SELECT nextval('seq_id')");
+        if (id_result->HasError()) throw std::runtime_error(id_result->GetError());
+        const int64_t observation_id = id_result->GetValue<int64_t>(0, 0);
 
         // Escape helper for inline SQL strings
         auto sq = [](const std::string& s) {
@@ -872,17 +930,28 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
             std::string sql =
                 "INSERT INTO observations (id, content, file_path, embedding, created_at) VALUES ("
-                "nextval('seq_id'), '" +
+                + std::to_string(observation_id) + ", '" +
                 sq(content) + "', '" + sq(file_path) + "', " + vs.str() + "::FLOAT[" +
                 std::to_string(ctx.model->dims()) + "], now())";
-            ctx.db->conn().Query(sql);
+            auto inserted = ctx.db->conn().Query(sql);
+            if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
         } else {
             auto stmt = ctx.db->conn().Prepare(
                 "INSERT INTO observations (id, content, file_path, created_at) "
-                "VALUES (nextval('seq_id'), $1, $2, now())");
-            stmt->Execute(content, file_path);
+                "VALUES ($1, $2, $3, now())");
+            auto inserted = stmt->Execute(observation_id, content, file_path);
+            if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
         }
-        return make_tool_result({{"saved", true}});
+
+        if (!tags.empty()) {
+            auto stmt = ctx.db->conn().Prepare(
+                "INSERT INTO observation_tags (observation_id, tag) VALUES ($1, $2)");
+            for (const auto& tag : tags) {
+                auto inserted = stmt->Execute(observation_id, tag);
+                if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
+            }
+        }
+        return make_tool_result({{"saved", true}, {"tags", tags}});
     }
 
     if (name == "get_overview") {

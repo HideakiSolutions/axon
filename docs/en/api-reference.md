@@ -100,6 +100,7 @@ Semantic search over saved observations (vector similarity via nomic-embed).
 |-----------|------|----------|-------------|
 | `query` | string | **Yes** | Natural language query |
 | `limit` | number | No | Max results (default: 5) |
+| `tags` | string[] | No | Require every supplied tag; matching is exact and case-sensitive |
 
 ---
 

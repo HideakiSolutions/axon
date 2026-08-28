@@ -98,6 +98,19 @@ void Database::run_migrations() {
          "  created_at TIMESTAMP NOT NULL DEFAULT now()"
          ")");
 
+    // Observation tags live in a child table so existing databases upgrade
+    // without rewriting the observations table. The composite primary key
+    // also makes repeated tags idempotent.
+    exec("CREATE TABLE IF NOT EXISTS observation_tags ("
+         "  observation_id BIGINT NOT NULL,"
+         "  tag            VARCHAR NOT NULL,"
+         "  PRIMARY KEY (observation_id, tag)"
+         ")");
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_observation_tags_tag ON observation_tags(tag)");
+    } catch (...) {
+    }
+
     // Index for O(1) symbol-level edge resolution
     try {
         exec("CREATE INDEX IF NOT EXISTS idx_symbols_file_name ON symbols(file_id, name)");
