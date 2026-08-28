@@ -21,6 +21,7 @@ grep -q 'all 27 MCP tools' docs/en/getting-started.md
 grep -q 'No. All 27 MCP tools work without it.' docs/en/faq.md
 grep -q '25 other tools' README.md
 grep -q 'raw shell-output' README.md
+grep -q '| Capsule cache by query hash | ✅ Done |' README.md
 grep -q 'axon-shell-guard.sh' scripts/templates/CLAUDE.md
 grep -q 'axon-shell-guard.sh' docs/en/axon-primary-rtk-optional.md
 grep -q 'axon-shell-guard.sh' docs/pt-br/axon-primary-rtk-optional.md
@@ -37,10 +38,11 @@ stale_patterns=(
   'richer log traces'
   'No single benchmark runner aggregates all scenarios yet'
   'End-to-end MCP JSON-RPC response schema is build-covered but not deeply smoke-tested'
+  '| Capsule cache by query hash | 🔄 Planned |'
 )
 
 for pattern in "${stale_patterns[@]}"; do
-  if rg -n "$pattern" README.md docs/en docs/evidence src/main.cpp >/tmp/axon-docs-freshness-hit.txt; then
+  if rg -n -F "$pattern" README.md docs/en docs/evidence src/main.cpp >/tmp/axon-docs-freshness-hit.txt; then
     cat /tmp/axon-docs-freshness-hit.txt >&2
     echo "stale documentation pattern found: $pattern" >&2
     exit 1
