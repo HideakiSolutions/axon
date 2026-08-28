@@ -35,7 +35,7 @@ flowchart TD
 | **Write-through** | Hooks do axon que reindexam arquivos automaticamente após cada `Edit`/`Write` no Claude Code |
 | **MCP** | Model Context Protocol — protocolo stdio JSON-RPC que o Claude Code usa para falar com o axon |
 | **Granularidade** | `"file"` (padrão) emite arestas arquivo-a-arquivo; `"symbol"` adiciona extração do call graph via tree-sitter — arestas `kind='calls'` com `from_symbol`/`to_symbol` populados |
-| **Call site** | Nó AST `call_expression` — registrado como `CallSite{caller, callee, line}`; o caller é o menor símbolo cuja faixa de linhas contém a chamada |
+| **Call site** | Nó AST de chamada — registrado como `CallSite{caller, callee, qualifier, argument_count, line}`; o caller é o menor símbolo cuja faixa de linhas contém a chamada e o callee é ranqueado por tipo proprietário, aridade e localidade |
 | **Symbol BFS** | Travessia em largura sobre `symbol_incoming` (chamadores). Expande um pivô para os símbolos que o chamam (depth=1) na cápsula |
 
 ---

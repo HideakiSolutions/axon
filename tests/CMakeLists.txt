@@ -94,6 +94,20 @@ target_link_libraries(test_ccr PRIVATE
 )
 add_test(NAME test_ccr COMMAND test_ccr)
 
+add_executable(test_call_resolution unit/test_call_resolution.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
+)
+target_include_directories(test_call_resolution PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+)
+target_link_libraries(test_call_resolution PRIVATE
+    duckdb_lib
+    GTest::gtest_main
+)
+add_test(NAME test_call_resolution COMMAND test_call_resolution)
+
 # Telemetry aggregation tests require DuckDB, but not llama.cpp.
 add_executable(test_telemetry unit/test_telemetry.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp

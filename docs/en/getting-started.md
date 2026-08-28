@@ -35,7 +35,7 @@ flowchart TD
 | **Write-through** | Axon hooks that auto-reindex files after every `Edit`/`Write` in Claude Code |
 | **MCP** | Model Context Protocol — the stdio JSON-RPC protocol Claude Code uses to talk to axon |
 | **Granularity** | `"file"` (default) emits file-to-file edges; `"symbol"` adds tree-sitter call graph extraction — `kind='calls'` edges with `from_symbol`/`to_symbol` populated |
-| **Call site** | A `call_expression` AST node — recorded as `CallSite{caller, callee, line}`; the caller is the smallest enclosing symbol whose line range contains it |
+| **Call site** | A call AST node — recorded as `CallSite{caller, callee, qualifier, argument_count, line}`; the caller is the smallest enclosing symbol and callee overloads are ranked by owner type, arity and locality |
 | **Symbol BFS** | Breadth-first traversal over `symbol_incoming` (callers). Expands a pivot symbol to its caller symbols (depth=1) for the capsule |
 
 ---

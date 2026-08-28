@@ -48,7 +48,7 @@ sequenceDiagram
         CLI->>DB: upsert files + insert symbols
     end
     CLI->>DB: resolve_edges (imports → from/to symbol by name match)
-    CLI->>DB: resolve_calls (kind='calls' from CallSite[])
+    CLI->>DB: resolve_call_edges (type/arity-ranked kind='calls' from CallSite[])
     CLI->>DB: sweep_deleted (purge missing + ignored paths)
     CLI->>E: embed pending symbols → FLOAT[768]
 ```
@@ -103,8 +103,8 @@ DuckDB grants the write lock to one process. Rather than making every other serv
 **7. Symbol-mode capsule with file-mode fallback**
 When `symbol_incoming` has data, `assemble_capsule` extracts only the matched symbol bodies — pivots get full bodies (cap `budget/16`), callers get signature + 2-3 lines (cap `budget/80`). When no symbol-level edges exist, the function falls back to file-level BFS with skeletonized support. Trade-off: dual rendering paths to maintain, but the capsule degrades gracefully on repos without `granularity = "symbol"` enabled.
 
-**8. Caller resolution by line containment**
-The parser emits one `CallSite{caller, callee, line}` per `call_expression` AST node, then a post-pass picks the smallest enclosing symbol whose line range contains each call. This is cross-language and avoids per-grammar callstack walking. Trade-off: module-level calls are dropped (no enclosing symbol), and overloaded callees can resolve ambiguously.
+**8. Type-aware caller and callee resolution**
+The parser emits one `CallSite{caller, callee, qualifier, argument_count, line}` per call AST node, then a post-pass picks the smallest enclosing caller symbol whose line range contains it. Callee candidates are ranked by receiver/enclosing owner type, signature arity, locality, and production-file preference before a stable-ID fallback. This stays cross-language without a compiler frontend. Trade-off: variable receivers whose declared type cannot be inferred still use arity/locality fallback, and module-level calls are dropped because they have no function-level caller.
 
 ## Constraints & Trade-offs
 
@@ -113,6 +113,6 @@ The parser emits one `CallSite{caller, callee, line}` per `call_expression` AST 
 | DuckDB single-writer | Multi-repo aggregation opens secondaries in READ_ONLY; concurrent serves on one repo proxy tool calls to the lock holder |
 | llama.cpp CPU inference | Embedding 50k symbols takes ~60s on first index; incremental reindex is fast |
 | tree-sitter 18 grammars | First build ~10–12 min; ccache makes subsequent builds ~3 min |
-| Callee resolution by name | `resolve_calls` matches callees by simple name lookup (no type inference) — overloaded callees may resolve to the wrong overload |
+| Callee resolution | Receiver/owner and arity are heuristic rather than a full compiler type system; unknown variable receivers fall back deterministically |
 | Noverlap sync | Skipped for graphs > 5000 nodes to prevent UI freeze in axon-web |
 | Call graph requires `granularity = "symbol"` | Default is `"file"` for compatibility; opt-in via `.axon/config.toml` then `axon index --force` |

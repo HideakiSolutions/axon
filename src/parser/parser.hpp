@@ -52,6 +52,8 @@ struct ImportEdge {
 struct CallSite {
     std::string caller_name; // enclosing symbol name (function/method/class)
     std::string callee_name; // identifier being invoked
+    std::string qualifier;   // receiver/type before the callee (obj in obj.method), if present
+    int argument_count = -1; // named arguments at the call site; -1 when grammar has no list
     int line = 0;
 };
 

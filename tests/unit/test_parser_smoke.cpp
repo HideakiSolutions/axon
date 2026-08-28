@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -230,6 +231,28 @@ async function loadAll() { return []; }
     ASSERT_NE(svc, nullptr);
     ASSERT_TRUE(svc->docstring.has_value());
     EXPECT_NE(svc->docstring->find("@Injectable"), std::string::npos);
+}
+
+TEST(ParserTypeScript, CallSitesCaptureQualifierAndArgumentCount) {
+    auto p = write_temp("ts", R"TS(
+class Beta {
+  static run(left: string, right: string) {}
+}
+function invoke() {
+  Beta.run("left", "right");
+}
+)TS");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    auto call = std::find_if(pf->calls.begin(), pf->calls.end(), [](const axon::CallSite& value) {
+        return value.callee_name == "run";
+    });
+    ASSERT_NE(call, pf->calls.end());
+    EXPECT_EQ(call->caller_name, "invoke");
+    EXPECT_EQ(call->qualifier, "Beta");
+    EXPECT_EQ(call->argument_count, 2);
 }
 
 // ── Go (W1.T04) ────────────────────────────────────────────────────────────

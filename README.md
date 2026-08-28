@@ -639,7 +639,7 @@ turn_anchors (id, turn_id, file_id, symbol_id, kind)                   -- kind: 
 
 `from_symbol`/`to_symbol` are populated by:
 - **Import resolution** (`kind='imports'`) — tries to match the import leaf name against a symbol with the same name on either side
-- **Call graph extraction** (`kind='calls'`) — tree-sitter walks every function body and emits one edge per call site, with `from_symbol = enclosing function`, `to_symbol = matched callee anywhere in the project`
+- **Call graph extraction** (`kind='calls'`) — tree-sitter walks every function body and emits one edge per call site, with `from_symbol = enclosing function`; overload resolution ranks `to_symbol` candidates by receiver/owner type, argument arity, locality, and a deterministic fallback
 
 Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots expand to their callers (depth=1), giving the LLM a focused map of relationships instead of full files.
 
@@ -681,7 +681,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | HNSW vector index (DuckDB VSS) | ⏸ Deferred | NO-GO while VSS persistence is experimental; re-evaluate at >100k symbols or scan >20% of miss latency |
 | Filtered tags in `search_memory` | ✅ Done | Exact all-tags filtering with tags returned in each result |
 | Capsule cache by query hash | ✅ Done | CLI, MCP, and HTTP reuse epoch-scoped payloads; `--no-cache` / `no_cache` bypasses it |
-| Caller resolution beyond name match | 🔄 Planned | Type-aware resolution for overloaded callees |
+| Caller resolution beyond name match | ✅ Done | Receiver/owner type and argument arity disambiguate overloads with deterministic fallback |
 
 ---
 
