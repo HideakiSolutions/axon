@@ -680,7 +680,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | Watch mode (native + poll fallback) | ✅ Done | `axon watch` uses inotify/FSEvents with automatic polling fallback; reindexes edits outside Claude Code |
 | HNSW vector index (DuckDB VSS) | ⏸ Deferred | NO-GO while VSS persistence is experimental; re-evaluate at >100k symbols or scan >20% of miss latency |
 | Filtered tags in `search_memory` | 🔄 Planned | |
-| Capsule cache by query hash | 🔄 Planned | |
+| Capsule cache by query hash | ✅ Done | CLI, MCP, and HTTP reuse epoch-scoped payloads; `--no-cache` / `no_cache` bypasses it |
 | Caller resolution beyond name match | 🔄 Planned | Type-aware resolution for overloaded callees |
 
 ---
