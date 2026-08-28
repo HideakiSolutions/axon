@@ -45,9 +45,8 @@ std::vector<std::string> normalized_tags(const nlohmann::json& args) {
     for (const auto& item : args["tags"]) {
         if (!item.is_string()) continue;
         std::string tag = item.get<std::string>();
-        auto first = std::find_if_not(tag.begin(), tag.end(), [](unsigned char ch) {
-            return std::isspace(ch);
-        });
+        auto first = std::find_if_not(tag.begin(), tag.end(),
+                                      [](unsigned char ch) { return std::isspace(ch); });
         auto last = std::find_if_not(tag.rbegin(), tag.rend(), [](unsigned char ch) {
                         return std::isspace(ch);
                     }).base();
@@ -864,11 +863,10 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         }
         vs << "]";
 
-        std::string sql =
-            "SELECT o.content, o.file_path, o.created_at, "
-            "       (SELECT list(ot.tag ORDER BY ot.tag) FROM observation_tags ot "
-            "        WHERE ot.observation_id = o.id) AS tags "
-            "FROM observations o WHERE o.embedding IS NOT NULL ";
+        std::string sql = "SELECT o.content, o.file_path, o.created_at, "
+                          "       (SELECT list(ot.tag ORDER BY ot.tag) FROM observation_tags ot "
+                          "        WHERE ot.observation_id = o.id) AS tags "
+                          "FROM observations o WHERE o.embedding IS NOT NULL ";
         if (!tags.empty()) {
             sql += "AND (SELECT COUNT(DISTINCT otf.tag) FROM observation_tags otf "
                    "     WHERE otf.observation_id = o.id AND otf.tag IN " +
@@ -928,11 +926,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             }
             vs << "]";
 
-            std::string sql =
-                "INSERT INTO observations (id, content, file_path, embedding, created_at) VALUES ("
-                + std::to_string(observation_id) + ", '" +
-                sq(content) + "', '" + sq(file_path) + "', " + vs.str() + "::FLOAT[" +
-                std::to_string(ctx.model->dims()) + "], now())";
+            std::string sql = "INSERT INTO observations (id, content, file_path, embedding, "
+                              "created_at) VALUES (" +
+                              std::to_string(observation_id) + ", '" + sq(content) + "', '" +
+                              sq(file_path) + "', " + vs.str() + "::FLOAT[" +
+                              std::to_string(ctx.model->dims()) + "], now())";
             auto inserted = ctx.db->conn().Query(sql);
             if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
         } else {
