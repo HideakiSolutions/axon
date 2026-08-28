@@ -18,7 +18,11 @@ chmod +x "$temp/drain"
 
 run_hook() {
   local file="$1"
-  (cd "$project" && jq -n --arg f "$file" '{tool_name:"Write",tool_input:{file_path:$f}}' | AXON_QUEUE_DRAIN_SCRIPT="$temp/drain" bash "$hook")
+  local hook_file="$file"
+  if command -v cygpath >/dev/null 2>&1; then
+    hook_file="$(cygpath -w "$file")"
+  fi
+  (cd "$project" && jq -n --arg f "$hook_file" '{tool_name:"Write",tool_input:{file_path:$f}}' | AXON_QUEUE_DRAIN_SCRIPT="$temp/drain" bash "$hook")
 }
 
 run_hook "$project/owned.md"

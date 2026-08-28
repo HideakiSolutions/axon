@@ -3,7 +3,7 @@ param([string]$AxonBin = "axon.exe")
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$payload = @($input) -join [Environment]::NewLine
+$payload = [Console]::In.ReadToEnd()
 if (-not $payload) { exit 0 }
 $inputJson = $payload | ConvertFrom-Json
 $tool = [string]$inputJson.tool_name

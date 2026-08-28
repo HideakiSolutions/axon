@@ -17,8 +17,10 @@ try {
     try {
         @{ tool_name = "Write"; tool_input = @{ file_path = $owned } } |
             ConvertTo-Json -Compress | powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hook -AxonBin "missing-axon.exe"
+        if ($LASTEXITCODE -ne 0) { throw "owned-path hook failed with exit $LASTEXITCODE" }
         @{ tool_name = "Write"; tool_input = @{ file_path = $outside } } |
             ConvertTo-Json -Compress | powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hook -AxonBin "missing-axon.exe"
+        if ($LASTEXITCODE -ne 0) { throw "foreign-path hook failed with exit $LASTEXITCODE" }
     } finally {
         Pop-Location
     }

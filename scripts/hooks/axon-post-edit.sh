@@ -92,6 +92,13 @@ queue_owned_file() {
   local candidate="$1"
   case "$candidate" in
     /*) ;;
+    [A-Za-z]:[\\/]*)
+      # Claude Code on native Windows can send a drive-qualified path to a
+      # hook running under Git Bash. Normalize the candidate to the same POSIX
+      # namespace as the project root before enforcing the boundary.
+      command -v cygpath >/dev/null 2>&1 || return 1
+      candidate="$(cygpath -u "$candidate")" || return 1
+      ;;
     *) candidate="$PROJECT_ROOT/$candidate" ;;
   esac
   local parent base resolved
