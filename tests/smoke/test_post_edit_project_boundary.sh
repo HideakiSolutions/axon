@@ -6,6 +6,7 @@ hook="$root/scripts/hooks/axon-post-edit.sh"
 command -v jq >/dev/null 2>&1 || exit 0
 
 temp="$(mktemp -d)"
+temp="$(cd "$temp" && pwd -P)"
 trap 'rm -rf "$temp"' EXIT
 project="$temp/project"
 foreign="$temp/foreign"

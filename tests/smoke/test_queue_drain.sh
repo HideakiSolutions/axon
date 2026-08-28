@@ -4,6 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 drain="$root/scripts/maintenance/axon-queue-drain.sh"
 temp="$(mktemp -d)"
+temp="$(cd "$temp" && pwd -P)"
 trap 'rm -rf "$temp"' EXIT
 project="$temp/project"
 mkdir -p "$project/.axon" "$temp/bin" "$temp/locks"
