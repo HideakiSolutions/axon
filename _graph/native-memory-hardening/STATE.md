@@ -1,10 +1,10 @@
 # Native memory hardening state
 
-Status: audit corrections validated locally; PR revalidation pending
+Status: delivered on main
 
 ## Current mini-goal
 
-Delivery — publish the completion-audit corrections and revalidate PR #90.
+Delivery complete — native memory hardening is merged on `main`.
 
 ## Evidence
 
@@ -57,8 +57,11 @@ Delivery — publish the completion-audit corrections and revalidate PR #90.
   the unchanged audited baseline `36ef099`.
 - All five required remote checks passed: GCC/Linux, Clang/macOS, MSVC/Windows, ShellCheck, and
   clang-format. The PR is clean and mergeable with no review findings or comments.
+- Completion-audit corrections were committed as `39e2b11`; the final CI rerun passed all five
+  required checks on that exact head.
+- PR #90 merged into `main` as `f55da1f` on 2026-08-29T05:56:22Z. Git ancestry verification proves
+  that the validated feature head is contained in `origin/main`.
 
 ## Next action
 
-Commit and push the audit corrections, then require all PR checks to pass again before the merge
-gate is evaluated.
+No remaining action for this delivery. Release/versioning is a separate lifecycle decision.
