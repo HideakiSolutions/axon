@@ -139,7 +139,7 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
 | `get_skeleton` | `files[]` | Signatures-only view (no function bodies) |
 | `get_tests_for` | `files[]` | Test files that import the given files (by path convention) |
-| `search_memory` | `query`, `limit?` | Semantic search over saved observations |
+| `search_memory` | `query`, `limit?`, `tags?` | Semantic search over saved observations; optional tags require an all-tags match |
 | `save_observation` | `content`, `tags?`, `file_path?` | Persist an insight for future retrieval |
 | `run_pipeline` | `root?` | Full project index (parse + graph + embeddings) |
 | `index_paths` | `paths[]`, `prune?` | Incremental reindex of specific paths |
@@ -679,7 +679,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | Dialogue context in capsule | ✅ Done | `get_context_capsule` accepts `dialogue_budget`; returns `related_turns` |
 | Watch mode (native + poll fallback) | ✅ Done | `axon watch` uses inotify/FSEvents with automatic polling fallback; reindexes edits outside Claude Code |
 | HNSW vector index (DuckDB VSS) | ⏸ Deferred | NO-GO while VSS persistence is experimental; re-evaluate at >100k symbols or scan >20% of miss latency |
-| Filtered tags in `search_memory` | 🔄 Planned | |
+| Filtered tags in `search_memory` | ✅ Done | Exact all-tags filtering with tags returned in each result |
 | Capsule cache by query hash | ✅ Done | CLI, MCP, and HTTP reuse epoch-scoped payloads; `--no-cache` / `no_cache` bypasses it |
 | Caller resolution beyond name match | 🔄 Planned | Type-aware resolution for overloaded callees |
 

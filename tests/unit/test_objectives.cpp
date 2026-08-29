@@ -192,6 +192,48 @@ TEST_F(ObjTest, EmbedPendingCountZeroWhenNoNullEmbeddings) {
     EXPECT_EQ(r->GetValue<int64_t>(0, 0), 0);
 }
 
+TEST_F(ObjTest, ObservationTagsRequireEveryRequestedTag) {
+    db->conn().Query("INSERT INTO observations (id, content, created_at) VALUES "
+                     "(nextval('seq_id'), 'both', now()), (nextval('seq_id'), 'only-one', now()), "
+                     "(nextval('seq_id'), 'untagged', now())");
+    auto ids = db->conn().Query("SELECT id, content FROM observations ORDER BY id");
+    const auto both_id = ids->GetValue<int64_t>(0, 0);
+    const auto one_id = ids->GetValue<int64_t>(0, 1);
+
+    auto insert =
+        db->conn().Prepare("INSERT INTO observation_tags (observation_id, tag) VALUES ($1, $2)");
+    insert->Execute(both_id, "backend");
+    insert->Execute(both_id, "security");
+    insert->Execute(one_id, "backend");
+
+    auto filtered =
+        db->conn().Query("SELECT o.content FROM observations o "
+                         "WHERE (SELECT COUNT(DISTINCT ot.tag) FROM observation_tags ot "
+                         "       WHERE ot.observation_id = o.id "
+                         "         AND ot.tag IN ('backend', 'security')) = 2");
+    ASSERT_FALSE(filtered->HasError()) << filtered->GetError();
+    ASSERT_EQ(filtered->RowCount(), 1u);
+    EXPECT_EQ(filtered->GetValue(0, 0).ToString(), "both");
+}
+
+TEST_F(ObjTest, ObservationTagsAreUniqueAndExistingRowsRemainValid) {
+    db->conn().Query("INSERT INTO observations (id, content, created_at) "
+                     "VALUES (nextval('seq_id'), 'legacy-row', now())");
+    auto id = db->conn()
+                  .Query("SELECT id FROM observations WHERE content = 'legacy-row'")
+                  ->GetValue<int64_t>(0, 0);
+
+    auto first = db->conn().Query("INSERT INTO observation_tags VALUES (" + std::to_string(id) +
+                                  ", 'migration')");
+    ASSERT_FALSE(first->HasError()) << first->GetError();
+    auto duplicate = db->conn().Query("INSERT INTO observation_tags VALUES (" + std::to_string(id) +
+                                      ", 'migration')");
+    EXPECT_TRUE(duplicate->HasError());
+
+    auto rows = db->conn().Query("SELECT COUNT(*) FROM observations");
+    EXPECT_EQ(rows->GetValue<int64_t>(0, 0), 1);
+}
+
 // =============================================================================
 // OBJETIVO 2 — MEMÓRIA ESTRUTURADA (paridade de capacidades)
 // =============================================================================
