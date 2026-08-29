@@ -1,6 +1,6 @@
 # API Reference — axon MCP Tools
 
-All 27 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
+All 33 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ---
 
@@ -94,7 +94,7 @@ Test files (by path convention) that import/reference the given files or a same-
 
 ### `search_memory`
 
-Semantic search over saved observations (vector similarity via nomic-embed).
+Hybrid search over saved observations. Semantic and lexical ranks are fused with RRF; bounded authority is applied after fusion. Results expose `semantic_rank`, `lexical_rank`, `rrf_score`, `authority`, and final `score` for auditability.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -113,6 +113,7 @@ Persist a text observation for future retrieval across sessions.
 | `content` | string | **Yes** | The observation text |
 | `tags` | string[] | No | Optional tags for categorization |
 | `file_path` | string | No | Associate the observation with a file |
+| `authority` | number | No | Ranking multiplier clamped to 0.5–2.0 (default: 1.0); never authorization |
 
 ---
 
@@ -240,6 +241,7 @@ Open a new working session within a thread.
 | `thread_id` | number | **Yes** | Thread to attach this session to |
 | `label` | string | No | Human-readable session label |
 | `model` | string | No | Model identifier for this session |
+| `idempotency_key` | string | No | Retry key scoped to the thread; replay returns the original session |
 
 ---
 
@@ -312,6 +314,21 @@ Retrieve past turns related to files or a semantic query. Used to inject convers
 | `file_paths` | string[] | No | Return turns anchored to these files |
 | `limit` | number | No | Max turns (default: 10) |
 | `thread_id` | number | No | Scope to a specific thread |
+
+---
+
+### Typed handoffs
+
+`handoff_create` persists a project-scoped work transfer with `target_agent`, `objective`, and optional `source_session_id`, `working_directory`, `context`, and `idempotency_key`. A supplied working directory must resolve inside the indexed project. The lifecycle is `pending` → `claimed` → `completed`; pending or claimed items may be `cancelled`.
+
+| Tool | Required parameters | Purpose |
+|------|---------------------|---------|
+| `handoff_create` | `target_agent`, `objective` | Create or replay an idempotent handoff |
+| `handoff_get` | `handoff_id` | Retrieve one handoff |
+| `handoff_list` | — | Filter by optional `status`, `target_agent`, and `limit` |
+| `handoff_claim` | `handoff_id`, `claimed_by` | Atomically claim; same-claimant replay is idempotent |
+| `handoff_complete` | `handoff_id`, `claimed_by` | Complete as current claimant, with optional `result` |
+| `handoff_cancel` | `handoff_id` | Cancel a pending or claimed handoff |
 
 ---
 

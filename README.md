@@ -5,7 +5,7 @@
 [![Lint](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)](CMakeLists.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-blue)](https://docs.anthropic.com/claude-code)
-[![MCP](https://img.shields.io/badge/MCP-27%20tools-8b5cf6)](src/mcp/server.cpp)
+[![MCP](https://img.shields.io/badge/MCP-33%20tools-8b5cf6)](src/mcp/server.cpp)
 
 <p align="center">
   <picture>
@@ -24,7 +24,7 @@
 - [What this does, in plain English](#what-this-does-in-plain-english)
 - [How it works](#how-it-works)
 - [Token reduction](#token-reduction)
-- [MCP Tools (27)](#mcp-tools-27)
+- [MCP Tools (33)](#mcp-tools-33)
 - [Dialogue Layer](#dialogue-layer)
 - [HTTP Mode & Axon Web](#http-mode--axon-web)
 - [Multi-repo Registry](#multi-repo-registry)
@@ -48,7 +48,7 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 25 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 31 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
@@ -129,7 +129,7 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 
 ---
 
-## MCP Tools (27)
+## MCP Tools (33)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
@@ -139,8 +139,8 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
 | `get_skeleton` | `files[]` | Signatures-only view (no function bodies) |
 | `get_tests_for` | `files[]` | Test files that import the given files (by path convention) |
-| `search_memory` | `query`, `limit?`, `tags?` | Semantic search over saved observations; optional tags require an all-tags match |
-| `save_observation` | `content`, `tags?`, `file_path?` | Persist an insight for future retrieval |
+| `search_memory` | `query`, `limit?`, `tags?` | Hybrid semantic + lexical RRF search with bounded authority and ranking evidence |
+| `save_observation` | `content`, `tags?`, `file_path?`, `authority?` | Persist an insight; authority is a bounded ranking hint, never authorization |
 | `run_pipeline` | `root?` | Full project index (parse + graph + embeddings) |
 | `index_paths` | `paths[]`, `prune?` | Incremental reindex of specific paths |
 | `rename` | `symbol_name`, `new_name`, `dry_run?` | Graph-assisted rename across the codebase |
@@ -151,7 +151,7 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `group_impact` | `file`, `group?` | Cross-repo blast radius for a file path, optionally scoped to a group |
 | `thread_create` | `name`, `kind?` | Create a named conversation scope (project \| person \| topic) |
 | `thread_list` | — | List all threads |
-| `session_start` | `thread_id`, `label?` | Open a new working session within a thread |
+| `session_start` | `thread_id`, `label?`, `idempotency_key?` | Open or replay an idempotent working session within a thread |
 | `session_end` | `session_id`, `compute_digest?` | Close session; optionally generate and embed a digest |
 | `turn_add` | `session_id`, `role`, `content` | Append a turn (user \| assistant); auto-anchors to code artifacts |
 | `turn_search` | `query`, `limit?`, `thread_id?` | Semantic search over all turns, optionally scoped to a thread |
@@ -159,6 +159,12 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `thread_get` | `thread_id` | List sessions within a thread with digest summaries |
 | `anchor_link` | `turn_id`, `file_id?`, `symbol_id?`, `kind?` | Manually link a turn to a file or symbol |
 | `dialogue_context` | `query`, `file_paths?[]`, `limit?`, `thread_id?` | Past turns related to files or semantic query |
+| `handoff_create` | `target_agent`, `objective`, `source_session_id?`, `working_directory?`, `context?`, `idempotency_key?` | Create an idempotent, project-scoped typed handoff |
+| `handoff_get` | `handoff_id` | Retrieve a typed handoff |
+| `handoff_list` | `status?`, `target_agent?`, `limit?` | List and filter handoffs |
+| `handoff_claim` | `handoff_id`, `claimed_by` | Atomically claim a pending handoff |
+| `handoff_complete` | `handoff_id`, `claimed_by`, `result?` | Complete a handoff as its claimant |
+| `handoff_cancel` | `handoff_id` | Cancel a pending or claimed handoff |
 | `artifact_retrieve` | `artifact_id` | Retrieve original content for a CCR artifact emitted by lossy compression |
 
 ### Agentic workflow coverage
@@ -575,11 +581,13 @@ src/
 │   ├── rename.hpp/cpp    # Graph-assisted symbol rename
 │   ├── git.hpp/cpp       # Git diff parsing for detect_changes
 │   ├── routes.hpp/cpp    # HTTP route detection for route_map / api_impact
-│   └── dialogue.hpp/cpp  # Dialogue Layer: threads/sessions/turns/anchors/digests
+│   ├── dialogue.hpp/cpp  # Dialogue Layer: threads/sessions/turns/anchors/digests/handoffs
+│   ├── memory_search.*   # Hybrid RRF ranking + bounded authority
+│   └── pending_writes.*  # Durable claim/retry spool for write-through capture
 ├── parser/
 │   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (18 langs)
 └── mcp/
-    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 27 MCP tool handlers
+    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 33 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
@@ -625,16 +633,17 @@ graph TD
 files        (id, path, language, hash, byte_size, indexed_at, skeleton)
 symbols      (id, file_id, name, kind, start_line, end_line, signature, docstring, embedding FLOAT[768])
 edges        (id, from_file, to_file, from_symbol, to_symbol, kind)  -- kind: imports | calls | extends
-observations (id, content, file_path, embedding FLOAT[768], created_at)
+observations (id, content, file_path, embedding FLOAT[768], authority, created_at)
 routes       (id, method, path, handler_file, framework, file_id)
 capsule_cache (query_hash, epoch, payload, created_at)
 ccr_artifacts (artifact_id, kind, source_ref, content, token_estimate, created_at)
 
 -- Dialogue Layer
 threads      (id, name, kind, created_at)                              -- kind: project | person | topic
-sessions     (id, thread_id, label, started_at, ended_at, digest, digest_embedding FLOAT[768])
+sessions     (id, thread_id, label, idempotency_key, started_at, ended_at, digest, digest_embedding FLOAT[768])
 turns        (id, session_id, role, content, ts, embedding FLOAT[768]) -- role: user | assistant
 turn_anchors (id, turn_id, file_id, symbol_id, kind)                   -- kind: mentions | decides | questions
+handoffs     (id, source_session_id, target_agent, objective, context, working_directory, status, claimed_by, result, idempotency_key, created_at, claimed_at, completed_at)
 ```
 
 `from_symbol`/`to_symbol` are populated by:
@@ -667,14 +676,14 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| 27 MCP tools | ✅ Done | Code context + dialogue layer + CCR artifact retrieval tools |
+| 33 MCP tools | ✅ Done | Code context + dialogue/handoff layer + CCR artifact retrieval tools |
 | HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
 | Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |
 | Symbol-granular capsule rendering | ✅ Done | `assemble_capsule` extracts only matched symbol bodies (signature + lines), not full files |
 | Worktree exclusion + sweep purge | ✅ Done | `.worktrees/` ignored; `axon index` purges newly-ignored entries from DB |
 | `axon index --force` | ✅ Done | Rebuild edges/symbols even when file hash unchanged |
-| Dialogue Layer | ✅ Done | Threads/sessions/turns/anchors/digests — native DuckDB + 768-dim embeddings |
+| Dialogue Layer | ✅ Done | Threads/sessions/turns/anchors/digests/typed handoffs — native DuckDB + 768-dim embeddings |
 | Auto-anchor | ✅ Done | File path (regex) + symbol name (top-500 cache) detection on every `turn_add` |
 | Dialogue context in capsule | ✅ Done | `get_context_capsule` accepts `dialogue_budget`; returns `related_turns` |
 | Watch mode (native + poll fallback) | ✅ Done | `axon watch` uses inotify/FSEvents with automatic polling fallback; reindexes edits outside Claude Code |
@@ -733,7 +742,7 @@ axon index /caminho/para/seu-projeto
 axon serve
 ```
 
-### Ferramentas MCP (26)
+### Ferramentas MCP (33)
 
 | Ferramenta | Descrição |
 |-----------|-----------|
@@ -743,8 +752,8 @@ axon serve
 | `get_callers` | Arquivos que importam o arquivo que define um símbolo |
 | `get_skeleton` | Apenas assinaturas (sem corpos de função) |
 | `get_tests_for` | Testes que referenciam os arquivos fornecidos |
-| `search_memory` | Busca semântica em observações salvas |
-| `save_observation` | Persistir um insight para sessões futuras |
+| `search_memory` | Busca híbrida semântica + lexical com RRF e evidências de ranking |
+| `save_observation` | Persistir insight com autoridade de ranking limitada (não autorização) |
 | `run_pipeline` | Indexação completa do projeto |
 | `index_paths` | Reindexação incremental de caminhos específicos |
 | `rename` | Renomear símbolo com assistência do grafo |
@@ -756,13 +765,15 @@ axon serve
 | `thread_create` | Criar escopo nomeado de conversação (project \| person \| topic) |
 | `thread_list` | Listar todos os threads |
 | `thread_get` | Listar sessões de um thread com resumos de digest |
-| `session_start` | Abrir sessão de trabalho dentro de um thread |
+| `session_start` | Abrir/repetir sessão idempotente dentro de um thread |
 | `session_end` | Encerrar sessão; gera e embeda um digest (ADF) |
 | `turn_add` | Adicionar turn (user \| assistant) com auto-âncora em arquivos e símbolos |
 | `turn_search` | Busca semântica sobre todos os turns |
 | `session_get` | Recuperar turns de uma sessão |
 | `anchor_link` | Vincular manualmente um turn a um arquivo ou símbolo |
 | `dialogue_context` | Turns relacionados a arquivos ou query semântica |
+| `handoff_create` / `handoff_get` / `handoff_list` | Criar e consultar handoffs tipados por projeto |
+| `handoff_claim` / `handoff_complete` / `handoff_cancel` | Controlar o ciclo de vida atômico de handoffs |
 
 ### Modo Web
 

@@ -16,7 +16,7 @@ TypeScript, JavaScript, Python, Rust, Go, C#, PHP, Dart, Java, **Bash**, **C++**
 | `get_callers(symbol_name, file_path?, limit?)` | **Debug / root cause.** Backward trace file-granular: dado um símbolo, retorna os arquivos que importam o arquivo-definidor. Narrowing com `get_skeleton(caller_files)` para chegar a call sites. |
 | `get_tests_for(files)` | **Test impact.** Testes (por convenção de path) que importam os arquivos dados. Use antes de mergear. |
 | `get_skeleton(files)` | **Inspeção rápida.** Só assinaturas, sem corpos de função. |
-| `search_memory(query, limit?)` | **Memória cross-session.** Recupera observações salvas. |
+| `search_memory(query, limit?, tags?)` | **Memória cross-session.** Busca híbrida RRF com evidências de ranking. |
 | `save_observation(content, tags?, file_path?)` | **Persistir insight.** Chame após descoberta arquitetural não-óbvia. |
 | `index_paths(paths, prune?)` / `run_pipeline(root?)` | **Reset.** Normalmente desnecessário — write-through é automático via hooks. Use só se o índice parecer corrompido ou após operações em massa fora do Claude Code. |
 

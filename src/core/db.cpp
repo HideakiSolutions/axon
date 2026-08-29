@@ -95,8 +95,13 @@ void Database::run_migrations() {
          "  content    VARCHAR NOT NULL,"
          "  file_path  VARCHAR,"
          "  embedding  FLOAT[768],"
+         "  authority  DOUBLE NOT NULL DEFAULT 1.0,"
          "  created_at TIMESTAMP NOT NULL DEFAULT now()"
          ")");
+    try {
+        exec("ALTER TABLE observations ADD COLUMN authority DOUBLE DEFAULT 1.0");
+    } catch (...) {
+    }
 
     // Observation tags live in a child table so existing databases upgrade
     // without rewriting the observations table. The composite primary key
@@ -209,7 +214,16 @@ void Database::run_migrations() {
          "  digest_embedding FLOAT[768]"
          ")");
     try {
+        exec("ALTER TABLE sessions ADD COLUMN idempotency_key VARCHAR");
+    } catch (...) {
+    }
+    try {
         exec("CREATE INDEX IF NOT EXISTS idx_sessions_thread ON sessions(thread_id)");
+    } catch (...) {
+    }
+    try {
+        exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_idempotency "
+             "ON sessions(thread_id, idempotency_key)");
     } catch (...) {
     }
 
@@ -243,6 +257,33 @@ void Database::run_migrations() {
     }
     try {
         exec("CREATE INDEX IF NOT EXISTS idx_anchors_symbol ON turn_anchors(symbol_id)");
+    } catch (...) {
+    }
+
+    exec("CREATE TABLE IF NOT EXISTS handoffs ("
+         "  id                BIGINT PRIMARY KEY,"
+         "  source_session_id BIGINT,"
+         "  target_agent      VARCHAR NOT NULL,"
+         "  project_root      VARCHAR NOT NULL,"
+         "  working_directory VARCHAR NOT NULL,"
+         "  objective         VARCHAR NOT NULL,"
+         "  context           VARCHAR NOT NULL DEFAULT '',"
+         "  status            VARCHAR NOT NULL DEFAULT 'pending',"
+         "  claimed_by        VARCHAR,"
+         "  result            VARCHAR,"
+         "  idempotency_key   VARCHAR,"
+         "  created_at        TIMESTAMP NOT NULL DEFAULT now(),"
+         "  claimed_at        TIMESTAMP,"
+         "  completed_at      TIMESTAMP"
+         ")");
+    try {
+        exec("CREATE INDEX IF NOT EXISTS idx_handoffs_target_status "
+             "ON handoffs(target_agent, status)");
+    } catch (...) {
+    }
+    try {
+        exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_handoffs_idempotency "
+             "ON handoffs(source_session_id, idempotency_key)");
     } catch (...) {
     }
 }

@@ -14,6 +14,8 @@
 #include "../core/routes.hpp"
 #include "../core/dialogue.hpp"
 #include "../core/telemetry.hpp"
+#include "../core/pending_writes.hpp"
+#include "../core/memory_search.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -132,8 +134,8 @@ static json tools_list() {
                   {{"files", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
               {{"name", "search_memory"},
                {"description",
-                "Semantic search over saved observations, optionally requiring all supplied "
-                "tags."},
+                "Hybrid semantic and lexical search over saved observations. Results use "
+                "authority-bounded Reciprocal Rank Fusion and expose ranking evidence."},
                {"inputSchema",
                 {{"type", "object"},
                  {"required", {"query"}},
@@ -149,7 +151,14 @@ static json tools_list() {
                  {"properties",
                   {{"content", {{"type", "string"}}},
                    {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}},
-                   {"file_path", {{"type", "string"}}}}}}}},
+                   {"file_path", {{"type", "string"}}},
+                   {"authority",
+                    {{"type", "number"},
+                     {"minimum", 0.5},
+                     {"maximum", 2.0},
+                     {"default", 1.0},
+                     {"description",
+                      "Bounded ranking hint; never an authorization decision"}}}}}}}},
               {{"name", "get_overview"},
                {"description", "Return codebase entry points: top files by coupling "
                                "(incoming+outgoing edges) and top referenced symbols. Use for "
@@ -256,12 +265,15 @@ static json tools_list() {
                {"description", "List all conversation threads with session counts."},
                {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}},
               {{"name", "session_start"},
-               {"description", "Start a new session within a thread. Returns the session id."},
+               {"description", "Start a new session within a thread. An optional idempotency key "
+                               "makes retries return the original session id."},
                {"inputSchema",
                 {{"type", "object"},
                  {"required", {"thread_id"}},
                  {"properties",
-                  {{"thread_id", {{"type", "integer"}}}, {"label", {{"type", "string"}}}}}}}},
+                  {{"thread_id", {{"type", "integer"}}},
+                   {"label", {{"type", "string"}}},
+                   {"idempotency_key", {{"type", "string"}, {"maxLength", 256}}}}}}}},
               {{"name", "session_end"},
                {"description",
                 "Close a session and optionally compute its digest (compressed summary)."},
@@ -328,6 +340,58 @@ static json tools_list() {
                    {"file_paths", {{"type", "array"}, {"items", {{"type", "string"}}}}},
                    {"limit", {{"type", "integer"}, {"default", 5}}},
                    {"thread_id", {{"type", "integer"}}}}}}}},
+              {{"name", "handoff_create"},
+               {"description", "Create a typed, project-scoped handoff for another agent."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"target_agent", "objective"}},
+                 {"properties",
+                  {{"source_session_id", {{"type", "integer"}}},
+                   {"target_agent", {{"type", "string"}, {"maxLength", 128}}},
+                   {"working_directory", {{"type", "string"}}},
+                   {"objective", {{"type", "string"}, {"maxLength", 8192}}},
+                   {"context", {{"type", "string"}, {"maxLength", 65536}}},
+                   {"idempotency_key", {{"type", "string"}, {"maxLength", 256}}}}}}}},
+              {{"name", "handoff_get"},
+               {"description", "Get one typed handoff by id."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id"}},
+                 {"properties", {{"handoff_id", {{"type", "integer"}}}}}}}},
+              {{"name", "handoff_list"},
+               {"description", "List handoffs, optionally filtered by status or target agent."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"status",
+                    {{"type", "string"},
+                     {"enum", {"pending", "claimed", "completed", "cancelled"}}}},
+                   {"target_agent", {{"type", "string"}, {"maxLength", 128}}},
+                   {"limit", {{"type", "integer"}, {"default", 100}}}}}}}},
+              {{"name", "handoff_claim"},
+               {"description", "Atomically claim a pending handoff. Replay by the same claimant "
+                               "is idempotent."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id", "claimed_by"}},
+                 {"properties",
+                  {{"handoff_id", {{"type", "integer"}}},
+                   {"claimed_by", {{"type", "string"}, {"maxLength", 128}}}}}}}},
+              {{"name", "handoff_complete"},
+               {"description", "Complete a claimed handoff as its current claimant."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id", "claimed_by"}},
+                 {"properties",
+                  {{"handoff_id", {{"type", "integer"}}},
+                   {"claimed_by", {{"type", "string"}, {"maxLength", 128}}},
+                   {"result", {{"type", "string"}, {"maxLength", 65536}}}}}}}},
+              {{"name", "handoff_cancel"},
+               {"description", "Cancel a pending or claimed handoff."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id"}},
+                 {"properties", {{"handoff_id", {{"type", "integer"}}}}}}}},
               {{"name", "artifact_retrieve"},
                {"description", "Retrieve the original content for an Axon CCR artifact emitted by "
                                "lossy compression."},
@@ -337,59 +401,131 @@ static json tools_list() {
                  {"properties", {{"artifact_id", {{"type", "string"}}}}}}}}})}};
 }
 
+static std::string bounded_string_arg(const json& args, const char* name, size_t max_length,
+                                      bool required = false) {
+    if (!args.contains(name)) {
+        if (required) throw std::invalid_argument(std::string(name) + " is required");
+        return "";
+    }
+    if (!args[name].is_string())
+        throw std::invalid_argument(std::string(name) + " must be a string");
+    auto value = args[name].get<std::string>();
+    if (required && value.empty()) throw std::invalid_argument(std::string(name) + " is required");
+    if (value.size() > max_length)
+        throw std::invalid_argument(std::string(name) + " exceeds maximum length");
+    return value;
+}
+
+static bool is_within_path(const std::filesystem::path& root,
+                           const std::filesystem::path& candidate) {
+    auto root_it = root.begin();
+    auto candidate_it = candidate.begin();
+    while (root_it != root.end() && candidate_it != candidate.end() && *root_it == *candidate_it) {
+        ++root_it;
+        ++candidate_it;
+    }
+    return root_it == root.end();
+}
+
+static std::filesystem::path validated_working_directory(const Config& cfg,
+                                                         const std::string& requested) {
+    std::error_code ec;
+    const auto root = std::filesystem::weakly_canonical(cfg.project_root, ec);
+    if (ec) throw std::invalid_argument("project_root cannot be canonicalized");
+    auto candidate = requested.empty() ? root : std::filesystem::path(requested);
+    if (candidate.is_relative()) candidate = root / candidate;
+    candidate = std::filesystem::weakly_canonical(candidate, ec);
+    if (ec || !std::filesystem::is_directory(candidate, ec))
+        throw std::invalid_argument("working_directory must be an existing directory");
+    if (!is_within_path(root, candidate))
+        throw std::invalid_argument("working_directory must stay within the project root");
+    return candidate;
+}
+
+static json handoff_json(const Handoff& handoff) {
+    return {{"handoff_id", handoff.id},
+            {"source_session_id",
+             handoff.source_session_id >= 0 ? json(handoff.source_session_id) : json(nullptr)},
+            {"target_agent", handoff.target_agent},
+            {"project_root", handoff.project_root},
+            {"working_directory", handoff.working_directory},
+            {"objective", handoff.objective},
+            {"context", handoff.context},
+            {"status", handoff.status},
+            {"claimed_by", handoff.claimed_by},
+            {"result", handoff.result},
+            {"idempotency_key", handoff.idempotency_key},
+            {"created_at", handoff.created_at},
+            {"claimed_at", handoff.claimed_at},
+            {"completed_at", handoff.completed_at}};
+}
+
 // Drain the PostToolUse pending-writes queue ($PROJECT/.axon/pending-writes.txt)
 // Called at the start of every tool call so the Claude Code hook's write-through
 // is visible by the time any MCP tool actually looks at the index. The hook owns
 // the queue file; we atomically steal it (rename to tmp) before processing to
 // avoid racing the hook's flock on new appends.
 static int drain_pending_writes(ServerContext& ctx) {
-    namespace fs = std::filesystem;
     if (!ctx.db_ready()) return 0;
 
-    fs::path queue = ctx.cfg.axon_dir / "pending-writes.txt";
-    std::error_code ec;
-    if (!fs::exists(queue, ec) || fs::file_size(queue, ec) == 0) return 0;
+    auto claim = PendingWriteClaim::acquire(ctx.cfg.axon_dir);
+    if (claim.quarantined_path()) {
+        std::cerr << json{{"event", "queue_drain_quarantined"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"failed_batch", claim.quarantined_path()->filename().string()}}
+                         .dump()
+                  << "\n";
+    }
+    if (!claim.has_batch()) return 0;
 
-    // Atomically claim the queue — any concurrent hook append after this rename
-    // writes to a fresh empty file we'll pick up next drain.
-    fs::path claimed = ctx.cfg.axon_dir / "pending-writes.processing";
-    fs::remove(claimed, ec);
-    fs::rename(queue, claimed, ec);
-    if (ec) return 0;
-
-    std::vector<fs::path> paths;
-    {
-        std::ifstream in(claimed);
-        std::string line;
-        while (std::getline(in, line)) {
-            if (line.empty()) continue;
-            paths.emplace_back(line);
+    try {
+        auto stats = index_files(ctx.cfg, *ctx.db, claim.paths(), false);
+        if (ctx.model_ready()) {
+            try {
+                embed_pending_symbols(*ctx.db, *ctx.model);
+                embed_pending_turns(*ctx.db, *ctx.model);
+            } catch (const std::exception& error) {
+                std::cerr << json{{"event", "queue_embedding_retry_pending"},
+                                  {"service", "axon"},
+                                  {"environment", "local"},
+                                  {"correlationId", "queue-drain"},
+                                  {"error", error.what()}}
+                                 .dump()
+                          << "\n";
+                throw;
+            }
         }
+        if (stats.files_indexed > 0) ctx.graph = load_graph(*ctx.db);
+
+        const auto path_count = claim.paths().size();
+        const auto attempt = claim.attempt();
+        claim.acknowledge();
+        std::cerr << json{{"event", "queue_drain_completed"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"path_count", path_count},
+                          {"files_indexed", stats.files_indexed},
+                          {"attempt", attempt}}
+                         .dump()
+                  << "\n";
+        return stats.files_indexed;
+    } catch (const std::exception& error) {
+        // Do not acknowledge: the durable .processing claim is replayed on
+        // the next tool call, then quarantined after the bounded retry limit.
+        std::cerr << json{{"event", "queue_drain_failed"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"path_count", claim.paths().size()},
+                          {"attempt", claim.attempt()},
+                          {"error", error.what()}}
+                         .dump()
+                  << "\n";
+        return 0;
     }
-    fs::remove(claimed, ec);
-
-    if (paths.empty()) return 0;
-
-    // Deduplicate while preserving order — same file edited N times in a row
-    // should only be reindexed once.
-    std::vector<fs::path> unique;
-    std::unordered_set<std::string> seen;
-    for (auto& p : paths) {
-        auto key = p.string();
-        if (seen.insert(key).second) unique.push_back(std::move(p));
-    }
-
-    auto stats = index_files(ctx.cfg, *ctx.db, unique, false);
-    if (stats.files_indexed > 0 && ctx.model_ready()) {
-        try {
-            embed_pending_symbols(*ctx.db, *ctx.model);
-            embed_pending_turns(*ctx.db, *ctx.model);
-        } catch (...) { /* silent — will retry on next drain */
-        }
-    }
-    if (stats.files_indexed > 0) ctx.graph = load_graph(*ctx.db);
-
-    return stats.files_indexed;
 }
 
 // Filesystem-change signal: PostToolUse(Bash) and UserPromptSubmit hooks touch
@@ -852,7 +988,9 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         int limit = args.value("limit", 5);
         if (limit < 1) limit = 1;
         if (limit > 100) limit = 100;
+        const int candidate_limit = std::min(500, std::max(20, limit * 4));
         const auto tags = normalized_tags(args);
+        const auto lexical_terms = memory_lexical_terms(q);
         auto qvec = ctx.model->embed(q);
 
         std::ostringstream vs;
@@ -863,33 +1001,96 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         }
         vs << "]";
 
-        std::string sql = "SELECT o.content, o.file_path, o.created_at, "
-                          "       (SELECT list(ot.tag ORDER BY ot.tag) FROM observation_tags ot "
-                          "        WHERE ot.observation_id = o.id) AS tags "
-                          "FROM observations o WHERE o.embedding IS NOT NULL ";
+        std::string tag_filter;
         if (!tags.empty()) {
-            sql += "AND (SELECT COUNT(DISTINCT otf.tag) FROM observation_tags otf "
-                   "     WHERE otf.observation_id = o.id AND otf.tag IN " +
-                   sql_string_list(tags) + ") = " + std::to_string(tags.size()) + " ";
+            tag_filter = " AND (SELECT COUNT(DISTINCT otf.tag) FROM observation_tags otf "
+                         "      WHERE otf.observation_id = o.id AND otf.tag IN " +
+                         sql_string_list(tags) + ") = " + std::to_string(tags.size()) + " ";
         }
-        sql += "ORDER BY array_cosine_similarity(o.embedding, " + vs.str() + "::FLOAT[" +
-               std::to_string(ctx.model->dims()) + "]) DESC LIMIT " + std::to_string(limit);
 
-        auto res = ctx.db->conn().Query(sql);
-        auto& mat = *res;
+        const std::string tag_projection =
+            "(SELECT list(ot.tag ORDER BY ot.tag) FROM observation_tags ot "
+            " WHERE ot.observation_id = o.id) AS tags";
+        const std::string similarity = "array_cosine_similarity(o.embedding, " + vs.str() +
+                                       "::FLOAT[" + std::to_string(ctx.model->dims()) + "])";
+        const std::string semantic_sql =
+            "SELECT o.id, o.content, o.file_path, CAST(o.created_at AS VARCHAR), "
+            "       COALESCE(o.authority, 1.0), " +
+            tag_projection + ", " + similarity +
+            " AS channel_score "
+            "FROM observations o WHERE o.embedding IS NOT NULL" +
+            tag_filter + " ORDER BY channel_score DESC, o.id ASC LIMIT " +
+            std::to_string(candidate_limit);
+
+        auto semantic_result = ctx.db->conn().Query(semantic_sql);
+        if (semantic_result->HasError())
+            throw std::runtime_error("search_memory semantic: " + semantic_result->GetError());
+
+        std::vector<int64_t> semantic_ids;
+        std::vector<int64_t> lexical_ids;
+        std::unordered_map<int64_t, double> authority_by_id;
+        std::unordered_map<int64_t, json> metadata;
+
+        const auto store_candidate = [&](duckdb::MaterializedQueryResult& rows, duckdb::idx_t row,
+                                         const char* channel_score_name) {
+            const int64_t id = rows.GetValue<int64_t>(0, row);
+            const double authority = bounded_memory_authority(rows.GetValue<double>(4, row));
+            authority_by_id[id] = authority;
+            auto [iterator, inserted] =
+                metadata.try_emplace(id, json{{"observation_id", id},
+                                              {"content", rows.GetValue(1, row).ToString()},
+                                              {"file_path", rows.GetValue(2, row).ToString()},
+                                              {"created_at", rows.GetValue(3, row).ToString()},
+                                              {"authority", authority},
+                                              {"tags", json::array()}});
+            auto& item = iterator->second;
+            if (inserted) {
+                auto tag_value = rows.GetValue(5, row);
+                if (!tag_value.IsNull()) {
+                    for (const auto& tag : duckdb::ListValue::GetChildren(tag_value))
+                        item["tags"].push_back(tag.GetValue<std::string>());
+                }
+            }
+            item[channel_score_name] = rows.GetValue<double>(6, row);
+            return id;
+        };
+
+        for (duckdb::idx_t row = 0; row < semantic_result->RowCount(); ++row)
+            semantic_ids.push_back(store_candidate(*semantic_result, row, "semantic_similarity"));
+
+        if (!lexical_terms.empty()) {
+            std::string lexical_expression = "(";
+            for (size_t index = 0; index < lexical_terms.size(); ++index) {
+                if (index) lexical_expression += " + ";
+                lexical_expression += "CASE WHEN contains(lower(o.content), '" +
+                                      sql_escape(lexical_terms[index]) + "') THEN 1 ELSE 0 END";
+            }
+            lexical_expression += ")";
+
+            const std::string lexical_sql =
+                "SELECT o.id, o.content, o.file_path, CAST(o.created_at AS VARCHAR), "
+                "       COALESCE(o.authority, 1.0), " +
+                tag_projection + ", CAST(" + lexical_expression +
+                " AS DOUBLE) AS channel_score "
+                "FROM observations o WHERE " +
+                lexical_expression + " > 0" + tag_filter +
+                " ORDER BY channel_score DESC, o.id ASC LIMIT " + std::to_string(candidate_limit);
+            auto lexical_result = ctx.db->conn().Query(lexical_sql);
+            if (lexical_result->HasError())
+                throw std::runtime_error("search_memory lexical: " + lexical_result->GetError());
+            for (duckdb::idx_t row = 0; row < lexical_result->RowCount(); ++row)
+                lexical_ids.push_back(store_candidate(*lexical_result, row, "lexical_hits"));
+        }
 
         json result = json::array();
-        for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
-            json result_tags = json::array();
-            auto tag_value = mat.GetValue(3, i);
-            if (!tag_value.IsNull()) {
-                for (const auto& tag : duckdb::ListValue::GetChildren(tag_value))
-                    result_tags.push_back(tag.GetValue<std::string>());
-            }
-            result.push_back({{"content", mat.GetValue(0, i).ToString()},
-                              {"file_path", mat.GetValue(1, i).ToString()},
-                              {"created_at", mat.GetValue(2, i).ToString()},
-                              {"tags", std::move(result_tags)}});
+        for (const auto& rank :
+             fuse_memory_ranks(semantic_ids, lexical_ids, authority_by_id, limit)) {
+            auto item = metadata.at(rank.observation_id);
+            item["semantic_rank"] = rank.semantic_rank ? json(*rank.semantic_rank) : json(nullptr);
+            item["lexical_rank"] = rank.lexical_rank ? json(*rank.lexical_rank) : json(nullptr);
+            item["rrf_score"] = rank.rrf_score;
+            item["score"] = rank.final_score;
+            result.push_back(std::move(item));
         }
         return make_tool_result(result);
     }
@@ -900,6 +1101,9 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         std::string content = args.value("content", "");
         std::string file_path = args.value("file_path", "");
         const auto tags = normalized_tags(args);
+        if (args.contains("authority") && !args["authority"].is_number())
+            return make_tool_result({{"error", "authority must be a number"}}, true);
+        const double authority = bounded_memory_authority(args.value("authority", 1.0));
 
         auto id_result = ctx.db->conn().Query("SELECT nextval('seq_id')");
         if (id_result->HasError()) throw std::runtime_error(id_result->GetError());
@@ -927,17 +1131,18 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             vs << "]";
 
             std::string sql = "INSERT INTO observations (id, content, file_path, embedding, "
-                              "created_at) VALUES (" +
+                              "authority, created_at) VALUES (" +
                               std::to_string(observation_id) + ", '" + sq(content) + "', '" +
                               sq(file_path) + "', " + vs.str() + "::FLOAT[" +
-                              std::to_string(ctx.model->dims()) + "], now())";
+                              std::to_string(ctx.model->dims()) + "], " +
+                              std::to_string(authority) + ", now())";
             auto inserted = ctx.db->conn().Query(sql);
             if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
         } else {
             auto stmt = ctx.db->conn().Prepare(
-                "INSERT INTO observations (id, content, file_path, created_at) "
-                "VALUES ($1, $2, $3, now())");
-            auto inserted = stmt->Execute(observation_id, content, file_path);
+                "INSERT INTO observations (id, content, file_path, authority, created_at) "
+                "VALUES ($1, $2, $3, $4, now())");
+            auto inserted = stmt->Execute(observation_id, content, file_path, authority);
             if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
         }
 
@@ -949,7 +1154,10 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
             }
         }
-        return make_tool_result({{"saved", true}, {"tags", tags}});
+        return make_tool_result({{"saved", true},
+                                 {"observation_id", observation_id},
+                                 {"tags", tags},
+                                 {"authority", authority}});
     }
 
     if (name == "get_overview") {
@@ -1498,9 +1706,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         int64_t thread_id = arg_int64(args, "thread_id", -1);
         std::string label = arg_str(args, "label", "");
+        std::string idempotency_key = bounded_string_arg(args, "idempotency_key", 256);
         if (thread_id < 0) return make_tool_result({{"error", "thread_id is required"}}, true);
-        int64_t id = session_start(*ctx.db, thread_id, label);
-        return make_tool_result({{"session_id", id}, {"thread_id", thread_id}, {"label", label}});
+        int64_t id = session_start(*ctx.db, thread_id, label, idempotency_key);
+        return make_tool_result({{"session_id", id},
+                                 {"thread_id", thread_id},
+                                 {"label", label},
+                                 {"idempotency_key", idempotency_key}});
     }
 
     if (name == "session_end") {
@@ -1630,6 +1842,72 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                               {"thread", h.thread_name},
                               {"score", h.score}});
         return make_tool_result(result);
+    }
+
+    if (name == "handoff_create") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t source_session_id = arg_int64(args, "source_session_id", -1);
+        const auto target_agent = bounded_string_arg(args, "target_agent", 128, true);
+        const auto objective = bounded_string_arg(args, "objective", 8192, true);
+        const auto context = bounded_string_arg(args, "context", 65536);
+        const auto idempotency_key = bounded_string_arg(args, "idempotency_key", 256);
+        const auto requested_directory = bounded_string_arg(args, "working_directory", 4096);
+        const auto working_directory = validated_working_directory(ctx.cfg, requested_directory);
+        std::error_code ec;
+        const auto project_root = std::filesystem::weakly_canonical(ctx.cfg.project_root, ec);
+        if (ec) throw std::invalid_argument("project_root cannot be canonicalized");
+
+        const int64_t id =
+            handoff_create(*ctx.db, source_session_id, target_agent, project_root.string(),
+                           working_directory.string(), objective, context, idempotency_key);
+        return make_tool_result(handoff_json(handoff_get(*ctx.db, id)));
+    }
+
+    if (name == "handoff_get") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(handoff_json(handoff_get(*ctx.db, handoff_id)));
+    }
+
+    if (name == "handoff_list") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const auto status = bounded_string_arg(args, "status", 16);
+        const auto target_agent = bounded_string_arg(args, "target_agent", 128);
+        if (!status.empty() && status != "pending" && status != "claimed" &&
+            status != "completed" && status != "cancelled") {
+            return make_tool_result({{"error", "invalid handoff status"}}, true);
+        }
+        const int limit = args.value("limit", 100);
+        json result = json::array();
+        for (const auto& handoff : handoff_list(*ctx.db, status, target_agent, limit))
+            result.push_back(handoff_json(handoff));
+        return make_tool_result(result);
+    }
+
+    if (name == "handoff_claim") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        const auto claimed_by = bounded_string_arg(args, "claimed_by", 128, true);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(handoff_json(handoff_claim(*ctx.db, handoff_id, claimed_by)));
+    }
+
+    if (name == "handoff_complete") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        const auto claimed_by = bounded_string_arg(args, "claimed_by", 128, true);
+        const auto result = bounded_string_arg(args, "result", 65536);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(
+            handoff_json(handoff_complete(*ctx.db, handoff_id, claimed_by, result)));
+    }
+
+    if (name == "handoff_cancel") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(handoff_json(handoff_cancel(*ctx.db, handoff_id)));
     }
 
     if (name == "artifact_retrieve") {

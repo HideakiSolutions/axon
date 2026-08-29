@@ -65,10 +65,22 @@ std::vector<Thread> thread_list(Database& db) {
 
 // ── Session operations ────────────────────────────────────────────────────────
 
-int64_t session_start(Database& db, int64_t thread_id, const std::string& label) {
-    auto ins = db.conn().Query("INSERT INTO sessions (id, thread_id, label) VALUES ("
-                               "nextval('seq_id'), " +
-                               std::to_string(thread_id) + ", '" + sq(label) + "') RETURNING id");
+int64_t session_start(Database& db, int64_t thread_id, const std::string& label,
+                      const std::string& idempotency_key) {
+    if (!idempotency_key.empty()) {
+        auto existing = db.conn().Query(
+            "SELECT id FROM sessions WHERE thread_id = " + std::to_string(thread_id) +
+            " AND idempotency_key = '" + sq(idempotency_key) + "' LIMIT 1");
+        if (!existing->HasError() && existing->RowCount() > 0)
+            return existing->GetValue<int64_t>(0, 0);
+    }
+
+    const std::string key_value =
+        idempotency_key.empty() ? "NULL" : "'" + sq(idempotency_key) + "'";
+    auto ins = db.conn().Query(
+        "INSERT INTO sessions (id, thread_id, label, idempotency_key) VALUES ("
+        "nextval('seq_id'), " +
+        std::to_string(thread_id) + ", '" + sq(label) + "', " + key_value + ") RETURNING id");
     if (ins->HasError()) throw std::runtime_error("session_start: " + ins->GetError());
     return ins->GetValue<int64_t>(0, 0);
 }
@@ -237,6 +249,156 @@ std::vector<Session> thread_get_sessions(Database& db, int64_t thread_id) {
         out.push_back(s);
     }
     return out;
+}
+
+// ── Typed handoff operations ─────────────────────────────────────────────────
+
+static Handoff handoff_from_row(duckdb::MaterializedQueryResult& result, duckdb::idx_t row) {
+    Handoff handoff;
+    handoff.id = result.GetValue<int64_t>(0, row);
+    handoff.source_session_id = result.GetValue<int64_t>(1, row);
+    handoff.target_agent = result.GetValue(2, row).ToString();
+    handoff.project_root = result.GetValue(3, row).ToString();
+    handoff.working_directory = result.GetValue(4, row).ToString();
+    handoff.objective = result.GetValue(5, row).ToString();
+    handoff.context = result.GetValue(6, row).ToString();
+    handoff.status = result.GetValue(7, row).ToString();
+    handoff.claimed_by = result.GetValue(8, row).ToString();
+    handoff.result = result.GetValue(9, row).ToString();
+    handoff.idempotency_key = result.GetValue(10, row).ToString();
+    handoff.created_at = result.GetValue(11, row).ToString();
+    handoff.claimed_at = result.GetValue(12, row).ToString();
+    handoff.completed_at = result.GetValue(13, row).ToString();
+    return handoff;
+}
+
+static const char* handoff_projection() {
+    return "id, COALESCE(source_session_id, -1), target_agent, project_root, "
+           "working_directory, objective, context, status, COALESCE(claimed_by, ''), "
+           "COALESCE(result, ''), COALESCE(idempotency_key, ''), "
+           "CAST(created_at AS VARCHAR), COALESCE(CAST(claimed_at AS VARCHAR), ''), "
+           "COALESCE(CAST(completed_at AS VARCHAR), '')";
+}
+
+int64_t handoff_create(Database& db, int64_t source_session_id, const std::string& target_agent,
+                       const std::string& project_root, const std::string& working_directory,
+                       const std::string& objective, const std::string& context,
+                       const std::string& idempotency_key) {
+    if (target_agent.empty()) throw std::invalid_argument("target_agent is required");
+    if (project_root.empty()) throw std::invalid_argument("project_root is required");
+    if (working_directory.empty()) throw std::invalid_argument("working_directory is required");
+    if (objective.empty()) throw std::invalid_argument("objective is required");
+
+    if (source_session_id >= 0) {
+        auto session = db.conn().Query("SELECT id FROM sessions WHERE id = " +
+                                       std::to_string(source_session_id));
+        if (session->HasError() || session->RowCount() == 0)
+            throw std::invalid_argument("source_session_id does not exist");
+    }
+
+    const std::string source_filter =
+        source_session_id >= 0 ? "source_session_id = " + std::to_string(source_session_id)
+                               : "source_session_id IS NULL";
+    if (!idempotency_key.empty()) {
+        auto existing =
+            db.conn().Query("SELECT id FROM handoffs WHERE " + source_filter +
+                            " AND idempotency_key = '" + sq(idempotency_key) + "' LIMIT 1");
+        if (!existing->HasError() && existing->RowCount() > 0)
+            return existing->GetValue<int64_t>(0, 0);
+    }
+
+    const std::string source_value =
+        source_session_id >= 0 ? std::to_string(source_session_id) : "NULL";
+    const std::string key_value =
+        idempotency_key.empty() ? "NULL" : "'" + sq(idempotency_key) + "'";
+    auto inserted = db.conn().Query(
+        "INSERT INTO handoffs (id, source_session_id, target_agent, project_root, "
+        "working_directory, objective, context, idempotency_key) VALUES (nextval('seq_id'), " +
+        source_value + ", '" + sq(target_agent) + "', '" + sq(project_root) + "', '" +
+        sq(working_directory) + "', '" + sq(objective) + "', '" + sq(context) + "', " + key_value +
+        ") RETURNING id");
+    if (inserted->HasError()) throw std::runtime_error("handoff_create: " + inserted->GetError());
+    return inserted->GetValue<int64_t>(0, 0);
+}
+
+Handoff handoff_get(Database& db, int64_t handoff_id) {
+    auto result = db.conn().Query("SELECT " + std::string(handoff_projection()) +
+                                  " FROM handoffs WHERE id = " + std::to_string(handoff_id));
+    if (result->HasError()) throw std::runtime_error("handoff_get: " + result->GetError());
+    if (result->RowCount() == 0) throw std::invalid_argument("handoff_id does not exist");
+    return handoff_from_row(*result, 0);
+}
+
+std::vector<Handoff> handoff_list(Database& db, const std::string& status,
+                                  const std::string& target_agent, int limit) {
+    if (limit < 1) limit = 1;
+    if (limit > 500) limit = 500;
+    std::string where = " WHERE 1=1";
+    if (!status.empty()) where += " AND status = '" + sq(status) + "'";
+    if (!target_agent.empty()) where += " AND target_agent = '" + sq(target_agent) + "'";
+
+    auto result =
+        db.conn().Query("SELECT " + std::string(handoff_projection()) + " FROM handoffs" + where +
+                        " ORDER BY created_at ASC, id ASC LIMIT " + std::to_string(limit));
+    if (result->HasError()) throw std::runtime_error("handoff_list: " + result->GetError());
+
+    std::vector<Handoff> handoffs;
+    handoffs.reserve(result->RowCount());
+    for (duckdb::idx_t row = 0; row < result->RowCount(); ++row)
+        handoffs.push_back(handoff_from_row(*result, row));
+    return handoffs;
+}
+
+Handoff handoff_claim(Database& db, int64_t handoff_id, const std::string& claimed_by) {
+    if (claimed_by.empty()) throw std::invalid_argument("claimed_by is required");
+    auto current = handoff_get(db, handoff_id);
+    if (current.status == "claimed" && current.claimed_by == claimed_by) return current;
+    if (current.status != "pending")
+        throw std::invalid_argument("handoff must be pending before it can be claimed");
+
+    auto updated =
+        db.conn().Query("UPDATE handoffs SET status = 'claimed', claimed_by = '" + sq(claimed_by) +
+                        "', claimed_at = now() WHERE id = " + std::to_string(handoff_id) +
+                        " AND status = 'pending' RETURNING id");
+    if (updated->HasError() || updated->RowCount() == 0)
+        throw std::runtime_error("handoff claim lost its state transition race");
+    return handoff_get(db, handoff_id);
+}
+
+Handoff handoff_complete(Database& db, int64_t handoff_id, const std::string& claimed_by,
+                         const std::string& result) {
+    if (claimed_by.empty()) throw std::invalid_argument("claimed_by is required");
+    auto current = handoff_get(db, handoff_id);
+    if (current.status == "completed" && current.claimed_by == claimed_by) return current;
+    if (current.status != "claimed")
+        throw std::invalid_argument("handoff must be claimed before it can be completed");
+    if (current.claimed_by != claimed_by)
+        throw std::invalid_argument("handoff can only be completed by its claimant");
+
+    auto updated =
+        db.conn().Query("UPDATE handoffs SET status = 'completed', result = '" + sq(result) +
+                        "', completed_at = now() WHERE id = " + std::to_string(handoff_id) +
+                        " AND status = 'claimed' AND "
+                        "claimed_by = '" +
+                        sq(claimed_by) + "' RETURNING id");
+    if (updated->HasError() || updated->RowCount() == 0)
+        throw std::runtime_error("handoff completion lost its state transition race");
+    return handoff_get(db, handoff_id);
+}
+
+Handoff handoff_cancel(Database& db, int64_t handoff_id) {
+    auto current = handoff_get(db, handoff_id);
+    if (current.status == "cancelled") return current;
+    if (current.status == "completed")
+        throw std::invalid_argument("completed handoff cannot be cancelled");
+
+    auto updated = db.conn().Query("UPDATE handoffs SET status = 'cancelled', completed_at = now() "
+                                   "WHERE id = " +
+                                   std::to_string(handoff_id) +
+                                   " AND status IN ('pending', 'claimed') RETURNING id");
+    if (updated->HasError() || updated->RowCount() == 0)
+        throw std::runtime_error("handoff cancellation lost its state transition race");
+    return handoff_get(db, handoff_id);
 }
 
 // ── Turn operations ───────────────────────────────────────────────────────────

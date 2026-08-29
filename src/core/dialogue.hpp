@@ -48,6 +48,23 @@ struct TurnHit {
     std::string thread_name;
 };
 
+struct Handoff {
+    int64_t id;
+    int64_t source_session_id;
+    std::string target_agent;
+    std::string project_root;
+    std::string working_directory;
+    std::string objective;
+    std::string context;
+    std::string status;
+    std::string claimed_by;
+    std::string result;
+    std::string idempotency_key;
+    std::string created_at;
+    std::string claimed_at;
+    std::string completed_at;
+};
+
 // ── Thread operations ─────────────────────────────────────────────────────────
 
 int64_t thread_create(Database& db, const std::string& name, const std::string& kind = "project");
@@ -55,12 +72,27 @@ std::vector<Thread> thread_list(Database& db);
 
 // ── Session operations ────────────────────────────────────────────────────────
 
-int64_t session_start(Database& db, int64_t thread_id, const std::string& label = "");
+int64_t session_start(Database& db, int64_t thread_id, const std::string& label = "",
+                      const std::string& idempotency_key = "");
 void session_end(Database& db, int64_t session_id,
                  EmbeddingModel* model, // nullable
                  bool compute_digest = true);
 std::vector<Turn> session_get(Database& db, int64_t session_id, int limit = 500);
 std::vector<Session> thread_get_sessions(Database& db, int64_t thread_id);
+
+// ── Typed handoff operations ─────────────────────────────────────────────────
+
+int64_t handoff_create(Database& db, int64_t source_session_id, const std::string& target_agent,
+                       const std::string& project_root, const std::string& working_directory,
+                       const std::string& objective, const std::string& context = "",
+                       const std::string& idempotency_key = "");
+Handoff handoff_get(Database& db, int64_t handoff_id);
+std::vector<Handoff> handoff_list(Database& db, const std::string& status = "",
+                                  const std::string& target_agent = "", int limit = 100);
+Handoff handoff_claim(Database& db, int64_t handoff_id, const std::string& claimed_by);
+Handoff handoff_complete(Database& db, int64_t handoff_id, const std::string& claimed_by,
+                         const std::string& result = "");
+Handoff handoff_cancel(Database& db, int64_t handoff_id);
 
 // ── Turn operations ───────────────────────────────────────────────────────────
 
