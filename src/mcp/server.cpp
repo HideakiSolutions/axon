@@ -26,6 +26,10 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <atomic>
+#include <condition_variable>
+#include <cstdlib>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -2062,7 +2066,25 @@ static void write_stdio_response(const json& response, bool framed) {
 
 json call_tool(const std::string& name, const json& args, ServerContext& ctx) {
     std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
-    return handle_tool(name, args, ctx);
+    auto result = handle_tool(name, args, ctx);
+    ctx.last_tool_activity = std::chrono::steady_clock::now();
+    if (ctx.last_tool_activity - ctx.last_owner_heartbeat >= std::chrono::seconds(60)) {
+        heartbeat_self_as_owner(ctx);
+        ctx.last_owner_heartbeat = ctx.last_tool_activity;
+    }
+    return result;
+}
+
+static int db_idle_seconds() {
+    constexpr int fallback = 300;
+    const char* raw = std::getenv("AXON_DB_IDLE_SECONDS");
+    if (!raw || !*raw) return fallback;
+    try {
+        int value = std::stoi(raw);
+        return std::max(0, std::min(value, 86400));
+    } catch (...) {
+        return fallback;
+    }
 }
 
 void run_stdio(ServerContext& ctx) {
@@ -2073,6 +2095,43 @@ void run_stdio(ServerContext& ctx) {
     if (!ctx.db_ready() && !ctx.db_error.empty())
         std::cerr << "[axon] serve started without the index database (" << ctx.db_error
                   << "); will retry on the first tool call\n";
+
+    // A client process can survive an SSH/network disconnect and keep our
+    // stdin pipe open indefinitely. Release only the DuckDB/graph lease after
+    // a bounded idle period; the MCP process and model remain warm, and the
+    // next tool call reacquires the database through ensure_db_open().
+    const int idle_limit = db_idle_seconds();
+    std::atomic<bool> reaper_running{idle_limit > 0};
+    std::mutex reaper_wait_mutex;
+    std::condition_variable reaper_wakeup;
+    std::thread reaper;
+    if (idle_limit > 0) {
+        reaper = std::thread([&ctx, &reaper_running, &reaper_wait_mutex, &reaper_wakeup,
+                              idle_limit]() {
+            while (reaper_running.load()) {
+                std::unique_lock<std::mutex> wait_lock(reaper_wait_mutex);
+                if (reaper_wakeup.wait_for(wait_lock, std::chrono::seconds(1),
+                                           [&reaper_running]() { return !reaper_running.load(); }))
+                    break;
+                wait_lock.unlock();
+                std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
+                if (!ctx.db_ready()) continue;
+                auto idle = std::chrono::duration_cast<std::chrono::seconds>(
+                                std::chrono::steady_clock::now() - ctx.last_tool_activity)
+                                .count();
+                if (idle < idle_limit) {
+                    continue;
+                }
+                ctx.db.reset();
+                ctx.graph = DependencyGraph{};
+                ctx.db_error.clear();
+                unregister_self_as_owner(ctx);
+                std::cerr << "[axon] service=axon environment=local correlationId=session-lifecycle"
+                             " event=db_lock_released reason=idle idle_seconds="
+                          << idle << "\n";
+            }
+        });
+    }
 
     StdioEnvelope env;
     while (read_stdio_envelope(std::cin, env)) {
@@ -2123,6 +2182,11 @@ void run_stdio(ServerContext& ctx) {
             axon::record_telemetry(
                 ctx.cfg, ctx.db.get(),
                 {tool_name, "mcp", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""});
+            ctx.last_tool_activity = std::chrono::steady_clock::now();
+            if (ctx.last_tool_activity - ctx.last_owner_heartbeat >= std::chrono::seconds(60)) {
+                heartbeat_self_as_owner(ctx);
+                ctx.last_owner_heartbeat = ctx.last_tool_activity;
+            }
         } else {
             response = make_error(id, METHOD_NOT_FOUND, "Method not found: " + method);
         }
@@ -2130,6 +2194,9 @@ void run_stdio(ServerContext& ctx) {
         write_stdio_response(response, env.framed);
     }
 
+    reaper_running = false;
+    reaper_wakeup.notify_all();
+    if (reaper.joinable()) reaper.join();
     unregister_self_as_owner(ctx);
     stop_peer_listener();
 }

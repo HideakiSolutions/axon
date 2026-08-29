@@ -505,13 +505,27 @@ LD_LIBRARY_PATH = "/path/to/axon/third_party/duckdb/lib"
 
 If two clients (a second Claude session, Codex, `axon web`) run `axon serve`
 against the same `.axon/index.duckdb`, DuckDB only grants the write lock to
-one of them. Axon handles this transparently: the process holding the lock
+one of them. Axon normally handles this transparently: the process holding the lock
 registers itself as the repo's owner (pid, localhost port, and an auth token
 in `~/.axon/registry.json`), and any latecomer serve forwards its tool calls
-to the owner over `127.0.0.1`. When the owner exits, the latecomer takes the
-lock on its next tool call and promotes itself to owner. You should only see
-a lock error if the proxy path is also unavailable (e.g. the owner is an
-older axon binary without a peer listener). To inspect active servers:
+to the owner over `127.0.0.1`. A stdio owner releases only its DuckDB handle
+after five minutes without a tool call, even if a disconnected parent keeps
+the process alive. Its next tool call reopens the DB and promotes it again.
+
+Peer waits are bounded to 15 seconds, so a live but frozen owner fails fast
+instead of blocking a new session for five minutes. Inspect registered lock
+owners without exposing their tokens:
+
+```bash
+axon doctor locks
+axon doctor locks --json
+```
+
+Lifecycle tuning is optional: `AXON_DB_IDLE_SECONDS=0` disables idle release,
+`AXON_PEER_TIMEOUT_MS` changes the peer deadline, and
+`AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS` changes each queue-drain child deadline.
+The defaults are 300 seconds, 15000 milliseconds, and 30 seconds respectively.
+Axon never kills a live registered owner automatically. For OS-level inspection:
 
 ```bash
 pgrep -af 'axon.*serve'

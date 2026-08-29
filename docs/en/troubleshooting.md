@@ -64,6 +64,23 @@ cmake .. -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_BUILD_TYPE=Release
 
 ## Runtime Problems
 
+### Session remains locked after a disconnect
+
+Run `axon doctor locks` from any project to inspect registered DuckDB owners. A `healthy` owner is
+serving peer requests; `unresponsive` means the PID exists but its localhost endpoint did not answer
+within one second; `dead` is stale registry metadata. The command is read-only and never prints the
+peer token.
+
+Stdio servers release their DuckDB handle after 300 seconds without a tool call even when a parent
+Claude/Codex process survives a network disconnect. A later call reacquires the handle. Tune this
+with `AXON_DB_IDLE_SECONDS`; `0` disables the idle release. Peer tool calls default to a bounded
+15000 ms deadline via `AXON_PEER_TIMEOUT_MS`.
+
+Axon does not terminate a live unresponsive PID automatically. Resume or close the owning client,
+then retry. Use `axon registry prune` only to clear dead owner metadata; it does not break an OS lock.
+
+---
+
 ### `axon: error while loading shared libraries: libduckdb.so`
 
 **Symptom:** Binary starts, immediately crashes with shared library error.

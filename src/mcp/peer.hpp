@@ -21,6 +21,10 @@ void stop_peer_listener();
 std::optional<nlohmann::json> proxy_tool_call(ServerContext& ctx, const std::string& name,
                                               const nlohmann::json& args, std::string& error);
 
+// Short, read-only health probe used by `axon doctor locks`. Never includes
+// the registry authentication token in its result or diagnostics.
+std::optional<nlohmann::json> probe_peer_health(int port, std::string& error);
+
 // True if `pid` refers to a live process on this machine.
 bool pid_alive(long long pid);
 
@@ -31,5 +35,9 @@ void register_self_as_owner(ServerContext& ctx, int port);
 
 // Remove this process's owner registration (no-op if another pid owns it).
 void unregister_self_as_owner(ServerContext& ctx);
+
+// Refresh the registry heartbeat for the current owner (rate-limited by the
+// caller to avoid unnecessary registry writes).
+void heartbeat_self_as_owner(ServerContext& ctx);
 
 } // namespace axon::mcp

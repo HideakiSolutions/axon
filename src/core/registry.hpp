@@ -16,6 +16,8 @@ struct RepoEntry {
     long long owner_pid = 0;
     int owner_port = 0;
     std::string owner_token;
+    long long owner_started_at = 0;   // Unix epoch seconds
+    long long owner_heartbeat_at = 0; // Unix epoch seconds
 };
 
 struct RegistryData {
@@ -39,6 +41,10 @@ void register_repo(const std::string& root, const std::string& db_path);
 
 // Record this process as the live DB owner for a repo (pid + peer port + token)
 void set_repo_owner(const std::string& root, long long pid, int port, const std::string& token);
+
+// Refresh an owner's heartbeat, but only while the same pid still owns the
+// entry. Returns false when ownership has already moved elsewhere.
+bool touch_repo_owner(const std::string& root, long long pid);
 
 // Clear owner info for a repo, but only if it still points at `pid`
 // (avoids a stale exiting process clobbering a newer owner's registration)

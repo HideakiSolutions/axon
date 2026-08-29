@@ -19,7 +19,10 @@ typedef int ssize_t;
 #include <cerrno>
 #endif
 #include <atomic>
+#include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdlib>
 #include <random>
 #include <sstream>
 #include <thread>
@@ -32,6 +35,34 @@ using json = nlohmann::json;
 static std::atomic<bool> g_peer_running{false};
 static std::thread g_peer_thread;
 static int g_peer_fd = -1;
+
+static int peer_timeout_ms() {
+    constexpr int fallback = 15000;
+    const char* raw = std::getenv("AXON_PEER_TIMEOUT_MS");
+    if (!raw || !*raw) return fallback;
+    try {
+        int value = std::stoi(raw);
+        return std::max(100, std::min(value, 300000));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+static void set_socket_timeout(int fd, int timeout_ms) {
+#ifdef _WIN32
+    DWORD timeout = static_cast<DWORD>(timeout_ms);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout),
+               sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout),
+               sizeof(timeout));
+#else
+    timeval timeout{timeout_ms / 1000, (timeout_ms % 1000) * 1000};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout),
+               sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout),
+               sizeof(timeout));
+#endif
+}
 
 static long long self_pid() {
 #ifdef _WIN32
@@ -175,10 +206,15 @@ static void handle_peer_client(int client_fd, ServerContext& ctx) {
     rl >> method >> path >> version;
 
     if (method == "GET" && path == "/rpc/health") {
+        std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
+        auto idle_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                std::chrono::steady_clock::now() - ctx.last_tool_activity)
+                                .count();
         send_http_response(client_fd, 200,
                            json{{"pid", self_pid()},
                                 {"root", ctx.cfg.project_root.string()},
-                                {"db_ready", ctx.db_ready()}}
+                                {"db_ready", ctx.db_ready()},
+                                {"idle_seconds", std::max<int64_t>(0, idle_seconds)}}
                                .dump());
         close(client_fd);
         return;
@@ -280,22 +316,21 @@ void stop_peer_listener() {
     }
 }
 
-// Minimal localhost HTTP POST. Reads until the server closes the connection
+// Minimal localhost HTTP request. Reads until the server closes the connection
 // (the peer listener and web server both send Connection: close).
-static std::optional<std::string> http_post_local(int port, const std::string& path,
-                                                  const std::string& token, const std::string& body,
-                                                  std::string& error) {
+static std::optional<std::string> http_request_local(int port, const std::string& method,
+                                                     const std::string& path,
+                                                     const std::string& token,
+                                                     const std::string& body, std::string& error,
+                                                     int timeout_ms = 0) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         error = "socket() failed";
         return std::nullopt;
     }
 
-    timeval timeout{300, 0};
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout),
-               sizeof(timeout));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout),
-               sizeof(timeout));
+    if (timeout_ms <= 0) timeout_ms = peer_timeout_ms();
+    set_socket_timeout(fd, timeout_ms);
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -309,13 +344,14 @@ static std::optional<std::string> http_post_local(int port, const std::string& p
     }
 
     std::ostringstream oss;
-    oss << "POST " << path << " HTTP/1.1\r\n"
+    oss << method << " " << path << " HTTP/1.1\r\n"
         << "Host: 127.0.0.1:" << port << "\r\n"
-        << "Content-Type: application/json\r\n"
-        << "Authorization: Bearer " << token << "\r\n"
-        << "Content-Length: " << body.size() << "\r\n"
-        << "Connection: close\r\n\r\n"
-        << body;
+        << "Connection: close\r\n";
+    if (!token.empty()) oss << "Authorization: Bearer " << token << "\r\n";
+    if (method == "POST")
+        oss << "Content-Type: application/json\r\n"
+            << "Content-Length: " << body.size() << "\r\n";
+    oss << "\r\n" << body;
     std::string request = oss.str();
     if (!send_all(fd, request.c_str(), request.size())) {
         error = "send failed";
@@ -329,6 +365,11 @@ static std::optional<std::string> http_post_local(int port, const std::string& p
     while ((n = recv(fd, buf, sizeof(buf), 0)) > 0)
         response.append(buf, static_cast<size_t>(n));
     close(fd);
+
+    if (response.empty()) {
+        error = "owner did not respond within " + std::to_string(timeout_ms) + "ms";
+        return std::nullopt;
+    }
 
     auto body_start = response.find("\r\n\r\n");
     if (body_start == std::string::npos) {
@@ -365,8 +406,8 @@ std::optional<json> proxy_tool_call(ServerContext& ctx, const std::string& name,
     }
 
     json payload = {{"name", name}, {"arguments", args}};
-    auto body =
-        http_post_local(entry->owner_port, "/rpc/tool", entry->owner_token, payload.dump(), error);
+    auto body = http_request_local(entry->owner_port, "POST", "/rpc/tool", entry->owner_token,
+                                   payload.dump(), error);
     if (!body) return std::nullopt;
 
     try {
@@ -376,6 +417,17 @@ std::optional<json> proxy_tool_call(ServerContext& ctx, const std::string& name,
         return std::nullopt;
     } catch (...) {
         error = "owner response is not valid JSON";
+        return std::nullopt;
+    }
+}
+
+std::optional<json> probe_peer_health(int port, std::string& error) {
+    auto body = http_request_local(port, "GET", "/rpc/health", "", "", error, 1000);
+    if (!body) return std::nullopt;
+    try {
+        return json::parse(*body);
+    } catch (...) {
+        error = "owner health response is not valid JSON";
         return std::nullopt;
     }
 }
@@ -391,6 +443,11 @@ void unregister_self_as_owner(ServerContext& ctx) {
     if (!ctx.owner_registered) return;
     clear_repo_owner(ctx.cfg.project_root.string(), self_pid());
     ctx.owner_registered = false;
+}
+
+void heartbeat_self_as_owner(ServerContext& ctx) {
+    if (!ctx.owner_registered) return;
+    if (!touch_repo_owner(ctx.cfg.project_root.string(), self_pid())) ctx.owner_registered = false;
 }
 
 } // namespace axon::mcp

@@ -927,6 +927,11 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
                     ctx.cfg, ctx.db.get(),
                     {path, "http", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""});
             }
+            ctx.last_tool_activity = std::chrono::steady_clock::now();
+            if (ctx.last_tool_activity - ctx.last_owner_heartbeat >= std::chrono::seconds(60)) {
+                heartbeat_self_as_owner(ctx);
+                ctx.last_owner_heartbeat = ctx.last_tool_activity;
+            }
             std::string content_type =
                 (path == "/" || path == "/index.html") ? "text/html" : "application/json";
             build_response(client_fd, http_status, response_body, content_type);

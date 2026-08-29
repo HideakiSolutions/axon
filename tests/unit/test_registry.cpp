@@ -67,6 +67,21 @@ TEST_F(RegistryTest, PruneKeepsDeadRootWithLiveOwner) {
     EXPECT_EQ(axon::prune_registry(), 0);
     auto reg = axon::load_registry();
     ASSERT_EQ(reg.repos.size(), 1u);
+    EXPECT_GT(reg.repos[0].owner_started_at, 0);
+    EXPECT_GT(reg.repos[0].owner_heartbeat_at, 0);
+}
+
+TEST_F(RegistryTest, HeartbeatOnlyUpdatesCurrentOwner) {
+    fs::path repo = home / "live-repo";
+    fs::create_directories(repo);
+    axon::register_repo(repo.string(), "unused");
+    axon::set_repo_owner(repo.string(), (long long)testsupport::pid(), 4242, "tok");
+
+    EXPECT_FALSE(axon::touch_repo_owner(repo.string(), 2147483647LL));
+    EXPECT_TRUE(axon::touch_repo_owner(repo.string(), (long long)testsupport::pid()));
+    auto entry = axon::find_repo(repo.string());
+    ASSERT_TRUE(entry.has_value());
+    EXPECT_GT(entry->owner_heartbeat_at, 0);
 }
 
 TEST_F(RegistryTest, PruneDropsGroupMembersOfPrunedRepos) {
@@ -107,6 +122,8 @@ TEST_F(RegistryTest, PruneClearsDeadOwnerOnLiveRoot) {
     EXPECT_EQ(reg.repos[0].owner_pid, 0);
     EXPECT_EQ(reg.repos[0].owner_port, 0);
     EXPECT_TRUE(reg.repos[0].owner_token.empty());
+    EXPECT_EQ(reg.repos[0].owner_started_at, 0);
+    EXPECT_EQ(reg.repos[0].owner_heartbeat_at, 0);
 }
 
 TEST_F(RegistryTest, CountPrunableMatchesPruneSemantics) {

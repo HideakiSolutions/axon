@@ -62,4 +62,20 @@ for pid in $pids; do wait "$pid"; done
 test ! -e "$temp/active-drain.overlap"
 test "$(wc -l < "$project/.axon/pending-writes.txt")" -eq 0
 test ! -e "$lock_dir"
+
+# A wedged axon subprocess is bounded per attempt and cannot pin a hook.
+printf 'hung.md\n' > "$project/.axon/pending-writes.txt"
+printf '%s\n' '#!/usr/bin/env bash' 'sleep 300' > "$temp/bin/axon-hang"
+chmod +x "$temp/bin/axon-hang"
+started=$(date +%s)
+set +e
+TMPDIR="$temp/locks" AXON_BIN="$temp/bin/axon-hang" AXON_QUEUE_MAX_AGE_SECONDS=0 \
+  AXON_QUEUE_MAX_ATTEMPTS=1 AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS=1 bash "$drain" "$project"
+hang_status=$?
+set -e
+elapsed=$(( $(date +%s) - started ))
+test "$hang_status" -eq 2
+test "$elapsed" -le 4
+test "$(wc -l < "$project/.axon/pending-writes.txt")" -eq 1
+test ! -e "$lock_dir"
 echo "queue_drain_ok=true"

@@ -1,6 +1,7 @@
 #include "registry.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
@@ -61,6 +62,8 @@ RegistryData load_registry() {
             entry.owner_pid = r.value("owner_pid", 0LL);
             entry.owner_port = r.value("owner_port", 0);
             entry.owner_token = r.value("owner_token", "");
+            entry.owner_started_at = r.value("owner_started_at", 0LL);
+            entry.owner_heartbeat_at = r.value("owner_heartbeat_at", 0LL);
             if (!entry.root.empty()) reg.repos.push_back(entry);
         }
     }
@@ -87,6 +90,8 @@ void save_registry(const RegistryData& reg) {
             entry["owner_pid"] = r.owner_pid;
             entry["owner_port"] = r.owner_port;
             entry["owner_token"] = r.owner_token;
+            entry["owner_started_at"] = r.owner_started_at;
+            entry["owner_heartbeat_at"] = r.owner_heartbeat_at;
         }
         j["repos"].push_back(entry);
     }
@@ -138,14 +143,32 @@ void register_repo(const std::string& root, const std::string& db_path) {
 
 void set_repo_owner(const std::string& root, long long pid, int port, const std::string& token) {
     auto reg = load_registry();
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                   std::chrono::system_clock::now().time_since_epoch())
+                   .count();
     for (auto& r : reg.repos) {
         if (r.root != root) continue;
+        if (r.owner_pid != pid || r.owner_token != token) r.owner_started_at = now;
         r.owner_pid = pid;
         r.owner_port = port;
         r.owner_token = token;
+        r.owner_heartbeat_at = now;
         save_registry(reg);
         return;
     }
+}
+
+bool touch_repo_owner(const std::string& root, long long pid) {
+    auto reg = load_registry();
+    for (auto& r : reg.repos) {
+        if (r.root != root || r.owner_pid != pid) continue;
+        r.owner_heartbeat_at = std::chrono::duration_cast<std::chrono::seconds>(
+                                   std::chrono::system_clock::now().time_since_epoch())
+                                   .count();
+        save_registry(reg);
+        return true;
+    }
+    return false;
 }
 
 void clear_repo_owner(const std::string& root, long long pid) {
@@ -155,6 +178,8 @@ void clear_repo_owner(const std::string& root, long long pid) {
         r.owner_pid = 0;
         r.owner_port = 0;
         r.owner_token.clear();
+        r.owner_started_at = 0;
+        r.owner_heartbeat_at = 0;
         save_registry(reg);
         return;
     }
@@ -215,6 +240,8 @@ int prune_registry() {
                 r.owner_pid = 0;
                 r.owner_port = 0;
                 r.owner_token.clear();
+                r.owner_started_at = 0;
+                r.owner_heartbeat_at = 0;
                 owners_cleared++;
             }
             kept.push_back(std::move(r));

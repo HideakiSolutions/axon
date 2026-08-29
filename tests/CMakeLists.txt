@@ -343,6 +343,14 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_queue_drain_registry_scope.sh
 )
 
+if(NOT WIN32)
+    add_test(
+        NAME test_session_lock_lifecycle
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_session_lock_lifecycle.py
+                $<TARGET_FILE:axon>
+    )
+endif()
+
 if(WIN32)
     add_test(
         NAME test_windows_queue_hooks
@@ -380,3 +388,7 @@ set_tests_properties(
     test_queue_drain_registry_scope
     test_shell_filter_aggregate_benchmark
     PROPERTIES LABELS smoke)
+
+if(NOT WIN32)
+    set_tests_properties(test_session_lock_lifecycle PROPERTIES LABELS smoke)
+endif()

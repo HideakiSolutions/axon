@@ -5,6 +5,19 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `axon doctor locks [--json]` reports registered DuckDB owner health, identity, heartbeat age,
+  and idle time without exposing peer authentication tokens or mutating processes.
+- Registry owner records now include additive start and heartbeat timestamps.
+
+### Fixed
+- Detached stdio sessions release their DuckDB lock after five minutes without a tool call while
+  keeping the MCP process and embedding model warm; the next call reacquires transparently.
+- A live but frozen peer now fails after a bounded 15-second default instead of holding a new
+  session for five minutes. Queue-drain attempts also enforce an independent 30-second deadline.
+
 ## [1.3.0] — 2026-08-29
 
 ### Added

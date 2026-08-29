@@ -17,6 +17,7 @@ if ($lines.Count -eq 0) { exit 0 }
 $maxAge = if ($env:AXON_QUEUE_MAX_AGE_SECONDS) { [int]$env:AXON_QUEUE_MAX_AGE_SECONDS } else { 900 }
 $maxLines = if ($env:AXON_QUEUE_MAX_LINES) { [int]$env:AXON_QUEUE_MAX_LINES } else { 100 }
 $maxAttempts = if ($env:AXON_QUEUE_MAX_ATTEMPTS) { [int]$env:AXON_QUEUE_MAX_ATTEMPTS } else { 3 }
+$attemptTimeoutSeconds = if ($env:AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS) { [Math]::Max(1, [int]$env:AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS) } else { 30 }
 $age = [int]((Get-Date).ToUniversalTime() - (Get-Item $queue).LastWriteTimeUtc).TotalSeconds
 if ($lines.Count -lt $maxLines -and $age -lt $maxAge) { exit 0 }
 
@@ -52,7 +53,7 @@ try {
             $length = [Text.Encoding]::UTF8.GetByteCount($request)
             $process.StandardInput.Write("Content-Length: $length`r`n`r`n$request")
             $process.StandardInput.Close()
-            if (-not $process.WaitForExit(30000)) {
+            if (-not $process.WaitForExit($attemptTimeoutSeconds * 1000)) {
                 $process.Kill()
                 $process.WaitForExit()
             }
