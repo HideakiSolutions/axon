@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `1.0`, existing session callers remain valid, and canonical external memory still requires human
   approval rather than being mutated automatically.
 
+### CI
+- The end-to-end version smoke now derives its expected version from `CMakeLists.txt`, so minor
+  releases validate the exact binary version without a stale series-specific assertion.
+
 ## [1.2.16] — 2026-08-28
 
 ### Added

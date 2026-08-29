@@ -61,7 +61,10 @@ log "axon binary: $AXON"
 [ -x "$AXON" ] || { echo "axon binary missing: $AXON" >&2; exit 1; }
 
 VERSION_OUTPUT=$("$AXON" --version)
-assert_contains "axon 1.2" "$VERSION_OUTPUT" "--version prints a 1.2 line"
+EXPECTED_VERSION=$(sed -nE 's/^project\(axon VERSION ([0-9.]+).*/\1/p' "${REPO_ROOT}/CMakeLists.txt")
+[ -n "$EXPECTED_VERSION" ] || fail "could not resolve the expected version from CMakeLists.txt"
+assert_contains "axon ${EXPECTED_VERSION} " "$VERSION_OUTPUT" \
+  "--version matches CMakeLists.txt (${EXPECTED_VERSION})"
 
 HELP_OUTPUT=$("$AXON" help 2>&1)
 assert_contains "axon capsule" "$HELP_OUTPUT" "help mentions capsule subcommand"
