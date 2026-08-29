@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `search_memory` accepts an optional `tags` array and returns only observations containing every requested tag. `save_observation` now persists its advertised tags, and search results expose them.
 - Symbol call edges now disambiguate overloaded callees with receiver/enclosing-owner type and argument-arity signals, retaining deterministic same-file fallback when semantic hints are unavailable.
 
+### Fixed
+- Windows release validation now checks the executable version from the fully staged package, after its runtime DLLs are colocated, instead of trying to launch the raw build output prematurely.
+
 ## [1.2.16] — 2026-08-28
 
 ### Added

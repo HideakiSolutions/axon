@@ -113,7 +113,14 @@ jobs:
           test "${cmake_version}" = "${version}"
           test "${extension_version}" = "${version}"
           grep -F "## [${version}]" CHANGELOG.md >/dev/null
-          ./build/axon --version | grep -F "axon ${version} " >/dev/null
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # The raw build output cannot run until duckdb.dll and the llama/ggml
+            # runtime DLLs are staged beside it. Execution and version are checked
+            # below from the isolated, self-contained package tree.
+            test -f ./build/axon.exe
+          else
+            ./build/axon --version | grep -F "axon ${version} " >/dev/null
+          fi
           if [ "${{ runner.os }}" = "Linux" ]; then
             test -f "editors/vscode/axon-vscode-${version}.vsix"
           fi
@@ -198,6 +205,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $expectedVersion = "${{ steps.ver.outputs.version }}"
           $stage = (Get-Content .stage-name -Raw).Trim()
           @(
             "$stage\install.ps1",
@@ -219,11 +227,16 @@ jobs:
           New-Item -ItemType Directory -Force $probe | Out-Null
           Copy-Item "$stage\bin\*" $probe -Recurse -Force
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-          & "$probe\axon.exe" --version
+          $versionOutput = & "$probe\axon.exe" --version
           if ($LASTEXITCODE -ne 0) {
               Write-Error "[release] axon.exe is not self-contained (exit $LASTEXITCODE) -- a runtime DLL is missing from the staged bin folder"
               exit 1
           }
+          if ($versionOutput -notlike "axon $expectedVersion *") {
+              Write-Error "[release] staged axon.exe reported an unexpected version: $versionOutput"
+              exit 1
+          }
+          Write-Output $versionOutput
 
       - name: Archive + checksum (Unix)
         if: runner.os != 'Windows'
