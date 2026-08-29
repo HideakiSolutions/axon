@@ -2,6 +2,7 @@
 # bootstrap. Bumping is a Dependabot concern (gitsubmodule isn't applicable
 # to FetchContent, so we drive this manually as part of release prep).
 include(FetchContent)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
@@ -75,6 +76,24 @@ add_axon_test(test_shell_filter
 target_include_directories(test_shell_filter PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
 )
+
+add_axon_test(test_pending_writes
+    unit/test_pending_writes.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/pending_writes.cpp
+)
+
+add_axon_test(test_memory_search
+    unit/test_memory_search.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/memory_search.cpp
+)
+
+add_test(
+    NAME test_memory_retrieval_eval
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/evals/run_memory_retrieval.py
+            --axon $<TARGET_FILE:axon>
+            --dataset ${CMAKE_SOURCE_DIR}/evals/memory-retrieval.jsonl
+)
+set_tests_properties(test_memory_retrieval_eval PROPERTIES SKIP_RETURN_CODE 77)
 
 # CCR artifact tests require DuckDB and BLAKE3.
 add_executable(test_ccr unit/test_ccr.cpp
@@ -260,6 +279,25 @@ add_test(
 )
 
 add_test(
+    NAME test_mcp_handoff
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_mcp_handoff.py
+            $<TARGET_FILE:axon>
+)
+
+add_test(
+    NAME test_mcp_pending_writes
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_mcp_pending_writes.py
+            $<TARGET_FILE:axon>
+)
+
+add_test(
+    NAME test_mcp_memory_search
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_mcp_memory_search.py
+            $<TARGET_FILE:axon>
+)
+set_tests_properties(test_mcp_memory_search PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(
     NAME test_cpp_header_impl
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_cpp_header_impl.sh $<TARGET_FILE:axon>
 )
@@ -328,6 +366,9 @@ set_tests_properties(test_shell_filter_aggregate_benchmark PROPERTIES SKIP_RETUR
 set_tests_properties(
     test_cli_filter_json_metrics
     test_mcp_capsule_schema
+    test_mcp_handoff
+    test_mcp_pending_writes
+    test_mcp_memory_search
     test_cpp_header_impl
     test_http_status_codes
     test_docs_freshness

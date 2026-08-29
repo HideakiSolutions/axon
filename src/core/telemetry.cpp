@@ -76,13 +76,18 @@ std::string infer_layer(const TelemetryEvent& event) {
         event.type.rfind("/api/overview", 0) == 0 || event.type.rfind("/api/graph", 0) == 0) {
         return "retrieval";
     }
+    if (event.type.rfind("thread_", 0) == 0 || event.type.rfind("session_", 0) == 0 ||
+        event.type.rfind("turn_", 0) == 0 || event.type.rfind("handoff_", 0) == 0 ||
+        event.type == "anchor_link") {
+        return "dialogue";
+    }
     return "unknown";
 }
 
 json empty_layer_metrics() {
     json layers = json::object();
     for (const auto* layer :
-         {"retrieval", "shell_filtering", "compression", "cache", "ccr", "unknown"}) {
+         {"retrieval", "dialogue", "shell_filtering", "compression", "cache", "ccr", "unknown"}) {
         layers[layer] = {{"requests", 0},
                          {"tokens_sent", 0},
                          {"tokens_saved", 0},

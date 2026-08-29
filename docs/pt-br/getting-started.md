@@ -149,6 +149,7 @@ Isso ativa o BFS granular em `get_context_capsule` — pivôs expandem para seus
 | Verificando rotas HTTP afetadas | `route_map` → `api_impact` |
 | Após mudanças recentes no git | `detect_changes` |
 | Buscando algo recordado em sessão anterior | `search_memory` |
+| Transferindo trabalho entre agentes | `handoff_create` → `handoff_claim` → `handoff_complete` |
 | Verificando impacto em múltiplos repos | `group_list` → `group_impact` |
 
 ---
@@ -157,6 +158,7 @@ Isso ativa o BFS granular em `get_context_capsule` — pivôs expandem para seus
 
 - [Arquitetura](architecture.md)
 - [Referência de API](api-reference.md)
+- [Operação da memória nativa](native-memory.md)
 - [Axon como camada primaria e RTK opcional](axon-primary-rtk-optional.md)
 - [FAQ](faq.md)
 - [Solução de Problemas](troubleshooting.md)

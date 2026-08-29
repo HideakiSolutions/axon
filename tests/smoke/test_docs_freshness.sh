@@ -10,16 +10,16 @@ cd "$repo_root"
 # Whitespace-tolerant so clang-format runs can't zero the count; serverInfo
 # also carries a {{"name", ...}} pair and must not count as a tool.
 tool_count="$(rg -n '\{\{"name",\s*"' src/mcp/server.cpp | rg -v 'serverInfo' | wc -l | tr -d ' ')"
-if [[ "$tool_count" != "27" ]]; then
-  echo "expected 27 MCP tools in src/mcp/server.cpp, found $tool_count" >&2
+if [[ "$tool_count" != "33" ]]; then
+  echo "expected 33 MCP tools in src/mcp/server.cpp, found $tool_count" >&2
   exit 1
 fi
 
-grep -q 'MCP Tools (27)' README.md
-grep -q 'All 27 MCP tools' docs/en/api-reference.md
-grep -q 'all 27 MCP tools' docs/en/getting-started.md
-grep -q 'No. All 27 MCP tools work without it.' docs/en/faq.md
-grep -q '25 other tools' README.md
+grep -q 'MCP Tools (33)' README.md
+grep -q 'All 33 MCP tools' docs/en/api-reference.md
+grep -q 'all 33 MCP tools' docs/en/getting-started.md
+grep -q 'Most of the 33 MCP tools work without it.' docs/en/faq.md
+grep -q '31 other tools' README.md
 grep -q 'raw shell-output' README.md
 grep -q '| Capsule cache by query hash | ✅ Done |' README.md
 grep -q 'axon-shell-guard.sh' scripts/templates/CLAUDE.md

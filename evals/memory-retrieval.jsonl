@@ -1,0 +1,5 @@
+{"case":"exact","query":"AXON_QUEUE_SENTINEL durable pending writes","relevant":"queue","k":3}
+{"case":"semantic","query":"transfer implementation context to another coding agent","relevant":"handoff","k":3}
+{"case":"authority","query":"project decision authority ranking","relevant":"authority","k":3}
+{"case":"capture","query":"retry a captured file after an interrupted index","relevant":"capture","k":3}
+{"case":"tie","query":"deterministic duplicate ranking fixture","relevant":"tie-a","k":2}
