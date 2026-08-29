@@ -1,10 +1,10 @@
 # Native memory hardening state
 
-Status: implementation validated; delivery pending
+Status: PR validated; merge gate pending
 
 ## Current mini-goal
 
-Delivery — review the complete diff, commit, push, and open the governed PR.
+Delivery — obtain the explicit merge-gate decision for PR #90.
 
 ## Evidence
 
@@ -50,8 +50,11 @@ Delivery — review the complete diff, commit, push, and open the governed PR.
 - Final local gates passed: Release build, 29/29 CTest tests with the real model, full shellcheck,
   clang-format 15 over all `src/` and `tests/`, docs freshness, Python byte compilation, and
   `git diff --check`.
+- Commit `d4ca241` was pushed on `feature/native-memory-hardening` and PR #90 was opened against
+  the unchanged audited baseline `36ef099`.
+- All five required remote checks passed: GCC/Linux, Clang/macOS, MSVC/Windows, ShellCheck, and
+  clang-format. The PR is clean and mergeable with no review findings or comments.
 
 ## Next action
 
-Run the governed pre-commit review, create the feature commit(s), push, and open the PR. Merge
-remains a separate human gate.
+Await the separate human merge-gate decision for PR #90. Do not merge implicitly.
