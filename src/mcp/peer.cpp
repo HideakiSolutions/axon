@@ -42,7 +42,7 @@ static int peer_timeout_ms() {
     if (!raw || !*raw) return fallback;
     try {
         int value = std::stoi(raw);
-        return std::max(100, std::min(value, 300000));
+        return std::clamp(value, 100, 300000);
     } catch (...) {
         return fallback;
     }
