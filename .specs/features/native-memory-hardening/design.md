@@ -79,8 +79,9 @@ An observation may appear in only one channel. Ranking evidence is returned to c
 
 - If `.axon/pending-writes.processing` exists, process it before claiming a new queue.
 - Do not remove the claim before `index_files` succeeds.
-- On a handled failure, merge the claimed paths back into the queue, retaining the claim until the
-  merge is durable. A crash may create duplicates, which are harmless by FR-03.
+- On a handled failure, retain the `.processing` claim for replay. New hook writes continue in the
+  queue and are claimed only after the retained batch succeeds or is quarantined. A crash may
+  produce duplicate paths across batches, which are harmless by FR-03.
 - Emit structured stderr telemetry containing counts and error class, never source content.
 
 ## Security and Privacy

@@ -285,6 +285,12 @@ add_test(
 )
 
 add_test(
+    NAME test_mcp_pending_writes
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_mcp_pending_writes.py
+            $<TARGET_FILE:axon>
+)
+
+add_test(
     NAME test_mcp_memory_search
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_mcp_memory_search.py
             $<TARGET_FILE:axon>
@@ -361,6 +367,7 @@ set_tests_properties(
     test_cli_filter_json_metrics
     test_mcp_capsule_schema
     test_mcp_handoff
+    test_mcp_pending_writes
     test_mcp_memory_search
     test_cpp_header_impl
     test_http_status_codes

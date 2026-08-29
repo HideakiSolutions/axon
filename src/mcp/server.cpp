@@ -480,6 +480,17 @@ static int drain_pending_writes(ServerContext& ctx) {
     }
     if (!claim.has_batch()) return 0;
 
+    if (claim.attempt() > 1) {
+        std::cerr << json{{"event", "queue_drain_recovered"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"path_count", claim.paths().size()},
+                          {"attempt", claim.attempt()}}
+                         .dump()
+                  << "\n";
+    }
+
     try {
         auto stats = index_files(ctx.cfg, *ctx.db, claim.paths(), false);
         if (ctx.model_ready()) {

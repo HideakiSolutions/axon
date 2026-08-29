@@ -1,10 +1,10 @@
 # Native memory hardening state
 
-Status: PR validated; merge gate pending
+Status: audit corrections validated locally; PR revalidation pending
 
 ## Current mini-goal
 
-Delivery — obtain the explicit merge-gate decision for PR #90.
+Delivery — publish the completion-audit corrections and revalidate PR #90.
 
 ## Evidence
 
@@ -47,9 +47,12 @@ Delivery — obtain the explicit merge-gate decision for PR #90.
 - Review found and corrected an embedding-retry defect: pending-write claims now remain durable
   when embedding fails and replay embedding work even when file indexing is already idempotently
   complete.
-- Final local gates passed: Release build, 29/29 CTest tests with the real model, full shellcheck,
+- Final local gates passed: Release build, 30/30 CTest tests with the real model, full shellcheck,
   clang-format 15 over all `src/` and `tests/`, docs freshness, Python byte compilation, and
   `git diff --check`.
+- Completion audit found and closed two final contract gaps: the design now matches the retained
+  `.processing` replay model, and recovered claims emit a tested `queue_drain_recovered` event with
+  bounded metadata. The new end-to-end smoke test replays attempt 2 and verifies acknowledgment.
 - Commit `d4ca241` was pushed on `feature/native-memory-hardening` and PR #90 was opened against
   the unchanged audited baseline `36ef099`.
 - All five required remote checks passed: GCC/Linux, Clang/macOS, MSVC/Windows, ShellCheck, and
@@ -57,4 +60,5 @@ Delivery — obtain the explicit merge-gate decision for PR #90.
 
 ## Next action
 
-Await the separate human merge-gate decision for PR #90. Do not merge implicitly.
+Commit and push the audit corrections, then require all PR checks to pass again before the merge
+gate is evaluated.
