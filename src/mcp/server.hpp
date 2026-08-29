@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <chrono>
 
 namespace axon::mcp {
 
@@ -27,6 +28,8 @@ struct ServerContext {
     int peer_port = 0;
     std::string peer_token;
     bool owner_registered = false;
+    std::chrono::steady_clock::time_point last_tool_activity = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point last_owner_heartbeat = std::chrono::steady_clock::now();
 
     bool db_ready() const { return db != nullptr; }
     bool model_ready() const { return model != nullptr; }

@@ -20,6 +20,7 @@
 #include <fstream>
 #include <sstream>
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -74,6 +75,7 @@ Usage:
   axon skeleton <file>                  Print skeleton (signatures-only) of a file
   axon status                           Show index statistics
   axon metrics [--json]                 Show per-layer telemetry (token savings, latency)
+  axon doctor locks [--json]            Diagnose registered DuckDB lock owners
   axon registry prune                   Drop registry entries whose repo root is gone
   axon help                             Show this help
   axon --version | -V                   Print version and git SHA
@@ -836,6 +838,85 @@ int main(int argc, char* argv[]) {
                    L.value("average_latency_ms", 0.0));
         }
         return 0;
+    }
+
+    // ── axon doctor locks [--json] ─────────────────────────────────────────
+    if (cmd == "doctor") {
+        std::string sub = argc > 2 ? argv[2] : "";
+        bool json_output = argc > 3 && std::string(argv[3]) == "--json";
+        if (sub != "locks" || (argc > 3 && !json_output) || argc > 4) {
+            std::cerr << "Usage: axon doctor locks [--json]\n";
+            return 1;
+        }
+
+        nlohmann::json reports = nlohmann::json::array();
+        int unhealthy = 0;
+        auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                       .count();
+        for (const auto& entry : axon::load_registry().repos) {
+            if (entry.owner_pid == 0) continue;
+            nlohmann::json report = {
+                {"root", entry.root},
+                {"pid", entry.owner_pid},
+                {"port", entry.owner_port},
+                {"process_alive", axon::mcp::pid_alive(entry.owner_pid)},
+                {"heartbeat_age_seconds", entry.owner_heartbeat_at > 0
+                                              ? std::max(0LL, now - entry.owner_heartbeat_at)
+                                              : -1LL}};
+            std::string status;
+            std::string detail;
+            if (!report["process_alive"].get<bool>()) {
+                status = "dead";
+                detail = "registered owner process is not running";
+            } else if (entry.owner_port <= 0) {
+                status = "unreachable";
+                detail = "registered owner has no peer port";
+            } else {
+                std::string probe_error;
+                auto health = axon::mcp::probe_peer_health(entry.owner_port, probe_error);
+                if (!health) {
+                    status = "unresponsive";
+                    detail = probe_error;
+                } else if (health->value("pid", 0LL) != entry.owner_pid ||
+                           health->value("root", "") != entry.root) {
+                    status = "identity_mismatch";
+                    detail = "peer identity does not match registry owner";
+                } else if (!health->value("db_ready", false)) {
+                    status = "released";
+                    detail = "peer is responsive but no longer holds the database";
+                } else {
+                    status = "healthy";
+                    if (health->contains("idle_seconds"))
+                        report["idle_seconds"] = (*health)["idle_seconds"];
+                }
+            }
+            report["status"] = status;
+            if (!detail.empty()) report["detail"] = detail;
+            if (status != "healthy") unhealthy++;
+            reports.push_back(std::move(report));
+        }
+
+        if (json_output) {
+            std::cout << nlohmann::json{{"owners", reports},
+                                        {"owner_count", reports.size()},
+                                        {"unhealthy_count", unhealthy}}
+                             .dump(2)
+                      << "\n";
+        } else if (reports.empty()) {
+            std::cout << "No registered DuckDB lock owners.\n";
+        } else {
+            for (const auto& report : reports) {
+                std::cout << report["status"].get<std::string>() << " pid=" << report["pid"]
+                          << " root=" << report["root"].get<std::string>();
+                if (report.contains("idle_seconds"))
+                    std::cout << " idle_seconds=" << report["idle_seconds"];
+                if (report.contains("detail"))
+                    std::cout << " detail=" << report["detail"].get<std::string>();
+                std::cout << "\n";
+            }
+        }
+        return unhealthy == 0 ? 0 : 2;
     }
 
     // ── axon registry prune ────────────────────────────────────────────────

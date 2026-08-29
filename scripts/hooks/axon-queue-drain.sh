@@ -10,6 +10,10 @@ AXON_BIN="${AXON_BIN:-axon}"
 MAX_AGE_SECONDS="${AXON_QUEUE_MAX_AGE_SECONDS:-900}"
 MAX_LINES="${AXON_QUEUE_MAX_LINES:-100}"
 MAX_ATTEMPTS="${AXON_QUEUE_MAX_ATTEMPTS:-3}"
+ATTEMPT_TIMEOUT_SECONDS="${AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS:-30}"
+case "$ATTEMPT_TIMEOUT_SECONDS" in
+  ''|*[!0-9]*|0) ATTEMPT_TIMEOUT_SECONDS=30 ;;
+esac
 
 [[ -d "$AXON_DIR" && -f "$AXON_DIR/index.duckdb" && -f "$QUEUE" ]] || exit 0
 command -v "$AXON_BIN" >/dev/null 2>&1 || { echo '[axon-queue-drain] axon binary unavailable' >&2; exit 2; }
@@ -70,15 +74,41 @@ trap release_lock EXIT
 trap 'release_lock; exit 130' INT
 trap 'release_lock; exit 143' TERM
 request='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_overview","arguments":{"limit":1}}}'
+framed_request=$(printf 'Content-Length: %s\r\n\r\n%s' "${#request}" "$request")
+
+run_bounded_attempt() {
+  local child_pid watchdog_pid status
+  (cd "$ROOT" && exec "$AXON_BIN" serve) <<<"$framed_request" >/dev/null 2>/dev/null &
+  child_pid=$!
+  (
+    remaining=$ATTEMPT_TIMEOUT_SECONDS
+    while [ "$remaining" -gt 0 ] && kill -0 "$child_pid" 2>/dev/null; do
+      sleep 1
+      remaining=$((remaining - 1))
+    done
+    kill -0 "$child_pid" 2>/dev/null || exit 0
+    kill -TERM "$child_pid" 2>/dev/null || exit 0
+    sleep 1
+    kill -KILL "$child_pid" 2>/dev/null || true
+  ) &
+  watchdog_pid=$!
+  set +e
+  wait "$child_pid"
+  status=$?
+  set -e
+  wait "$watchdog_pid" 2>/dev/null || true
+  return "$status"
+}
 
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
-  if printf 'Content-Length: %s\r\n\r\n%s' "${#request}" "$request" | (cd "$ROOT" && "$AXON_BIN" serve) >/dev/null 2>/dev/null; then
+  if run_bounded_attempt; then
     remaining=$(grep -cve '^\s*$' "$QUEUE" 2>/dev/null || true)
     if [[ "$remaining" -eq 0 ]]; then
       echo "[axon-queue-drain] drained lines=$count attempt=$attempt" >&2
       exit 0
     fi
   fi
+  echo "[axon-queue-drain] attempt_failed attempt=$attempt timeout_seconds=$ATTEMPT_TIMEOUT_SECONDS" >&2
   sleep "$attempt"
 done
 echo "[axon-queue-drain] degraded: drain failed lines=$count attempts=$MAX_ATTEMPTS" >&2

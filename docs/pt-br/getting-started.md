@@ -154,6 +154,19 @@ Isso ativa o BFS granular em `get_context_capsule` — pivôs expandem para seus
 
 ---
 
+## Sessões desconectadas e lock do DuckDB
+
+Um `axon serve` via stdio libera somente o handle do DuckDB após 300 segundos sem chamada de
+ferramenta, mesmo que o processo pai sobreviva a uma queda de conexão. A próxima chamada reabre o
+banco automaticamente. Inspecione os owners registrados com `axon doctor locks` ou
+`axon doctor locks --json`; tokens de autenticação nunca são exibidos.
+
+Os ajustes opcionais são `AXON_DB_IDLE_SECONDS` (use `0` para desabilitar a liberação),
+`AXON_PEER_TIMEOUT_MS` (padrão 15000) e `AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS` (padrão 30). Um PID vivo
+e não responsivo é diagnosticado, mas nunca encerrado automaticamente.
+
+---
+
 ## Próximos passos
 
 - [Arquitetura](architecture.md)
