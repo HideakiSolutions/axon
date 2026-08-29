@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
+#include <utility>
 #include <climits>
 #include <blake3.h>
 
@@ -245,15 +246,43 @@ static bool is_call_kind(const std::string& kind) {
 //   obj.method(...)     → "method"
 //   ns::path::fn(...)   → "fn"
 //   self.foo(...)       → "foo"
-static std::string extract_callee_name(TSNode call_node, const std::string& src) {
+static TSNode call_target_node(TSNode call_node) {
     // Try field "function" first (TS/JS/Rust/Go/C++/etc)
     TSNode fn = ts_node_child_by_field_name(call_node, "function", 8);
     if (ts_node_is_null(fn)) {
         // Fallback: first named child
         uint32_t n = ts_node_named_child_count(call_node);
-        if (n == 0) return "";
+        if (n == 0) return {};
         fn = ts_node_named_child(call_node, 0);
     }
+    return fn;
+}
+
+static std::string rightmost_identifier(TSNode node, const std::string& src) {
+    while (!ts_node_is_null(node)) {
+        std::string kind = ts_node_type(node);
+        if (kind == "identifier" || kind == "field_identifier" || kind == "property_identifier" ||
+            kind == "simple_identifier" || kind == "shorthand_property_identifier" ||
+            kind == "type_identifier") {
+            return node_text(node, src);
+        }
+        uint32_t count = ts_node_named_child_count(node);
+        if (count == 0) return "";
+        node = ts_node_named_child(node, count - 1);
+    }
+    return "";
+}
+
+static std::string extract_callee_name(TSNode call_node, const std::string& src) {
+    // Some grammars (notably Java method_invocation) expose the method name
+    // directly on the call node rather than through a `function` child.
+    TSNode direct_name = ts_node_child_by_field_name(call_node, "name", 4);
+    if (!ts_node_is_null(direct_name)) {
+        std::string name = rightmost_identifier(direct_name, src);
+        if (!name.empty()) return name;
+    }
+
+    TSNode fn = call_target_node(call_node);
     if (ts_node_is_null(fn)) return "";
 
     // Walk down picking the rightmost identifier-like leaf.
@@ -282,6 +311,40 @@ static std::string extract_callee_name(TSNode call_node, const std::string& src)
         fn = ts_node_named_child(fn, n - 1);
     }
     return "";
+}
+
+static std::string extract_callee_qualifier(TSNode call_node, const std::string& src) {
+    TSNode fn = call_target_node(call_node);
+    static constexpr std::pair<const char*, uint32_t> fields[] = {
+        {"object", 6}, {"receiver", 8}, {"scope", 5},      {"argument", 8},
+        {"value", 5},  {"operand", 7},  {"expression", 10}};
+
+    // Java and a few other grammars attach the receiver to the call node.
+    for (const auto& [field, length] : fields) {
+        TSNode qualifier = ts_node_child_by_field_name(call_node, field, length);
+        if (!ts_node_is_null(qualifier)) return rightmost_identifier(qualifier, src);
+    }
+    if (ts_node_is_null(fn)) return "";
+
+    for (const auto& [field, length] : fields) {
+        TSNode qualifier = ts_node_child_by_field_name(fn, field, length);
+        if (!ts_node_is_null(qualifier)) return rightmost_identifier(qualifier, src);
+    }
+    return "";
+}
+
+static int extract_argument_count(TSNode call_node) {
+    TSNode args = ts_node_child_by_field_name(call_node, "arguments", 9);
+    if (!ts_node_is_null(args)) return static_cast<int>(ts_node_named_child_count(args));
+
+    const uint32_t count = ts_node_named_child_count(call_node);
+    for (uint32_t i = 0; i < count; ++i) {
+        TSNode child = ts_node_named_child(call_node, i);
+        const std::string kind = ts_node_type(child);
+        if (kind == "argument_list" || kind == "arguments")
+            return static_cast<int>(ts_node_named_child_count(child));
+    }
+    return -1;
 }
 
 // Common identifiers that look like calls but are control flow / built-ins.
@@ -1604,6 +1667,8 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             CallSite cs;
             cs.caller_name = ""; // resolved post-walk via byte range
             cs.callee_name = std::move(callee);
+            cs.qualifier = extract_callee_qualifier(node, ctx.src);
+            cs.argument_count = extract_argument_count(node);
             cs.line = (int)ts_node_start_point(node).row + 1;
             // Stash byte position in line slot's high bits — no, keep separate.
             // We need start_byte to find enclosing symbol; piggyback in caller_name temporarily
