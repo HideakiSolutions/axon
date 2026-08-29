@@ -5,14 +5,30 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] — 2026-08-29
 
 ### Added
+- Native at-least-once pending-write spool with atomic claims, crash replay, path deduplication,
+  bounded retry, poison-batch quarantine, and structured recovery telemetry.
+- Typed project-scoped handoffs with create, get, list, claim, complete, and cancel MCP tools;
+  session and handoff creation now support optional idempotency keys for transport retries.
+- Explainable hybrid memory retrieval: semantic and lexical candidates are fused with deterministic
+  Reciprocal Rank Fusion, then adjusted by bounded observation authority. Results expose channel
+  ranks, RRF score, authority, and final score.
+- Versioned retrieval evaluation comparing semantic-only and hybrid Recall@K, MRR, and latency,
+  plus legacy-schema, state-machine, queue-recovery, and MCP smoke coverage.
 - `search_memory` accepts an optional `tags` array and returns only observations containing every requested tag. `save_observation` now persists its advertised tags, and search results expose them.
 - Symbol call edges now disambiguate overloaded callees with receiver/enclosing-owner type and argument-arity signals, retaining deterministic same-file fallback when semantic hints are unavailable.
 
 ### Fixed
+- Pending-write claims now remain durable when embedding fails, replay embedding work after an
+  idempotent file-index pass, and explicitly report recovered attempts before acknowledgment.
 - Windows release validation now checks the executable version from the fully staged package, after its runtime DLLs are colocated, instead of trying to launch the raw build output prematurely.
+
+### Compatibility
+- DuckDB migrations and MCP contracts are additive: existing observations default to authority
+  `1.0`, existing session callers remain valid, and canonical external memory still requires human
+  approval rather than being mutated automatically.
 
 ## [1.2.16] — 2026-08-28
 
