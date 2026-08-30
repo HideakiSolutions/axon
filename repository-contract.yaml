@@ -1,0 +1,7 @@
+schema_version: repository-contract/v1
+repository_id: 7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb
+identity:
+  remotes:
+    - github.com/hideakisolutions/axon
+capabilities:
+  manifest: null
