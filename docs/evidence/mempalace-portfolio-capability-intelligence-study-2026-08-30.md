@@ -187,8 +187,9 @@ embeddings, vector graphs and other indexes are derived locally. The shipped log
 uses stable replica ids, per-origin sequences, hybrid logical clocks, version vectors, artifact-first
 transfer, hashes and idempotent fold. The full multi-master memory design is explicitly incomplete.
 
-For Axon, only a subset is needed initially: stable repository identity, monotonic per-repository
-sequence, append-only local journal, snapshot/manifest reconciliation and a single-writer derived
+For Axon, only a subset is needed initially: stable logical repository identity, a distinct physical
+index-stream identity, monotonic per-stream sequence, append-only local journal,
+snapshot/manifest reconciliation and a single-writer derived
 central projection. Multi-master project indexes are out of scope.
 
 ### 3.6 Retrieval and capability discovery lessons
@@ -337,9 +338,12 @@ Illustrative additive registry format:
   "repos": [
     {
       "repository_id": "7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb",
+      "index_stream_id": "11111111-1111-4111-8111-111111111111",
       "name": "axon",
       "root": "/opt/hideakisolutions/axon",
-      "db_path": "/opt/hideakisolutions/axon/.axon/index.duckdb"
+      "db_path": "/opt/hideakisolutions/axon/.axon/index.duckdb",
+      "variant": "main",
+      "default_for_profiles": ["local", "team"]
     }
   ],
   "groups": {"core": ["7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb"]},
@@ -372,6 +376,10 @@ Compatibility requirements:
 - old fields remain present;
 - groups resolve by stable repository id internally, while old name-based membership remains a
   migration input;
+- each physical index persists a distinct `index_stream_id`; clones/worktrees may share the logical
+  repository id and are registered as explicit variants;
+- exactly one index stream is the default for each `(repository_id, storage_profile)` pair; a
+  command may select a non-default variant explicitly but it is never merged silently;
 - paths and endpoints are never combined in one profile;
 - exactly one default may exist for each role, but commands may select a named profile explicitly;
 - secrets come from environment/key store, never `registry.json` or CLI arguments;
@@ -389,8 +397,8 @@ PortfolioStore
   health()
   schema_version()
   transaction(apply_batch)
-  repository_cursor(repository_id)
-  replace_repository_partition(snapshot)
+  stream_cursor(repository_id, index_stream_id)
+  replace_repository_stream_partition(repository_id, index_stream_id, snapshot)
   query_capabilities(filter, page)
   query_candidates(filter, page)
   maintenance(kind)
@@ -446,6 +454,7 @@ Minimum event envelope:
 {
   "schema_version": "axon/index-event/v1",
   "repository_id": "uuid",
+  "index_stream_id": "uuid",
   "sequence": 42,
   "event_id": "uuid-or-deterministic-hash",
   "event_type": "IndexFilesUpdated",
@@ -454,12 +463,13 @@ Minimum event envelope:
   "source_ref": "optional",
   "manifest_hash": "optional",
   "occurred_at": "UTC timestamp",
-  "affected": [{"kind": "file", "stable_key": "src/x.cpp", "operation": "upsert"}]
+  "affected": [{"kind": "file", "key": "src/x.cpp", "operation": "upsert"}]
 }
 ```
 
-Use one monotonic sequence per stable repository id. Enforce uniqueness on both `event_id` and
-`(repository_id, sequence)`. Store normalized item references rather than unbounded JSON source
+Use one monotonic sequence per stable physical `index_stream_id`; legitimate main/clone/worktree
+streams may share a logical `repository_id`. Enforce uniqueness on both `event_id` and
+`(index_stream_id, sequence)`. Store normalized item references rather than unbounded JSON source
 content. A snapshot completion event carries the manifest hash. Deletes create tombstones retained
 until every configured projection cursor has passed the delete and the retention policy permits
 compaction.
@@ -489,11 +499,11 @@ sync_runs
 
 The central transaction:
 
-1. validates repository identity, protocol/schema version and sequence continuity;
-2. applies one bounded event batch to one repository partition;
+1. validates logical repository, physical stream identity, protocol/schema and stream sequence continuity;
+2. applies one bounded event batch to one repository/stream variant partition;
 3. updates signatures, candidates and staleness affected by that batch;
 4. inserts applied-event evidence;
-5. advances that repository's cursor last;
+5. advances that stream's cursor last;
 6. commits atomically.
 
 No acknowledgement is written into a project DB. Cursors belong to each projection. A failed batch
@@ -514,7 +524,8 @@ The shared server cannot assume filesystem access to clients. Clients use authen
 ```text
 POST /api/v1/portfolio/events          bounded ordered event batch
 POST /api/v1/portfolio/snapshot        signature/manifest snapshot for bootstrap or repair
-GET  /api/v1/portfolio/cursor/{repo}   server cursor and epoch
+GET  /api/v1/portfolio/cursor/{repo}   default-stream cursor, epoch and resolved index_stream_id
+GET  /api/v1/portfolio/cursor/{repo}/{stream} explicit variant cursor and epoch
 GET  /api/v1/portfolio/status          authenticated operational status
 GET  /healthz                          minimal liveness only
 ```
@@ -529,8 +540,10 @@ transport contains full code. The server therefore never needs filesystem access
 
 On ambiguous submission failure, the client queries the server cursor before retrying; it never
 falls back to an unrelated direct write. PostgreSQL is the sole durable central writer target in
-shared mode and supports concurrent repository ingestion with transactional per-repository cursor
-updates. The local DuckDB portfolio provider retains its single-writer apply rule; horizontal
+shared mode and supports concurrent stream ingestion with transactional
+`(repository_id, index_stream_id)` cursor updates. The repository-only cursor endpoint resolves the
+configured default stream and returns that resolution; variant callers use the explicit endpoint.
+The local DuckDB portfolio provider retains its single-writer apply rule; horizontal
 multi-writer scale is out of scope only for that embedded provider.
 
 #### Coexistence
@@ -538,9 +551,10 @@ multi-writer scale is out of scope only for that embedded provider.
 A project may publish to both `portfolio_local` and `portfolio_shared`. Each has an independent
 cursor. Local failure does not erase shared state; server unavailability does not block local
 indexing. Query commands accept `--profile=<name>` and may use `--federated` to merge two projection
-result sets. Every result reports source profile, repository epoch and freshness. Conflicting
-projection records are not merged invisibly: the newer compatible epoch wins for ranking, while
-the discrepancy is reported.
+result sets. Every result reports source profile, logical repository id, resolved index stream,
+repository epoch and freshness. Conflicting variants are not merged invisibly: default-stream
+results rank by default, while explicitly federated variants remain separately labeled and any
+discrepancy is reported.
 
 ### 5.8 Reconciliation and rebuild
 
@@ -763,7 +777,7 @@ amplification. Record hardware, compiler, DuckDB version, embedding identity and
 | Central server becomes authority accidentally | Role/schema naming, provenance and docs state projection-only; local code index and Git declarations remain authorities |
 | Central outage blocks development | Local indexing/event commit never waits for network; sync is retryable and fail-soft |
 | Wrong central target/tenant | Stable server id + namespace marker, TLS/bearer, explicit profile and fail-closed mismatch |
-| Event acknowledged but response lost | Query cursor before retry; idempotency on repository id + sequence and event id |
+| Event acknowledged but response lost | Query stream cursor before retry; idempotency on index stream id + sequence and event id |
 | Writable secondary side effects | Shared `ReadOnlyProjectDatabase` opener plus integration test and filesystem hash evidence |
 | Cross-repo path traversal/symlink escape | Canonical roots, registered-root validation, no-follow policy and evidence references confined to repo |
 | Central data leakage | Signature allowlist; no full source, secret, PII or arbitrary docstrings/log bodies; structured limited-cardinality telemetry |

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.axon.local/portfolio/v1/repository-snapshot.schema.json",
+  "title": "Axon Repository Projection Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "target", "publisher_binding", "repository_id", "index_stream_id", "through_sequence", "index_epoch", "manifest_hash", "generated_at", "snapshot_session_id", "projection_generation", "idempotency_key", "chunk_index", "chunk_count", "chunk_digest", "signatures", "observed_capabilities", "tombstones"],
+  "properties": {
+    "schema_version": {"const": "axon/repository-snapshot/v1"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "namespace", "protocol_version"],
+      "properties": {
+        "instance_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "namespace": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"},
+        "protocol_version": {"const": "axon/portfolio-sync/v1"}
+      }
+    },
+    "repository_id": {"type": "string", "format": "uuid"},
+    "index_stream_id": {"type": "string", "format": "uuid"},
+    "publisher_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id", "binding_id", "index_stream_id", "identity_epoch", "root_fingerprint"],
+      "properties": {
+        "principal_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "binding_id": {"type": "string", "minLength": 16, "maxLength": 128},
+        "index_stream_id": {"type": "string", "format": "uuid"},
+        "identity_epoch": {"type": "integer", "minimum": 1},
+        "root_fingerprint": {"type": "string", "minLength": 16, "maxLength": 128},
+        "repository_contract_digest": {"type": ["string", "null"], "minLength": 16, "maxLength": 128}
+      }
+    },
+    "through_sequence": {"type": "integer", "minimum": 1},
+    "index_epoch": {"type": "string", "minLength": 16, "maxLength": 128},
+    "manifest_hash": {"type": "string", "minLength": 16, "maxLength": 128},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "snapshot_session_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "projection_generation": {"type": "string", "minLength": 16, "maxLength": 128},
+    "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 128},
+    "chunk_index": {"type": "integer", "minimum": 0},
+    "chunk_count": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "chunk_digest": {"type": "string", "minLength": 16, "maxLength": 128},
+    "previous_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_id", "binding_id", "handoff_sequence", "approval_reference"],
+      "properties": {
+        "repository_id": {"type": "string", "format": "uuid"},
+        "binding_id": {"type": "string", "minLength": 16, "maxLength": 128},
+        "handoff_sequence": {"type": "integer", "minimum": 1},
+        "approval_reference": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "signatures": {"type": "array", "maxItems": 10000, "items": {"$ref": "https://schemas.axon.local/portfolio/v1/capability-signature.schema.json"}},
+    "observed_capabilities": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability_id", "signature_id"],
+        "properties": {
+          "capability_id": {"type": "string", "minLength": 16, "maxLength": 128},
+          "signature_id": {"type": "string", "minLength": 16, "maxLength": 128}
+        }
+      }
+    },
+    "tombstones": {"type": "array", "maxItems": 10000, "items": {"$ref": "https://schemas.axon.local/portfolio/v1/projection-delta.schema.json#/$defs/tombstone"}}
+  }
+}
