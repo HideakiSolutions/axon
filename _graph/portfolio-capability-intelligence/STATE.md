@@ -1,6 +1,6 @@
 # Portfolio Capability Intelligence State
 
-Status: G1 independently accepted; ADR and capability-intake human gates pending
+Status: G1 and architecture/intake gates accepted; G2 authorized to start
 
 ## Current Mini-Goal
 
@@ -11,7 +11,7 @@ G1 — specifications, ADR and capability intake.
 - G0 baseline and confrontation: independently accepted and committed as `37a5039`.
 - G1 specifications/contracts: exceptional third correction authorized, independently accepted and
   ready for its isolated commit.
-- G2-G16 implementation: not started; prohibited until ADR/intake gate resolves.
+- G2-G16 implementation: not started; G2 is now authorized under its closed contract.
 
 ## Current Evidence
 
@@ -22,11 +22,12 @@ G1 — specifications, ADR and capability intake.
   five versioned data/transport schemas and G0-G16 delivery contracts.
 - Logical repository identity is distinct from physical `index_stream_id`; main/clones/worktrees may
   coexist as explicit variants with independent cursors and one profile-selected default.
-- ADR-0003 is `Proposed`.
+- ADR-0003 is `Accepted` by explicit responsible-owner decision on 2026-08-30.
 - Capability Intake v2 proposal requests promotion to platform-core, records that all four exact
   migration-view queries returned no matches and the validator failed on two unrelated preexisting
   registry drifts, only Axon as an evidenced consumer, unavailable mandatory semantic corpus and
-  the Proposed ADR. Governance discovery is therefore degraded/fail-closed, not successful.
+  the accepted strategic ADR. The responsible owner approved `promote` to `platform-core` while
+  external graph writing remains prohibited. Discovery remains degraded/fail-closed, not successful.
 
 ## Risks and Gaps
 
@@ -45,6 +46,5 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Create the isolated accepted G1 commit, then obtain explicit owner acceptance/revision of ADR-0003
-and platform-owner disposition of the capability intake. G2 remains prohibited until both gates
-resolve.
+Start G2 only within its declared allowed paths: repair `group_impact`, add registry v2 logical/
+stream identity and profile validation, execute its deterministic tests and independent refutation.

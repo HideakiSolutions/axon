@@ -42,8 +42,8 @@
       "MemPalace multi-provider storage contracts"
     ],
     "candidate_consumers": ["axon"],
-    "strategic_adr": "axon/.specs/decisions/ADR-0003-federated-portfolio-capability-intelligence.md (Proposed; acceptance required)",
-    "compatibility_assessment": "Additive Axon projection and query capability; preserves project DuckDB authority and Git capability ownership. No existing package is replaced. Exact federated queries returned no target node, while the migration-view validator also reported two unrelated preexisting registry drifts and exited nonzero. Only Axon is an evidenced initial consumer; promotion relies on the Proposed strategic ADR and remains human-gated."
+    "strategic_adr": "axon/.specs/decisions/ADR-0003-federated-portfolio-capability-intelligence.md (Accepted by responsible owner on 2026-08-30)",
+    "compatibility_assessment": "Additive Axon projection and query capability; preserves project DuckDB authority and Git capability ownership. No existing package is replaced. Exact federated queries returned no target node, while the migration-view validator also reported two unrelated preexisting registry drifts and exited nonzero. Only Axon is an evidenced initial consumer. The responsible owner approved the promote disposition to platform-core on 2026-08-30; external graph materialization remains a separate prohibited write in this goal."
   },
   "graph_update": {
     "owning_fragment": "platform-core/.platform/capability-graph.fragment.json",
@@ -67,5 +67,5 @@
     ],
     "rollback": "Disable shared profile, route to local live aggregation, stop projectors and rebuild or remove derived stores."
   },
-  "rationale": "Only Axon is currently evidenced as a consumer. Promotion is proposed under the strategic-ADR path because the contract governs portfolio-wide authority and shared projections; it is not validated while semantic discovery is unavailable and requires explicit platform-owner disposition. Fail-closed applies to target, authentication and governance validation; local indexing and unavailable derived read models remain fail-soft."
+  "rationale": "Only Axon is currently evidenced as a consumer. Promotion was approved by the responsible owner under the accepted strategic-ADR path because the contract governs portfolio-wide authority and shared projections. Semantic discovery remains unavailable and explicitly degraded; approval does not claim a discovered existing node or authorize external graph writes. Fail-closed applies to target, authentication and governance validation; local indexing and unavailable derived read models remain fail-soft."
 }

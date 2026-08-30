@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed
+Accepted
+
+Accepted by the responsible owner on 2026-08-30 after independent G1 verification. This acceptance
+authorizes additive local implementation under the governed delivery graph; it does not authorize
+schema/data migration of shared environments, secrets, infrastructure changes, external capability-
+graph writes, merge, deployment, tag or release.
 
 ## Context
 
