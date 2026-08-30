@@ -200,16 +200,17 @@ target_link_libraries(test_objectives PRIVATE
 )
 add_test(NAME test_objectives COMMAND test_objectives)
 
-# Registry tests — pure filesystem + JSON, no DuckDB/llama.cpp. Runs entirely
-# under an isolated AXON_REGISTRY_DIR.
+# Registry tests — isolated registry plus real DuckDB read-only secondary checks.
 add_executable(test_registry unit/test_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/core/registry.cpp
 )
 target_include_directories(test_registry PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
     ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
 )
 target_link_libraries(test_registry PRIVATE
+    duckdb_lib
     GTest::gtest_main
 )
 add_test(NAME test_registry COMMAND test_registry)

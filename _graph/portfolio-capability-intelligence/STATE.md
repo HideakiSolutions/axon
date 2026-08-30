@@ -1,17 +1,21 @@
 # Portfolio Capability Intelligence State
 
-Status: G1 and architecture/intake gates accepted; G2 authorized to start
+Status: G2 independently accepted and committed
 
 ## Current Mini-Goal
 
-G1 — specifications, ADR and capability intake.
+G2 — existing aggregation repair and registry v2.
 
 ## Progress
 
 - G0 baseline and confrontation: independently accepted and committed as `37a5039`.
 - G1 specifications/contracts: exceptional third correction authorized, independently accepted and
   ready for its isolated commit.
-- G2-G16 implementation: not started; G2 is now authorized under its closed contract.
+- G2 implementation: registry v2, shared read-only opener and aggregation repair independently
+  accepted after the owner-authorized bounded correction beyond budget 2/2. Structural top-level
+  and nested JSON types now fail closed before partial model materialization. The verifier added
+  7 adversarial cases and found no issue; the isolated G2 commit was created.
+- G3-G16 implementation: not started.
 
 ## Current Evidence
 
@@ -28,13 +32,20 @@ G1 — specifications, ADR and capability intake.
   registry drifts, only Axon as an evidenced consumer, unavailable mandatory semantic corpus and
   the accepted strategic ADR. The responsible owner approved `promote` to `platform-core` while
   external graph writing remains prohibited. Discovery remains degraded/fail-closed, not successful.
+- Registry v1 remains round-trippable. Registry v2 models logical repositories, distinct physical
+  streams, storage profiles/default variants and target markers with fail-closed validation.
+- HTTP and MCP aggregation share a root-contained, symlink-rejecting `READ_ONLY` DuckDB opener;
+  tested secondary files remained byte-identical and per-repository failures are structured.
+- G2 correction 3 passed 20 registry tests, HTTP/MCP smoke, ShellCheck, `git diff --check` and full
+  CTest: 29 passed and 2 embedding-dependent tests skipped; no failures.
 
 ## Risks and Gaps
 
 - Governance sources reference Constitution v2.2/ADR-0022 and a pinned corpus validator absent from
   the checked-out enterprise-hseos source; current Git sources provide Constitution v2.1 and the
   platform migration view/intake v2 contract.
-- Existing `group_impact` correctness/read-only defect is scheduled for G2.
+- Registry identity generation/index persistence remains G3 work; G2 only provides the additive
+  registry representation and validation.
 - Provider namespaces and credentials are intentionally unprovisioned.
 - PostgreSQL/Qdrant/FalkorDB production adapter dependencies/build strategy require accepted ADR and
   supply-chain review before code.
@@ -46,5 +57,4 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Start G2 only within its declared allowed paths: repair `group_impact`, add registry v2 logical/
-stream identity and profile validation, execute its deterministic tests and independent refutation.
+Evaluate the G3 entry contract without mixing G3 changes into the accepted G2 node.

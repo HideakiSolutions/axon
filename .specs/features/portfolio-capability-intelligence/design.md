@@ -159,19 +159,29 @@ Registry v2 retains all v1 fields and adds named profiles:
 
 ```json
 {
+  "schema_version": "axon-registry/v2",
   "storage_profiles": {
     "local": {
-      "transport": "local",
-      "portfolio_store": {"provider": "duckdb", "path": "${AXON_REGISTRY_DIR}/portfolio.duckdb"},
+      "role": "portfolio_local",
+      "provider": "duckdb",
+      "path": "${AXON_REGISTRY_DIR}/portfolio.duckdb",
       "default": true
     },
     "shared-dev": {
+      "role": "portfolio_shared",
       "transport": "axon_http",
       "endpoint": "http://127.0.0.1:7071",
       "namespace": "axon",
-      "portfolio_store": {"provider": "postgresql"},
-      "semantic_index": {"provider": "qdrant"},
-      "graph_projection": {"provider": "falkordb"},
+      "providers": {
+        "portfolio_store": "postgresql",
+        "semantic_index": "qdrant",
+        "graph_projection": "falkordb"
+      },
+      "target_marker": {
+        "instance_id": "shared-dev-1",
+        "namespace": "axon",
+        "protocol_version": "axon/portfolio-sync/v1"
+      },
       "default": false
     }
   }
@@ -179,8 +189,10 @@ Registry v2 retains all v1 fields and adds named profiles:
 ```
 
 Endpoints are non-secret. Credentials are referenced by environment/secret-provider keys and never
-serialized. Exactly one default per role/profile class is allowed. Target markers bind instance id,
-namespace and protocol version.
+serialized. At most one named profile per role may be marked default and exactly one profile is the
+operational default when no explicit profile is supplied. Target markers bind instance id,
+namespace and the exact `axon/portfolio-sync/v1` protocol version. Local targets use `path`, remote
+targets use `endpoint`, and the two are mutually exclusive.
 
 ## 7. Projection Protocol
 

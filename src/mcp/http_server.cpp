@@ -408,79 +408,87 @@ static std::string handle_request(const std::string& method, const std::string& 
 
         // Aggregate extra repos if --group or --all was specified
         std::vector<axon::RepoEntry> extra_repos;
-        if (cfg.all_repos) {
+        json secondary_errors = json::array();
+        if (cfg.all_repos || !cfg.group.empty()) {
             auto reg = axon::load_registry();
-            extra_repos = axon::get_repos(reg);
-        } else if (!cfg.group.empty()) {
-            auto reg = axon::load_registry();
-            extra_repos = axon::get_group_repos(reg, cfg.group);
+            auto selection =
+                axon::aggregation_repos(reg, cfg.group.empty()
+                                                 ? std::optional<std::string>{}
+                                                 : std::optional<std::string>{cfg.group});
+            extra_repos = std::move(selection.repos);
+            for (const auto& issue : selection.issues)
+                secondary_errors.push_back({{"repo", nullptr},
+                                            {"code", issue.code},
+                                            {"path", issue.path},
+                                            {"message", issue.message}});
         }
 
         for (auto& repo : extra_repos) {
             if (repo.db_path == ctx.cfg.db_path.string()) continue; // skip self
-            try {
-                duckdb::DBConfig db_cfg;
-                db_cfg.options.access_mode = duckdb::AccessMode::READ_ONLY;
-                duckdb::DuckDB other_db(repo.db_path, &db_cfg);
-                duckdb::Connection other_conn(other_db);
+            auto secondary = axon::open_secondary_read_only(repo);
+            if (!secondary) {
+                secondary_errors.push_back({{"repo", repo.name},
+                                            {"code", secondary.error_code},
+                                            {"message", secondary.error}});
+                continue;
+            }
+            duckdb::Connection other_conn(*secondary.db);
 
-                // Query nodes (degree = outgoing + incoming edges)
-                auto res = other_conn.Query(
-                    "SELECT f.path, "
-                    "  (SELECT COUNT(*) FROM edges WHERE from_file = f.id) + "
-                    "  (SELECT COUNT(*) FROM edges WHERE to_file   = f.id) AS degree "
-                    "FROM files f");
-                if (!res->HasError()) {
-                    for (size_t i = 0; i < res->RowCount(); i++) {
-                        std::string path = repo.name + "/" + res->GetValue(0, i).ToString();
-                        int degree = 0;
-                        try {
-                            degree = std::stoi(res->GetValue(1, i).ToString());
-                        } catch (...) {
-                        }
-                        std::string label = fs::path(path).filename().string();
-                        nodes.push_back({{"id", path},
-                                         {"label", label},
-                                         {"degree", degree},
-                                         {"path", path},
-                                         {"size", degree},
-                                         {"kind", "file"},
-                                         {"repo", repo.name}});
+            // Query nodes (degree = outgoing + incoming edges)
+            auto res = other_conn.Query(
+                "SELECT f.path, "
+                "  (SELECT COUNT(*) FROM edges WHERE from_file = f.id) + "
+                "  (SELECT COUNT(*) FROM edges WHERE to_file   = f.id) AS degree "
+                "FROM files f");
+            if (!res->HasError()) {
+                for (size_t i = 0; i < res->RowCount(); i++) {
+                    std::string path = repo.name + "/" + res->GetValue(0, i).ToString();
+                    int degree = 0;
+                    try {
+                        degree = std::stoi(res->GetValue(1, i).ToString());
+                    } catch (...) {
                     }
-                } else {
-                    std::cerr << "[axon] skip repo " << repo.name << " nodes: " << res->GetError()
-                              << "\n";
+                    std::string label = fs::path(path).filename().string();
+                    nodes.push_back({{"id", path},
+                                     {"label", label},
+                                     {"degree", degree},
+                                     {"path", path},
+                                     {"size", degree},
+                                     {"kind", "file"},
+                                     {"repo", repo.name}});
                 }
+            } else {
+                secondary_errors.push_back({{"repo", repo.name},
+                                            {"code", "nodes_query_failed"},
+                                            {"message", res->GetError()}});
+            }
 
-                // Query edges
-                auto eres = other_conn.Query("SELECT f1.path, f2.path FROM edges e "
-                                             "JOIN files f1 ON e.from_file = f1.id "
-                                             "JOIN files f2 ON e.to_file   = f2.id");
-                if (!eres->HasError()) {
-                    for (size_t i = 0; i < eres->RowCount(); i++) {
-                        std::string from = repo.name + "/" + eres->GetValue(0, i).ToString();
-                        std::string to = repo.name + "/" + eres->GetValue(1, i).ToString();
-                        edges.push_back({{"id", from + "->" + to},
-                                         {"source", from},
-                                         {"target", to},
-                                         {"kind", "imports"},
-                                         {"repo", repo.name}});
-                    }
-                } else {
-                    std::cerr << "[axon] skip repo " << repo.name << " edges: " << eres->GetError()
-                              << "\n";
+            // Query edges
+            auto eres = other_conn.Query("SELECT f1.path, f2.path FROM edges e "
+                                         "JOIN files f1 ON e.from_file = f1.id "
+                                         "JOIN files f2 ON e.to_file   = f2.id");
+            if (!eres->HasError()) {
+                for (size_t i = 0; i < eres->RowCount(); i++) {
+                    std::string from = repo.name + "/" + eres->GetValue(0, i).ToString();
+                    std::string to = repo.name + "/" + eres->GetValue(1, i).ToString();
+                    edges.push_back({{"id", from + "->" + to},
+                                     {"source", from},
+                                     {"target", to},
+                                     {"kind", "imports"},
+                                     {"repo", repo.name}});
                 }
-            } catch (const std::exception& e) {
-                std::cerr << "[axon] skip repo " << repo.name << ": " << e.what() << "\n";
-            } catch (...) {
-                std::cerr << "[axon] skip repo " << repo.name << ": unknown error\n";
+            } else {
+                secondary_errors.push_back({{"repo", repo.name},
+                                            {"code", "edges_query_failed"},
+                                            {"message", eres->GetError()}});
             }
         }
 
         json meta = {{"files", (int)ctx.graph.id_to_path.size()},
                      {"symbols", 0}, // filled below if DB available
                      {"edges", (int)edges.size()},
-                     {"project", ctx.cfg.project_root.filename().string()}};
+                     {"project", ctx.cfg.project_root.filename().string()},
+                     {"secondary_errors", secondary_errors}};
 
         if (ctx.db_ready()) {
             auto sr = ctx.db->conn().Query("SELECT count(*) FROM symbols");

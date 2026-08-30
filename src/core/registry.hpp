@@ -3,6 +3,8 @@
 #include <vector>
 #include <optional>
 #include <filesystem>
+#include <memory>
+#include <duckdb.hpp>
 
 namespace axon {
 
@@ -18,12 +20,67 @@ struct RepoEntry {
     std::string owner_token;
     long long owner_started_at = 0;   // Unix epoch seconds
     long long owner_heartbeat_at = 0; // Unix epoch seconds
+
+    // Registry v2 identity. Empty values preserve the v1 contract for legacy
+    // registrations until identity is resolved by the portfolio bootstrap.
+    std::string repository_id;  // logical source-repository identity
+    std::string index_stream_id; // physical index/worktree identity
+    std::string variant;
+    std::vector<std::string> default_for_profiles;
+};
+
+struct ProviderTarget {
+    std::string provider;
+    std::string path;
+    std::string endpoint;
+};
+
+struct TargetMarker {
+    std::string instance_id;
+    std::string namespace_name;
+    std::string protocol_version;
+};
+
+struct StorageProfile {
+    std::string name;
+    std::string role;
+    std::string transport;
+    std::string endpoint;
+    std::string namespace_name;
+    ProviderTarget portfolio_store;
+    std::optional<ProviderTarget> semantic_index;
+    std::optional<ProviderTarget> graph_projection;
+    std::optional<TargetMarker> target_marker;
+    bool is_default = false;
+};
+
+struct RegistryValidationIssue {
+    std::string code;
+    std::string path;
+    std::string message;
 };
 
 struct RegistryData {
+    std::string schema_version;
+    std::vector<RegistryValidationIssue> load_issues;
     std::vector<RepoEntry> repos;
-    // groups: map name → list of repo names
+    // groups: v2 repository ids; legacy v1 repo names remain migration input.
     std::vector<std::pair<std::string, std::vector<std::string>>> groups;
+    std::vector<StorageProfile> storage_profiles;
+};
+
+struct RepoSelection {
+    std::vector<RepoEntry> repos;
+    std::vector<RegistryValidationIssue> issues;
+    std::string profile_name;
+};
+
+struct ReadOnlySecondary {
+    std::unique_ptr<duckdb::DuckDB> db;
+    std::string error_code;
+    std::string error;
+
+    explicit operator bool() const { return db != nullptr; }
 };
 
 // Returns path to the registry: $AXON_REGISTRY_DIR/registry.json when AXON_REGISTRY_DIR is
@@ -70,5 +127,27 @@ std::vector<RepoEntry> get_repos(const RegistryData& reg);
 
 // Get repos in a group
 std::vector<RepoEntry> get_group_repos(const RegistryData& reg, const std::string& group_name);
+
+// Validate additive registry v2 identity/profile invariants. A legacy v1
+// registry (no v2 fields) remains valid and round-trippable.
+std::vector<RegistryValidationIssue> validate_registry(const RegistryData& reg);
+
+// Resolve the single default profile and the default physical stream for one
+// logical repository. Ambiguous or missing selections return nullopt.
+std::optional<StorageProfile> default_storage_profile(const RegistryData& reg);
+std::optional<RepoEntry> default_repo_stream(const RegistryData& reg,
+                                             const std::string& repository_id,
+                                             const std::string& profile_name);
+
+// Resolve repositories for an aggregate query. V1 entries retain name-based
+// behavior. V2 registries fail closed on validation errors and select only the
+// default physical stream for the default storage profile.
+RepoSelection aggregation_repos(const RegistryData& reg,
+                                const std::optional<std::string>& group_name = std::nullopt);
+
+// Open a registered project index without any write capability. The opener
+// rejects missing targets, symlinks and paths escaping the registered root and
+// reports a stable error code suitable for MCP/HTTP responses.
+ReadOnlySecondary open_secondary_read_only(const RepoEntry& repo);
 
 } // namespace axon

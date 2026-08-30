@@ -1630,13 +1630,32 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         auto reg = axon::load_registry();
         json repos_arr = json::array();
         for (auto& r : reg.repos) {
-            repos_arr.push_back({{"name", r.name}, {"root", r.root}, {"db_path", r.db_path}});
+            json repo = {{"name", r.name}, {"root", r.root}, {"db_path", r.db_path}};
+            if (!r.repository_id.empty()) repo["repository_id"] = r.repository_id;
+            if (!r.index_stream_id.empty()) repo["index_stream_id"] = r.index_stream_id;
+            if (!r.default_for_profiles.empty())
+                repo["default_for_profiles"] = r.default_for_profiles;
+            repos_arr.push_back(std::move(repo));
         }
         json groups_arr = json::array();
         for (auto& [gname, members] : reg.groups) {
             groups_arr.push_back({{"name", gname}, {"repos", members}});
         }
-        return make_tool_result({{"repos", repos_arr}, {"groups", groups_arr}});
+        json profiles = json::array();
+        for (const auto& p : reg.storage_profiles)
+            profiles.push_back({{"name", p.name},
+                                {"role", p.role},
+                                {"transport", p.transport},
+                                {"default", p.is_default},
+                                {"portfolio_store", p.portfolio_store.provider}});
+        json validation = json::array();
+        for (const auto& issue : axon::validate_registry(reg))
+            validation.push_back(
+                {{"code", issue.code}, {"path", issue.path}, {"message", issue.message}});
+        return make_tool_result({{"repos", repos_arr},
+                                 {"groups", groups_arr},
+                                 {"storage_profiles", profiles},
+                                 {"validation_errors", validation}});
     }
 
     if (name == "group_impact") {
@@ -1651,49 +1670,62 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         std::string stem = file_path.stem().string();
 
         // Determine repos to scan
-        std::vector<axon::RepoEntry> repos_to_scan;
-        if (!group_filter.empty()) {
-            repos_to_scan = axon::get_group_repos(reg, group_filter);
-        } else {
-            repos_to_scan = axon::get_repos(reg);
-        }
+        auto selection = axon::aggregation_repos(
+            reg, group_filter.empty() ? std::optional<std::string>{}
+                                      : std::optional<std::string>{group_filter});
+        std::vector<axon::RepoEntry> repos_to_scan = std::move(selection.repos);
 
         // Exclude the current repo
         std::string current_root = ctx.cfg.project_root.string();
         json cross_impact = json::array();
+        json failures = json::array();
+        for (const auto& issue : selection.issues)
+            failures.push_back({{"repo", nullptr},
+                                {"repo_root", nullptr},
+                                {"code", issue.code},
+                                {"path", issue.path},
+                                {"message", issue.message}});
 
         for (const auto& r : repos_to_scan) {
             if (r.root == current_root) continue;
-            if (!std::filesystem::exists(r.db_path)) continue;
-
-            try {
-                duckdb::DuckDB other_db(r.db_path);
-                duckdb::Connection other_conn(other_db);
-
-                std::string sql = "SELECT DISTINCT f.path FROM files f "
-                                  "JOIN edges e ON e.from_id = f.id "
-                                  "JOIN files f2 ON e.to_id = f2.id "
-                                  "WHERE f2.path LIKE '%" +
-                                  sql_escape(stem) + "%' LIMIT 50";
-
-                auto res = other_conn.Query(sql);
-                if (res->HasError()) continue;
-
-                json impacted = json::array();
-                for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
-                    impacted.push_back(res->GetValue(0, i).ToString());
-                }
-                cross_impact.push_back(
-                    {{"repo", r.name}, {"repo_root", r.root}, {"impacted_files", impacted}});
-            } catch (...) {
-                // Skip repos with inaccessible/corrupt DBs
+            auto secondary = axon::open_secondary_read_only(r);
+            if (!secondary) {
+                failures.push_back({{"repo", r.name},
+                                    {"repo_root", r.root},
+                                    {"code", secondary.error_code},
+                                    {"message", secondary.error}});
+                continue;
             }
+
+            duckdb::Connection other_conn(*secondary.db);
+            std::string sql = "SELECT DISTINCT f.path FROM files f "
+                              "JOIN edges e ON e.from_file = f.id "
+                              "JOIN files f2 ON e.to_file = f2.id "
+                              "WHERE f2.path LIKE '%" +
+                              sql_escape(stem) + "%' LIMIT 50";
+
+            auto res = other_conn.Query(sql);
+            if (res->HasError()) {
+                failures.push_back({{"repo", r.name},
+                                    {"repo_root", r.root},
+                                    {"code", "query_failed"},
+                                    {"message", res->GetError()}});
+                continue;
+            }
+
+            json impacted = json::array();
+            for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
+                impacted.push_back(res->GetValue(0, i).ToString());
+            }
+            cross_impact.push_back(
+                {{"repo", r.name}, {"repo_root", r.root}, {"impacted_files", impacted}});
         }
 
         return make_tool_result({{"file", file_arg},
                                  {"stem", stem},
                                  {"group_filter", group_filter},
-                                 {"cross_repo_impact", cross_impact}});
+                                 {"cross_repo_impact", cross_impact},
+                                 {"failures", failures}});
     }
 
     // ── Dialogue Layer tools ──────────────────────────────────────────────────
