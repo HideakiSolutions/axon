@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G6 independently accepted and committed; G7 entry discovery next
+Status: G7 independently accepted and ready for its isolated commit; G8 next
 
 ## Current Mini-Goal
 
-G6 — PostgreSQL shared projector; hermetic real-provider evidence accepted.
+G7 — Notification, authenticated remote ingest and reconciliation using Keycloak Shared OIDC; accepted.
 
 ## Progress
 
@@ -20,7 +20,14 @@ G6 — PostgreSQL shared projector; hermetic real-provider evidence accepted.
 - G4 implementation: pure provider contracts/reference adapter independently accepted after two
   bounded corrections and committed in its isolated node commit.
 - G6 implementation: real libpq provider, migrations, concurrency, durable outbox and hermetic
-  runner independently accepted after one correction. G7-G16 are not started.
+  runner independently accepted after one correction.
+- G7 entry: the responsible owner selected Keycloak Shared. The implementation will use a
+  dedicated Axon realm/client contract, public issuer and internal JWKS validation; no Keycloak
+  secret, realm/client mutation or deployment is included in this node.
+- G7 implementation: Keycloak RS256 validation, target/binding/stream gating, cursor probe and
+  server-side reidentification grants are independently accepted. JOSE/JWT/JWK validation is
+  fail-closed for unsupported critical headers, malformed audiences, temporal claims, algorithm,
+  key operations and weak RSA key material.
 - G5 discovery: the owner authorized the required bounded G4 reopening. The correction is
   independently accepted and committed in its isolated corrective commit. G5 is resumed.
 - G5 implementation: real DuckDB store/projector and 27 directed tests are executor-green and
@@ -74,6 +81,9 @@ G6 — PostgreSQL shared projector; hermetic real-provider evidence accepted.
 - Provider namespaces and credentials are intentionally unprovisioned.
 - PostgreSQL/Qdrant/FalkorDB production adapter dependencies/build strategy require accepted ADR and
   supply-chain review before code.
+- G7 semantic discovery is degraded because the local second-brain Qdrant/Ollama search endpoint
+  was unavailable after a successful status probe; direct canonical Keycloak/shared-infra sources
+  were used and this is not treated as a successful semantic result.
 - G5 source prevalidation and the DuckDB store now share every typed reidentification invariant.
   The prior independent probe fails before any write with old and new cursors both zero. No G5
   MAJOR remains; reidentification is an explicit documented transaction boundary.
@@ -89,5 +99,6 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Create the isolated G6 commit, then begin G7 entry discovery. Keep shared-postgres compatibility,
-credential access, security posture changes and shared namespace mutation behind explicit gates.
+Commit G7, then begin G8 capability signature extraction. Keep realm/client registration,
+credential access, shared namespace mutation, deployment and live compatibility smoke behind their
+separate explicit gates.

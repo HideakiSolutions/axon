@@ -292,6 +292,25 @@ target_compile_definitions(test_portfolio_duckdb PRIVATE
 target_link_libraries(test_portfolio_duckdb PRIVATE duckdb_lib blake3_lib GTest::gtest_main)
 add_test(NAME test_portfolio_duckdb COMMAND test_portfolio_duckdb)
 
+# G7 remote transport: signed Keycloak access tokens are verified with OpenSSL in a hermetic
+# fixture. No Keycloak credential, user or shared service is contacted by this test.
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+    add_executable(test_portfolio_reconcile
+        integration/test_portfolio_reconcile.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/reference_portfolio_store.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/remote_ingest.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/http/keycloak_oidc_auth.cpp
+    )
+    target_include_directories(test_portfolio_reconcile PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    )
+    target_link_libraries(test_portfolio_reconcile PRIVATE OpenSSL::Crypto GTest::gtest_main)
+    add_test(NAME test_portfolio_reconcile COMMAND test_portfolio_reconcile)
+endif()
+
 # G6 PostgreSQL provider. The binary is built whenever libpq is available, but the real integration
 # test is registered only when explicitly enabled with an isolated disposable test DSN.
 find_package(PostgreSQL QUIET)

@@ -249,6 +249,19 @@ endif()
 # ── axon executable ──────────────────────────────────────────────────────────
 file(GLOB_RECURSE AXON_SOURCES src/*.cpp)
 
+# Optional shared-server adapters must never make the local-first binary unbuildable. They are
+# compiled into the executable whenever their system dependency is present; provider conformance
+# targets select the same sources explicitly. A missing dependency leaves only that additive role
+# unavailable and does not change the authoritative local DuckDB behavior.
+find_package(PostgreSQL QUIET)
+find_package(OpenSSL QUIET)
+if(NOT PostgreSQL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/postgresql/.*\\.cpp$")
+endif()
+if(NOT OpenSSL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/http/.*\\.cpp$")
+endif()
+
 add_executable(axon ${AXON_SOURCES})
 
 target_include_directories(axon PRIVATE
@@ -285,6 +298,12 @@ target_link_libraries(axon PRIVATE
     ggml
     blake3_lib
 )
+if(PostgreSQL_FOUND)
+    target_link_libraries(axon PRIVATE PostgreSQL::PostgreSQL)
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(axon PRIVATE OpenSSL::Crypto)
+endif()
 
 if(APPLE)
     set_target_properties(axon PROPERTIES
