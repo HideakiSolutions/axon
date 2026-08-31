@@ -271,6 +271,27 @@ target_include_directories(test_portfolio_store_contract PRIVATE ${CMAKE_SOURCE_
 target_link_libraries(test_portfolio_store_contract PRIVATE GTest::gtest_main)
 add_test(NAME test_portfolio_store_contract COMMAND test_portfolio_store_contract)
 
+# G5 real DuckDB adapter runs the exact G4 conformance source through the common PortfolioStore
+# factory seam, plus persistence/migration/lifecycle integration cases.
+add_executable(test_portfolio_duckdb
+    unit/test_portfolio_store_contract.cpp
+    integration/test_portfolio_duckdb.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/duckdb/duckdb_repository_projector.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/duckdb/duckdb_portfolio_store.cpp
+)
+target_include_directories(test_portfolio_duckdb PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/include
+)
+target_compile_definitions(test_portfolio_duckdb PRIVATE
+    AXON_PORTFOLIO_STORE_FACTORY_HEADER="portfolio/infrastructure/duckdb/duckdb_portfolio_store.hpp"
+    AXON_PORTFOLIO_STORE_FACTORY=std::make_unique\<axon::portfolio::DuckdbPortfolioStore\>
+)
+target_link_libraries(test_portfolio_duckdb PRIVATE duckdb_lib blake3_lib GTest::gtest_main)
+add_test(NAME test_portfolio_duckdb COMMAND test_portfolio_duckdb)
+
 # Capsule budget tests — drive assemble_capsule end-to-end; require the real
 # GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
 add_executable(test_capsule_budget unit/test_capsule_budget.cpp

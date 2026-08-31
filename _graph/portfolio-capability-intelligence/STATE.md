@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G4 cardinality/reidentification correction independently accepted; G5 resumes after commit
+Status: G5 independently accepted and committed; G6 entry discovery next
 
 ## Current Mini-Goal
 
-G5 — DuckDB local portfolio projector, resuming on the corrected G4 contract.
+G5 — DuckDB local portfolio projector; accepted after the owner-authorized exceptional correction.
 
 ## Progress
 
@@ -19,12 +19,12 @@ G5 — DuckDB local portfolio projector, resuming on the corrected G4 contract.
   and committed in its isolated node commit.
 - G4 implementation: pure provider contracts/reference adapter independently accepted after two
   bounded corrections and committed in its isolated node commit.
-- G6-G16 implementation: not started.
+- G6-G16 implementation: not started and cannot begin before G5 acceptance.
 - G5 discovery: the owner authorized the required bounded G4 reopening. The correction is
   independently accepted and committed in its isolated corrective commit. G5 is resumed.
-- G5 implementation: real DuckDB store/projector and 16 directed tests are executor-green, but the
-  node is not accepted or committed because G3 permits 10,000 affected entities per event while G4
-  permits only 500 mutations and has no repository reidentification/partition-transfer operation.
+- G5 implementation: real DuckDB store/projector and 27 directed tests are executor-green and
+  independently accepted. The owner-authorized third correction shares one typed handoff validator
+  between full-journal preflight and store, closing the last partial-prefix counterexample.
 - G4 correction 4: the owner-authorized cardinality/reidentification reopening is independently
   accepted. The port now distinguishes 500 events/apply, 10,000 mutations/event and 10,000
   snapshot entities, and defines optional capability-advertised atomic identity transfer keyed by
@@ -56,9 +56,12 @@ G5 — DuckDB local portfolio projector, resuming on the corrected G4 contract.
   Present repository contracts are revalidated on every open and malformed/divergent identities
   fail closed. Thirteen real-DuckDB tests, four call-resolution tests and the full 32-test CTest
   registry pass with no failures (2 optional embedding skips); the final verifier accepted the node.
-- The uncommitted G5 target passes 16/16 tests under `ccache`, `nice -n 10`, `-j1`, including three
+- The uncommitted G5 target passes 27/27 tests under `ccache`, `nice -n 10`, `-j1`, including three
   byte-identical read-only source databases, replay/rollback, reconcile/rebuild, stale lifecycle,
-  removal/return, root containment and symlink rejection.
+  removal/return, root containment, symlink rejection, metadata/journal identity convergence,
+  ordinary batch atomicity, shared live database handles and canonical handoff mutations. Full
+  sequential CTest registered 34 tests: 32 passed, 2 project-declared optional memory tests
+  skipped and 0 failed.
 
 ## Risks and Gaps
 
@@ -70,9 +73,9 @@ G5 — DuckDB local portfolio projector, resuming on the corrected G4 contract.
 - Provider namespaces and credentials are intentionally unprovisioned.
 - PostgreSQL/Qdrant/FalkorDB production adapter dependencies/build strategy require accepted ADR and
   supply-chain review before code.
-- The prior G4 cardinality and identity-transfer blockers are corrected and independently accepted;
-  the uncommitted DuckDB adapter/projector must now implement the accepted contract before G5 can
-  receive acceptance credit.
+- G5 source prevalidation and the DuckDB store now share every typed reidentification invariant.
+  The prior independent probe fails before any write with old and new cursors both zero. No G5
+  MAJOR remains; reidentification is an explicit documented transaction boundary.
 
 ## Rollback
 
@@ -81,5 +84,5 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Create the isolated corrective G4 commit, update the uncommitted DuckDB adapter/projector to the
-accepted limits and handoff semantics, then complete independent G5 verification.
+Create the isolated G5 commit, then evaluate the G6 PostgreSQL shared-projector entry contract,
+hermetic test isolation and human infrastructure gates before changing any external service.
