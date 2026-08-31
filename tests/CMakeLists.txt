@@ -271,6 +271,21 @@ target_include_directories(test_portfolio_store_contract PRIVATE ${CMAKE_SOURCE_
 target_link_libraries(test_portfolio_store_contract PRIVATE GTest::gtest_main)
 add_test(NAME test_portfolio_store_contract COMMAND test_portfolio_store_contract)
 
+# G8 capability signatures are a metadata-only deterministic extraction boundary. This target is
+# deliberately independent of DuckDB, providers, embeddings and network clients.
+add_executable(test_capability_signature
+    unit/test_capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/extract/capability_signature_extractor.cpp
+)
+target_include_directories(test_capability_signature PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+)
+target_compile_definitions(test_capability_signature PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_capability_signature PRIVATE blake3_lib GTest::gtest_main)
+add_test(NAME test_capability_signature COMMAND test_capability_signature)
+
 # G5 real DuckDB adapter runs the exact G4 conformance source through the common PortfolioStore
 # factory seam, plus persistence/migration/lifecycle integration cases.
 add_executable(test_portfolio_duckdb

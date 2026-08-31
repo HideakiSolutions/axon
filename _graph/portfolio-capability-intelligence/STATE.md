@@ -1,6 +1,6 @@
 # Portfolio Capability Intelligence State
 
-Status: G7 independently accepted and ready for its isolated commit; G8 next
+Status: G8 independently accepted and ready for its isolated commit; G9 next
 
 ## Current Mini-Goal
 

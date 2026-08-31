@@ -1,0 +1,13 @@
+entity_key=ts:catalogSearch
+name=catalogSearch
+language=typescript
+path=src/catalog/search.ts
+content_digest=dddddddddddddddddddddddddddddddd
+ast_digest=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+symbol=catalogSearch
+public_symbols=catalogSearch
+routes=GET /catalog/search
+contracts=CatalogSearchQuery
+events=catalog.searched
+external_dependencies=search-client
+tests=tests/catalog/search.test.ts
