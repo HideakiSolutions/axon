@@ -29,3 +29,16 @@
 - Next action: begin G5 DuckDB local portfolio projector in a separate node.
 - Human authority: no additional authority is required for this pure additive node. Infrastructure,
   secrets, external writes, merge, deploy, tag and release remain prohibited.
+
+## Owner-authorized manifest correction
+
+- G5 discovery proved that non-snapshot `index-event-v1` and `projection-delta-v1` facts carry epoch
+  but not a mandatory manifest. The owner explicitly reopened G4 beyond budget 2/2 for this mismatch.
+- `ProjectionEvent.manifest` is now optional. A delta without one advances cursor/epoch and preserves
+  the last verified snapshot manifest; an initial delta keeps manifest empty rather than fabricating
+  one. `RepositorySnapshot` still requires a bounded manifest.
+- 9/9 focused tests and complete CTest 33/33 pass. The independent verifier additionally exercised
+  200 manifest-less deltas, later replacement, conflicting replay and bounds, then accepted the
+  correction without an objective blocker.
+- Commit: isolated corrective `fix(portfolio): preserve snapshot manifest across deltas`; G5 and
+  legacy untracked evidence were explicitly excluded.

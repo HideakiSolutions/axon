@@ -68,7 +68,8 @@ void ReferencePortfolioStore::validate_event(const ProjectionEvent& event,
     if (event.sequence != expected_sequence)
         fail(PortfolioStoreErrorCode::CursorConflict, "event sequence is not contiguous");
     if (event.event_id.size() < 16 || event.event_id.size() > 128 || event.epoch.size() < 16 ||
-        event.epoch.size() > 128 || event.manifest.size() < 16 || event.manifest.size() > 128 ||
+        event.epoch.size() > 128 ||
+        (event.manifest && (event.manifest->size() < 16 || event.manifest->size() > 128)) ||
         event.mutations.size() > max_batch_size)
         fail(PortfolioStoreErrorCode::InvalidInput, "projection event bounds are invalid");
     for (const auto& mutation : event.mutations) validate_mutation(mutation);
@@ -128,7 +129,8 @@ ApplyResult ReferencePortfolioStore::apply(const RepositoryStreamKey& stream,
         }
         next.events[event.sequence] = event;
         next_receipts.emplace(event.event_id, EventReceipt{stream, event.sequence, event});
-        next.state = {true, event.sequence, event.epoch, event.manifest, false, false};
+        next.state = {true, event.sequence, event.epoch,
+                      event.manifest.value_or(next.state.manifest), false, false};
     }
     streams_[stream] = std::move(next);
     receipts_ = std::move(next_receipts);

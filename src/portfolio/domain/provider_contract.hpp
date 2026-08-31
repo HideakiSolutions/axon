@@ -72,7 +72,9 @@ struct ProjectionEvent {
     std::uint64_t sequence = 0;
     std::string event_id;
     std::string epoch;
-    std::string manifest;
+    // Present only when the event carries a verified manifest (mandatory for snapshots in the
+    // wire schema). Incremental deltas advance epoch/cursor while preserving the last verified one.
+    std::optional<std::string> manifest;
     std::vector<ProjectionMutation> mutations;
 
     bool operator==(const ProjectionEvent&) const = default;

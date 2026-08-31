@@ -1,6 +1,6 @@
 # Portfolio Capability Intelligence State
 
-Status: G4 independently accepted and committed; G5 ready
+Status: G4 manifest correction independently accepted and committed; G5 resumed
 
 ## Current Mini-Goal
 
@@ -19,7 +19,9 @@ G5 — DuckDB local portfolio projector.
   and committed in its isolated node commit.
 - G4 implementation: pure provider contracts/reference adapter independently accepted after two
   bounded corrections and committed in its isolated node commit.
-- G5-G16 implementation: not started.
+- G6-G16 implementation: not started.
+- G5 discovery: the owner authorized the required bounded G4 reopening. The correction is
+  independently accepted and committed in its isolated corrective commit. G5 is resumed.
 
 ## Current Evidence
 
@@ -66,4 +68,4 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Start G5 DuckDB local portfolio projector without mixing remote PostgreSQL transport.
+Resume G5 DuckDB local portfolio projector without fabricating historical state.

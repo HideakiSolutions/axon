@@ -109,6 +109,40 @@ TEST(PortfolioStoreConformance, AppliesContiguousBatchAndReplaysIdempotently) {
     EXPECT_EQ(inspect(*store, kStream).entities.size(), 2u);
 }
 
+TEST(PortfolioStoreConformance, DeltaWithoutManifestPreservesLastVerifiedSnapshotManifest) {
+    auto store = make_conformance_store();
+    auto snapshot_event = event(1, "snapshot-event-001",
+                                {{"file", "src/a.cpp", ProjectionOperation::Upsert,
+                                  "digest-000000001"}});
+    snapshot_event.manifest = "snapshot-manifest-0001";
+    auto delta = event(2, "delta-event-00001",
+                       {{"file", "src/b.cpp", ProjectionOperation::Upsert,
+                         "digest-000000002"}});
+    delta.epoch = "epoch-0000000002";
+    delta.manifest = std::nullopt;
+
+    const auto applied = store->apply(kStream, 0, {snapshot_event, delta});
+    EXPECT_EQ(applied.state.cursor, 2u);
+    EXPECT_EQ(applied.state.epoch, "epoch-0000000002");
+    EXPECT_EQ(applied.state.manifest, "snapshot-manifest-0001");
+    EXPECT_EQ(store->apply(kStream, 0, {snapshot_event, delta}).disposition,
+              ApplyDisposition::Duplicate);
+
+    auto verified = event(3, "verified-event-001", {});
+    verified.epoch = "epoch-0000000003";
+    verified.manifest = "snapshot-manifest-0002";
+    const auto advanced = store->apply(kStream, 2, {verified});
+    EXPECT_EQ(advanced.state.cursor, 3u);
+    EXPECT_EQ(advanced.state.epoch, "epoch-0000000003");
+    EXPECT_EQ(advanced.state.manifest, "snapshot-manifest-0002");
+
+    auto initial_delta = event(kOtherStream, 1, "initial-delta-001", {});
+    initial_delta.manifest = std::nullopt;
+    const auto initial = store->apply(kOtherStream, 0, {initial_delta});
+    EXPECT_EQ(initial.state.cursor, 1u);
+    EXPECT_TRUE(initial.state.manifest.empty());
+}
+
 TEST(PortfolioStoreConformance, CursorFailureAndInvalidTailAreAtomic) {
     auto store = make_conformance_store();
     store->apply(kStream, 0,
@@ -264,6 +298,10 @@ TEST(PortfolioStoreConformance, EnforcesAdvertisedBatchMutationAndFieldBounds) {
     expect_error(PortfolioStoreErrorCode::InvalidInput, [&] {
         store->apply(kStream, 0, {event(1, std::string(129, 'e'), {})});
     });
+    auto invalid_manifest = event(1, "bounded-event-0001", {});
+    invalid_manifest.manifest = "short";
+    expect_error(PortfolioStoreErrorCode::InvalidInput,
+                 [&] { store->apply(kStream, 0, {invalid_manifest}); });
     RepositoryStreamKey invalid = kStream;
     invalid.repository_id = "not-a-uuid";
     expect_error(PortfolioStoreErrorCode::InvalidInput,
