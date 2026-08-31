@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G5 independently accepted and committed; G6 entry discovery next
+Status: G6 independently accepted and committed; G7 entry discovery next
 
 ## Current Mini-Goal
 
-G5 — DuckDB local portfolio projector; accepted after the owner-authorized exceptional correction.
+G6 — PostgreSQL shared projector; hermetic real-provider evidence accepted.
 
 ## Progress
 
@@ -19,7 +19,8 @@ G5 — DuckDB local portfolio projector; accepted after the owner-authorized exc
   and committed in its isolated node commit.
 - G4 implementation: pure provider contracts/reference adapter independently accepted after two
   bounded corrections and committed in its isolated node commit.
-- G6-G16 implementation: not started and cannot begin before G5 acceptance.
+- G6 implementation: real libpq provider, migrations, concurrency, durable outbox and hermetic
+  runner independently accepted after one correction. G7-G16 are not started.
 - G5 discovery: the owner authorized the required bounded G4 reopening. The correction is
   independently accepted and committed in its isolated corrective commit. G5 is resumed.
 - G5 implementation: real DuckDB store/projector and 27 directed tests are executor-green and
@@ -76,6 +77,10 @@ G5 — DuckDB local portfolio projector; accepted after the owner-authorized exc
 - G5 source prevalidation and the DuckDB store now share every typed reidentification invariant.
   The prior independent probe fails before any write with old and new cursors both zero. No G5
   MAJOR remains; reidentification is an explicit documented transaction boundary.
+- G6 installed owner-approved `libpq-dev` and used only no-volume resource-bounded PostgreSQL
+  16/pgvector test containers. Twenty real-provider tests pass; all containers were removed. The
+  shared PostgreSQL service and credentials were not accessed. Reserved schemas and unsafe teardown
+  fail closed; v1→v2 upgrade, multi-client concurrency and durable outbox are verified.
 
 ## Rollback
 
@@ -84,5 +89,5 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Create the isolated G5 commit, then evaluate the G6 PostgreSQL shared-projector entry contract,
-hermetic test isolation and human infrastructure gates before changing any external service.
+Create the isolated G6 commit, then begin G7 entry discovery. Keep shared-postgres compatibility,
+credential access, security posture changes and shared namespace mutation behind explicit gates.

@@ -292,6 +292,39 @@ target_compile_definitions(test_portfolio_duckdb PRIVATE
 target_link_libraries(test_portfolio_duckdb PRIVATE duckdb_lib blake3_lib GTest::gtest_main)
 add_test(NAME test_portfolio_duckdb COMMAND test_portfolio_duckdb)
 
+# G6 PostgreSQL provider. The binary is built whenever libpq is available, but the real integration
+# test is registered only when explicitly enabled with an isolated disposable test DSN.
+find_package(PostgreSQL QUIET)
+if(AXON_ENABLE_POSTGRES_TESTS AND NOT PostgreSQL_FOUND)
+    message(FATAL_ERROR "AXON_ENABLE_POSTGRES_TESTS requires PostgreSQL/libpq development files")
+endif()
+if(AXON_ENABLE_POSTGRES_TESTS AND NOT DEFINED ENV{AXON_POSTGRES_TEST_DSN})
+    message(FATAL_ERROR "AXON_ENABLE_POSTGRES_TESTS requires AXON_POSTGRES_TEST_DSN")
+endif()
+if(PostgreSQL_FOUND)
+    add_executable(test_portfolio_postgresql
+        unit/test_portfolio_store_contract.cpp
+        integration/test_portfolio_postgresql.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/postgresql/postgresql_portfolio_store.cpp
+    )
+    target_include_directories(test_portfolio_postgresql PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+    )
+    target_compile_definitions(test_portfolio_postgresql PRIVATE
+        AXON_PORTFOLIO_STORE_FACTORY_HEADER="portfolio/infrastructure/postgresql/postgresql_portfolio_store.hpp"
+        AXON_PORTFOLIO_STORE_FACTORY=axon::portfolio::make_postgresql_conformance_store
+    )
+    target_link_libraries(test_portfolio_postgresql PRIVATE
+        PostgreSQL::PostgreSQL blake3_lib GTest::gtest_main)
+    if(AXON_ENABLE_POSTGRES_TESTS AND DEFINED ENV{AXON_POSTGRES_TEST_DSN})
+        add_test(NAME test_portfolio_postgresql COMMAND test_portfolio_postgresql)
+        set_tests_properties(test_portfolio_postgresql PROPERTIES
+            ENVIRONMENT "AXON_POSTGRES_TEST_DSN=$ENV{AXON_POSTGRES_TEST_DSN}")
+    endif()
+endif()
+
 # Capsule budget tests — drive assemble_capsule end-to-end; require the real
 # GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
 add_executable(test_capsule_budget unit/test_capsule_budget.cpp

@@ -45,7 +45,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build ccache jq ripgrep
+          sudo apt-get install -y cmake build-essential ninja-build ccache jq ripgrep libpq-dev
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
@@ -113,6 +113,10 @@ jobs:
 
       - name: Build tests
         run: cmake --build build -j 2
+
+      - name: PostgreSQL provider integration
+        if: runner.os == 'Linux'
+        run: AXON_POSTGRES_BUILD_DIR=build-postgresql AXON_BUILD_JOBS=2 ./scripts/dependencies/run-portfolio-postgresql-tests.sh
 
       - name: Stage runtime DLLs beside test binaries (Windows)
         # Windows has no RUNPATH, and GITHUB_PATH prepends are clobbered here:
