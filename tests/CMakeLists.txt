@@ -116,12 +116,16 @@ add_test(NAME test_ccr COMMAND test_ccr)
 add_executable(test_call_resolution unit/test_call_resolution.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_call_resolution PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
 )
 target_link_libraries(test_call_resolution PRIVATE
+    blake3_lib
     duckdb_lib
     GTest::gtest_main
 )
@@ -153,6 +157,7 @@ add_executable(test_dialogue unit/test_dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_dialogue PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -161,6 +166,7 @@ target_include_directories(test_dialogue PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
 )
 target_link_libraries(test_dialogue PRIVATE
+    blake3_lib
     duckdb_lib
     llama
     ggml
@@ -180,6 +186,7 @@ add_executable(test_objectives unit/test_objectives.cpp
     ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
     ${CMAKE_SOURCE_DIR}/src/core/git.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_objectives PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -215,6 +222,31 @@ target_link_libraries(test_registry PRIVATE
 )
 add_test(NAME test_registry COMMAND test_registry)
 
+# Portfolio journal: real DuckDB, real parser, transactional fault injection.
+add_executable(test_portfolio_journal unit/test_portfolio_journal.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/routes.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skip_dirs.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/config.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
+)
+target_include_directories(test_portfolio_journal PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+)
+target_link_libraries(test_portfolio_journal PRIVATE
+    axon_parser_objs
+    duckdb_lib
+    blake3_lib
+    GTest::gtest_main
+)
+add_test(NAME test_portfolio_journal COMMAND test_portfolio_journal)
+
 # Capsule budget tests — drive assemble_capsule end-to-end; require the real
 # GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
 add_executable(test_capsule_budget unit/test_capsule_budget.cpp
@@ -228,6 +260,7 @@ add_executable(test_capsule_budget unit/test_capsule_budget.cpp
     ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
     ${CMAKE_SOURCE_DIR}/src/core/git.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_capsule_budget PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -254,6 +287,7 @@ add_executable(test_semantic unit/test_semantic.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_semantic PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -262,6 +296,7 @@ target_include_directories(test_semantic PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
 )
 target_link_libraries(test_semantic PRIVATE
+    blake3_lib
     duckdb_lib
     llama
     ggml

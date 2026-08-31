@@ -1,4 +1,6 @@
 #include "call_resolver.hpp"
+#include "db.hpp"
+#include "portfolio/domain/index_journal.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -135,7 +137,8 @@ struct Candidate {
 } // namespace
 
 int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
-                       const std::vector<CallSite>& calls) {
+                       const std::vector<CallSite>& calls,
+                       portfolio::Transaction& transaction) {
     int inserted_edges = 0;
     for (const auto& call : calls) {
         if (call.caller_name.empty() || call.callee_name.empty()) continue;
@@ -145,7 +148,8 @@ int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
             std::to_string(from_file_id) + " AND name = '" + sql_escape(call.caller_name) +
             "' AND start_line <= " + std::to_string(call.line) + " AND end_line >= " +
             std::to_string(call.line) + " ORDER BY (end_line - start_line), id LIMIT 1");
-        if (caller_result->HasError() || caller_result->RowCount() == 0) continue;
+        require_ok(caller_result, "resolve caller symbol");
+        if (caller_result->RowCount() == 0) continue;
         const int64_t caller_id = caller_result->GetValue<int64_t>(0, 0);
         const int caller_start = caller_result->GetValue<int32_t>(1, 0);
         const int caller_end = caller_result->GetValue<int32_t>(2, 0);
@@ -157,7 +161,7 @@ int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
                        "s.start_line, s.end_line FROM symbols s JOIN files f ON f.id = s.file_id "
                        "WHERE s.name = '" +
                        sql_escape(call.callee_name) + "' ORDER BY s.id");
-        if (candidates_result->HasError()) continue;
+        require_ok(candidates_result, "resolve callee candidates");
 
         std::vector<Candidate> candidates;
         for (duckdb::idx_t row = 0; row < candidates_result->RowCount(); ++row) {
@@ -210,9 +214,27 @@ int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
             std::string("nextval('seq_id'), ") + std::to_string(from_file_id) + ", " +
             std::to_string(best->file_id) + ", 'calls', " + std::to_string(caller_id) + ", " +
             std::to_string(best->id) + ")");
-        if (!inserted->HasError()) ++inserted_edges;
+        require_success(std::move(inserted), "insert call edge");
+        transaction.mark_index_mutation();
+        ++inserted_edges;
     }
     return inserted_edges;
+}
+
+int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
+                       const std::vector<CallSite>& calls) {
+    portfolio::Transaction transaction(conn);
+    const int inserted = resolve_call_edges(conn, from_file_id, calls, transaction);
+    if (inserted > 0) {
+        const std::string manifest = portfolio::compute_manifest_hash(conn);
+        std::vector<portfolio::AffectedEntity> affected = {
+            {"dependency", "call-edges-from-file:" + std::to_string(from_file_id), "upsert",
+             std::nullopt}};
+        portfolio::append_index_event(transaction, conn, "IndexSymbolsUpdated", affected,
+                                      manifest);
+    }
+    transaction.commit();
+    return inserted;
 }
 
 } // namespace axon

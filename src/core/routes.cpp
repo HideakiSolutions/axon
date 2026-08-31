@@ -1,9 +1,11 @@
 #include "routes.hpp"
+#include "portfolio/domain/index_journal.hpp"
 #include <fstream>
 #include <sstream>
 #include <regex>
 #include <filesystem>
 #include <iostream>
+#include <unordered_set>
 
 namespace axon {
 namespace fs = std::filesystem;
@@ -139,8 +141,6 @@ int index_routes(const Config& cfg, Database& db) {
             "  framework    VARCHAR NOT NULL DEFAULT 'unknown',"
             "  file_id      BIGINT"
             ")");
-    db.exec("DELETE FROM routes"); // full re-scan
-
     std::vector<RouteInfo> found;
 
     for (auto it = fs::recursive_directory_iterator(cfg.project_root,
@@ -176,21 +176,59 @@ int index_routes(const Config& cfg, Database& db) {
 
     // Deduplicate and insert
     auto& conn = db.conn();
+    portfolio::Transaction transaction(conn);
+    auto previous = conn.Query("SELECT method,path,handler_file FROM routes");
+    require_ok(previous, "load existing routes");
+    std::unordered_set<std::string> previous_keys;
+    for (duckdb::idx_t row = 0; row < previous->RowCount(); ++row)
+        previous_keys.insert(previous->GetValue(0, row).ToString() + " " +
+                             previous->GetValue(1, row).ToString() + "@" +
+                             previous->GetValue(2, row).ToString());
+    require_success(conn.Query("DELETE FROM routes"), "replace routes");
+    if (!previous_keys.empty() || !found.empty()) transaction.mark_index_mutation();
     int inserted = 0;
+    std::vector<portfolio::AffectedEntity> affected;
+    std::unordered_set<std::string> current_keys;
     for (const auto& r : found) {
         // Resolve file_id
         std::string fid_sql = "SELECT id FROM files WHERE path = '" + sq(r.handler_file) + "'";
         auto fid_res = conn.Query(fid_sql);
+        require_ok(fid_res, "resolve route handler file");
         std::string fid_str = "NULL";
-        if (!fid_res->HasError() && fid_res->RowCount() > 0)
+        if (fid_res->RowCount() > 0)
             fid_str = std::to_string(fid_res->GetValue<int64_t>(0, 0));
 
-        conn.Query("INSERT INTO routes (id, method, path, handler_file, framework, file_id) "
-                   "VALUES (nextval('seq_id'), '" +
-                   sq(r.method) + "', '" + sq(r.path) + "', '" + sq(r.handler_file) + "', '" +
-                   sq(r.framework) + "', " + fid_str + ")");
+        require_success(conn.Query("INSERT INTO routes (id, method, path, handler_file, framework, "
+                                   "file_id) VALUES (nextval('seq_id'), '" +
+                                   sq(r.method) + "', '" + sq(r.path) + "', '" +
+                                   sq(r.handler_file) + "', '" + sq(r.framework) + "', " +
+                                   fid_str + ")"),
+                        "insert route");
+        const std::string route_key = r.method + " " + r.path + "@" + r.handler_file;
+        current_keys.insert(route_key);
+        affected.push_back({"route", route_key, "upsert", std::nullopt});
         inserted++;
     }
+    std::vector<portfolio::AffectedEntity> deleted;
+    for (const auto& route_key : previous_keys)
+        if (current_keys.count(route_key) == 0) {
+            deleted.push_back({"route", route_key, "delete", std::nullopt});
+            affected.push_back(deleted.back());
+        }
+    if (!affected.empty()) {
+        for (const auto& route_key : current_keys)
+            portfolio::clear_tombstone(
+                conn, {"route", route_key, "upsert", std::nullopt});
+        portfolio::trigger_journal_failpoint_for_testing("after_mutation");
+        const std::string manifest = portfolio::compute_manifest_hash(conn);
+        const uint64_t sequence =
+            portfolio::append_index_event(transaction, conn, "IndexRoutesUpdated", affected,
+                                          manifest);
+        const std::string epoch = portfolio::index_identity(conn).current_epoch;
+        for (const auto& route : deleted)
+            portfolio::upsert_tombstone(conn, route, sequence, epoch);
+    }
+    transaction.commit();
     return inserted;
 }
 

@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G2 independently accepted and committed
+Status: G3 independently accepted and committed; G4 ready
 
 ## Current Mini-Goal
 
-G2 — existing aggregation repair and registry v2.
+G4 — provider ports and reference conformance.
 
 ## Progress
 
@@ -15,7 +15,9 @@ G2 — existing aggregation repair and registry v2.
   accepted after the owner-authorized bounded correction beyond budget 2/2. Structural top-level
   and nested JSON types now fail closed before partial model materialization. The verifier added
   7 adversarial cases and found no issue; the isolated G2 commit was created.
-- G3-G16 implementation: not started.
+- G3 implementation: additive local journal independently accepted after two bounded corrections
+  and committed in its isolated node commit.
+- G4-G16 implementation: not started.
 
 ## Current Evidence
 
@@ -38,14 +40,19 @@ G2 — existing aggregation repair and registry v2.
   tested secondary files remained byte-identical and per-repository failures are structured.
 - G2 correction 3 passed 20 registry tests, HTTP/MCP smoke, ShellCheck, `git diff --check` and full
   CTest: 29 passed and 2 embedding-dependent tests skipped; no failures.
+- G3 persists logical/physical identities, deterministic manifests/epochs, transaction-bound events
+  and tombstones across full, incremental, delete, route, embedding and call-resolution mutations.
+  Present repository contracts are revalidated on every open and malformed/divergent identities
+  fail closed. Thirteen real-DuckDB tests, four call-resolution tests and the full 32-test CTest
+  registry pass with no failures (2 optional embedding skips); the final verifier accepted the node.
 
 ## Risks and Gaps
 
 - Governance sources reference Constitution v2.2/ADR-0022 and a pinned corpus validator absent from
   the checked-out enterprise-hseos source; current Git sources provide Constitution v2.1 and the
   platform migration view/intake v2 contract.
-- Registry identity generation/index persistence remains G3 work; G2 only provides the additive
-  registry representation and validation.
+- Repository reidentification/removal remain explicit later workflows; G3 does not infer identity
+  changes or removal from temporary unavailability.
 - Provider namespaces and credentials are intentionally unprovisioned.
 - PostgreSQL/Qdrant/FalkorDB production adapter dependencies/build strategy require accepted ADR and
   supply-chain review before code.
@@ -57,4 +64,4 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Evaluate the G3 entry contract without mixing G3 changes into the accepted G2 node.
+Start G4 provider ports and reference conformance without mixing later provider implementations.
