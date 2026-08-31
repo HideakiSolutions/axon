@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G3 independently accepted and committed; G4 ready
+Status: G4 independently accepted and committed; G5 ready
 
 ## Current Mini-Goal
 
-G4 — provider ports and reference conformance.
+G5 — DuckDB local portfolio projector.
 
 ## Progress
 
@@ -17,7 +17,9 @@ G4 — provider ports and reference conformance.
   7 adversarial cases and found no issue; the isolated G2 commit was created.
 - G3 implementation: additive local journal independently accepted after two bounded corrections
   and committed in its isolated node commit.
-- G4-G16 implementation: not started.
+- G4 implementation: pure provider contracts/reference adapter independently accepted after two
+  bounded corrections and committed in its isolated node commit.
+- G5-G16 implementation: not started.
 
 ## Current Evidence
 
@@ -64,4 +66,4 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Start G4 provider ports and reference conformance without mixing later provider implementations.
+Start G5 DuckDB local portfolio projector without mixing remote PostgreSQL transport.

@@ -247,6 +247,30 @@ target_link_libraries(test_portfolio_journal PRIVATE
 )
 add_test(NAME test_portfolio_journal COMMAND test_portfolio_journal)
 
+# Pure portfolio provider contract and deterministic reference adapter. Keep this target free of
+# DuckDB, JSON, HTTP and provider-client libraries so real adapters can share its semantics.
+set(PORTFOLIO_PURE_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.hpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/portfolio_store.hpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/reference_portfolio_store.hpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/reference_portfolio_store.cpp
+)
+foreach(portfolio_source IN LISTS PORTFOLIO_PURE_SOURCES)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${portfolio_source})
+    file(READ ${portfolio_source} portfolio_source_text)
+    if(portfolio_source_text MATCHES "#[ \t]*include[ \t]*[<\"](duckdb|nlohmann|libpq|pqxx|curl|hiredis|qdrant)")
+        message(FATAL_ERROR "portfolio domain/application boundary imports infrastructure: ${portfolio_source}")
+    endif()
+endforeach()
+add_executable(test_portfolio_store_contract
+    unit/test_portfolio_store_contract.cpp
+    ${PORTFOLIO_PURE_SOURCES}
+)
+target_include_directories(test_portfolio_store_contract PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_portfolio_store_contract PRIVATE GTest::gtest_main)
+add_test(NAME test_portfolio_store_contract COMMAND test_portfolio_store_contract)
+
 # Capsule budget tests — drive assemble_capsule end-to-end; require the real
 # GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
 add_executable(test_capsule_budget unit/test_capsule_budget.cpp
