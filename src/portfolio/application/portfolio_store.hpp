@@ -20,6 +20,13 @@ public:
                               const std::vector<ProjectionEvent>& events) = 0;
     virtual ReplaceResult replace_repository_stream(const RepositorySnapshot& snapshot,
                                                     std::uint64_t expected_cursor) = 0;
+    // Optional additive capability. Existing providers remain source-compatible and must advertise
+    // ReidentifyRepositoryStream only when they override this operation atomically.
+    virtual ApplyResult reidentify_repository_stream(
+        const RepositoryReidentification&, std::uint64_t) {
+        throw PortfolioStoreError(PortfolioStoreErrorCode::UnsupportedCapability,
+                                  "repository reidentification is unsupported");
+    }
     virtual CursorEpochManifest stream_state(const RepositoryStreamKey& stream) const = 0;
     // Bounded projected metadata inspection makes delete/replace atomicity independently
     // conformable across adapters without exposing source bodies or infrastructure handles.

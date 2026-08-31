@@ -30,6 +30,10 @@ const RepositoryStreamKey kStream{"7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb",
                                   "4b809f2e-5606-4f45-b050-e4dbb30cde53"};
 const RepositoryStreamKey kOtherStream{"ea75c2b6-f4a8-4bd6-a86c-fe52763bb33b",
                                        "d2be0631-0d2c-40cf-a997-1bc7f4618822"};
+const RepositoryStreamKey kReidentifiedStream{"11111111-2222-4333-8444-555555555555",
+                                              kStream.index_stream_id};
+const RepositoryStreamKey kTwiceReidentifiedStream{"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                                                   kStream.index_stream_id};
 constexpr std::size_t kInspectionLimit = 1000;
 
 ProjectionEvent event(const RepositoryStreamKey& stream, std::uint64_t sequence, std::string id,
@@ -70,8 +74,13 @@ TEST(PortfolioStoreConformance, AdvertisesRoleSpecificCapabilitiesHealthAndVersi
     EXPECT_EQ(caps.role, ProviderRole::PortfolioStore);
     EXPECT_TRUE(caps.supports(ProviderCapability::AtomicApply));
     EXPECT_TRUE(caps.supports(ProviderCapability::ReplaceRepositoryStream));
+    EXPECT_TRUE(caps.supports(ProviderCapability::ReidentifyRepositoryStream));
     EXPECT_FALSE(caps.supports(ProviderCapability::CapabilityQueries));
     EXPECT_GE(caps.max_batch_size, 1u);
+    EXPECT_EQ(caps.max_batch_size, caps.max_events_per_batch);
+    EXPECT_EQ(caps.max_events_per_batch, 500u);
+    EXPECT_EQ(caps.max_mutations_per_event, 10000u);
+    EXPECT_EQ(caps.max_snapshot_entities, 10000u);
     EXPECT_EQ(store->health().status, ProviderHealthStatus::Healthy);
     EXPECT_EQ(store->schema_version(), "axon/portfolio-store/v1");
     EXPECT_EQ(store->protocol_version(), "axon/portfolio-provider/v1");
@@ -264,14 +273,14 @@ TEST(PortfolioStoreConformance, EnforcesAdvertisedBatchMutationAndFieldBounds) {
                  [&] { store->apply(kStream, 0, {}); });
 
     std::vector<ProjectionEvent> oversized_batch;
-    oversized_batch.reserve(store->capabilities().max_batch_size + 1);
-    for (std::size_t i = 0; i <= store->capabilities().max_batch_size; ++i)
+    oversized_batch.reserve(store->capabilities().max_events_per_batch + 1);
+    for (std::size_t i = 0; i <= store->capabilities().max_events_per_batch; ++i)
         oversized_batch.push_back(event(i + 1, "bounded-event-" + std::to_string(100000 + i), {}));
     expect_error(PortfolioStoreErrorCode::InvalidInput,
                  [&] { store->apply(kStream, 0, oversized_batch); });
 
     std::vector<ProjectionMutation> oversized_mutations(
-        store->capabilities().max_batch_size + 1,
+        store->capabilities().max_mutations_per_event + 1,
         {"file", "src/a.cpp", ProjectionOperation::Upsert, "digest-000000001"});
     expect_error(PortfolioStoreErrorCode::InvalidInput, [&] {
         store->apply(kStream, 0, {event(1, "bounded-event-0001", oversized_mutations)});
@@ -309,6 +318,129 @@ TEST(PortfolioStoreConformance, EnforcesAdvertisedBatchMutationAndFieldBounds) {
     expect_error(PortfolioStoreErrorCode::InvalidInput,
                  [&] { (void)store->inspect_repository_stream(kStream, 0); });
     EXPECT_FALSE(store->stream_state(kStream).exists);
+}
+
+TEST(PortfolioStoreConformance, AcceptsJournalCardinalityAndBoundsSnapshotsSeparately) {
+    auto store = make_conformance_store();
+    const auto caps = store->capabilities();
+    std::vector<ProjectionMutation> mutations;
+    mutations.reserve(caps.max_mutations_per_event);
+    for (std::size_t index = 0; index < caps.max_mutations_per_event; ++index)
+        mutations.push_back({"file", "src/file-" + std::to_string(index),
+                             ProjectionOperation::Upsert,
+                             "digest-cardinality-" + std::to_string(100000 + index)});
+    EXPECT_EQ(store->apply(kStream, 0,
+                           {event(1, "cardinality-event-0001", mutations)}).mutations_applied,
+              caps.max_mutations_per_event);
+    const auto projection = store->inspect_repository_stream(kStream,
+                                                              caps.max_snapshot_entities);
+    EXPECT_EQ(projection.entities.size(), caps.max_mutations_per_event);
+    EXPECT_FALSE(projection.truncated);
+
+    RepositorySnapshot snapshot{kOtherStream, 1, "snapshot-epoch-0001",
+                                "snapshot-manifest-0001", false, false,
+                                projection.entities};
+    EXPECT_EQ(store->replace_repository_stream(snapshot, 0).mutations_applied,
+              caps.max_snapshot_entities);
+    snapshot.entities.push_back({"file", "overflow", ProjectionOperation::Upsert,
+                                 "digest-cardinality-overflow"});
+    expect_error(PortfolioStoreErrorCode::InvalidInput,
+                 [&] { store->replace_repository_stream(snapshot, 1); });
+}
+
+TEST(PortfolioStoreConformance, ReidentifiesPhysicalStreamAtomicallyAndIdempotently) {
+    auto store = make_conformance_store();
+    const auto initial = event(1, "before-handoff-event-001",
+                               {{"file", "src/a.cpp", ProjectionOperation::Upsert,
+                                 "digest-before-handoff"}});
+    store->apply(kStream, 0, {initial});
+    RepositoryReidentification handoff{kStream, kReidentifiedStream, 2,
+                                       "repository-handoff-event-01",
+                                       "handoff-epoch-0001", std::nullopt,
+                                       "old-binding-0000001", "new-binding-0000001",
+                                       "ADR-0003-owner-approval", "owner-approved"};
+    const auto applied = store->reidentify_repository_stream(handoff, 1);
+    EXPECT_EQ(applied.disposition, ApplyDisposition::Applied);
+    EXPECT_FALSE(store->stream_state(kStream).exists);
+    EXPECT_EQ(store->stream_state(kReidentifiedStream).cursor, 2u);
+    EXPECT_TRUE(contains(inspect(*store, kReidentifiedStream), "file", "src/a.cpp"));
+    EXPECT_TRUE(contains(inspect(*store, kReidentifiedStream), "repository",
+                         kReidentifiedStream.repository_id));
+    EXPECT_FALSE(contains(inspect(*store, kReidentifiedStream), "repository",
+                          kStream.repository_id));
+    EXPECT_EQ(store->reidentify_repository_stream(handoff, 1).disposition,
+              ApplyDisposition::Duplicate);
+    EXPECT_EQ(store->apply(kStream, 0, {initial}).state.cursor, 2u);
+
+    const auto after = event(kReidentifiedStream, 3, "after-handoff-event-0001",
+                             {{"file", "src/b.cpp", ProjectionOperation::Upsert,
+                               "digest-after-handoff"}});
+    EXPECT_EQ(store->apply(kReidentifiedStream, 2, {after}).state.cursor, 3u);
+    const auto late_replay = store->reidentify_repository_stream(handoff, 1);
+    EXPECT_EQ(late_replay.disposition, ApplyDisposition::Duplicate);
+    EXPECT_EQ(late_replay.state.cursor, 3u);
+    expect_error(PortfolioStoreErrorCode::IdempotencyConflict, [&] {
+        store->apply(kReidentifiedStream, 3,
+                     {event(kReidentifiedStream, 4, handoff.event_id, {})});
+    });
+    RepositoryReidentification second_handoff{
+        kReidentifiedStream, kTwiceReidentifiedStream, 4, "second-handoff-event-0001",
+        "handoff-epoch-0002", "handoff-manifest-0002", "new-binding-0000001",
+        "next-binding-000001", "ADR-0003-owner-approval", "repository-moved"};
+    EXPECT_EQ(store->reidentify_repository_stream(second_handoff, 3).state.cursor, 4u);
+    EXPECT_FALSE(store->stream_state(kReidentifiedStream).exists);
+    EXPECT_TRUE(contains(inspect(*store, kTwiceReidentifiedStream), "file", "src/a.cpp"));
+    EXPECT_EQ(store->reidentify_repository_stream(handoff, 1).state.cursor, 4u);
+
+    auto changed = handoff;
+    changed.current_stream.repository_id = "99999999-2222-4333-8444-555555555555";
+    expect_error(PortfolioStoreErrorCode::IdempotencyConflict,
+                 [&] { store->reidentify_repository_stream(changed, 1); });
+}
+
+TEST(PortfolioStoreConformance, ReidentificationCollisionAndInvalidShapeAreAtomic) {
+    auto store = make_conformance_store();
+    store->apply(kStream, 0, {event(1, "old-partition-event-0001", {})});
+    expect_error(PortfolioStoreErrorCode::IdempotencyConflict, [&] {
+        store->apply(kReidentifiedStream, 0,
+                     {event(kReidentifiedStream, 1, "target-partition-event-01", {})});
+    });
+    RepositoryReidentification handoff{kStream, kReidentifiedStream, 2,
+                                       "collision-handoff-event-01",
+                                       "handoff-epoch-0001", "handoff-manifest-0001",
+                                       "old-binding-0000001", "new-binding-0000001",
+                                       "ADR-0003-owner-approval", "owner-approved"};
+    EXPECT_EQ(store->reidentify_repository_stream(handoff, 1).disposition,
+              ApplyDisposition::Applied);
+    EXPECT_FALSE(store->stream_state(kStream).exists);
+    EXPECT_EQ(store->stream_state(kReidentifiedStream).cursor, 2u);
+
+    auto invalid = handoff;
+    invalid.current_stream.index_stream_id = kOtherStream.index_stream_id;
+    expect_error(PortfolioStoreErrorCode::InvalidInput,
+                 [&] { store->reidentify_repository_stream(invalid, 1); });
+    invalid = handoff;
+    invalid.reason = "unapproved";
+    expect_error(PortfolioStoreErrorCode::InvalidInput,
+                 [&] { store->reidentify_repository_stream(invalid, 1); });
+    invalid = handoff;
+    invalid.old_binding_id = "short";
+    expect_error(PortfolioStoreErrorCode::InvalidInput,
+                 [&] { store->reidentify_repository_stream(invalid, 1); });
+    invalid = handoff;
+    invalid.event_id = "different-handoff-event-01";
+    invalid.sequence = 3;
+    expect_error(PortfolioStoreErrorCode::CursorConflict,
+                 [&] { store->reidentify_repository_stream(invalid, 1); });
+    EXPECT_EQ(store->stream_state(kReidentifiedStream).cursor, 2u);
+
+    auto removed_store = make_conformance_store();
+    RepositorySnapshot removed{kStream, 1, "removed-epoch-0001", "removed-manifest-0001",
+                               false, true, {}};
+    removed_store->replace_repository_stream(removed, 0);
+    expect_error(PortfolioStoreErrorCode::InvalidInput,
+                 [&] { removed_store->reidentify_repository_stream(handoff, 1); });
+    EXPECT_TRUE(removed_store->stream_state(kStream).removed);
 }
 
 TEST(PortfolioStoreConformance, RejectsZeroSnapshotAndNeverWrapsExhaustedCursor) {

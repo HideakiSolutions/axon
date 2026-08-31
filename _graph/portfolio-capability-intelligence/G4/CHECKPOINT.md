@@ -42,3 +42,24 @@
   correction without an objective blocker.
 - Commit: isolated corrective `fix(portfolio): preserve snapshot manifest across deltas`; G5 and
   legacy untracked evidence were explicitly excluded.
+
+## Owner-authorized cardinality and identity-handoff correction
+
+- G5 proved a second upstream mismatch: the accepted journal permits 10,000 affected entities per
+  authoritative event, but the provider port used one 500-item limit for event batches, event
+  mutations and snapshots. It also could not atomically transfer a persistent physical stream when
+  `RepositoryReidentified` changes its logical repository id.
+- The owner explicitly reopened G4 beyond its exhausted budget for this bounded correction. The
+  additive capability contract now distinguishes 500 events per apply, 10,000 mutations per event
+  and 10,000 snapshot entities; the original `max_batch_size` remains as a compatibility alias.
+- `reidentify_repository_stream` is an optional, capability-advertised operation with a default
+  `UnsupportedCapability` implementation for source compatibility. The reference implementation
+  validates typed provenance, advances one contiguous sequence, preserves stream data/receipts and
+  manifest, retires the old logical partition, materializes the new repository identity, enforces
+  global physical-stream uniqueness and supports idempotent replay through chained handoffs.
+- Executor verification passed 12/12 shared tests under `ccache`, `nice -n 10`, `-j1`. An
+  independent verifier added temporary chained-handoff, provenance, removed-stream and uint64
+  probes and returned `ACCEPT`. `clang-format` was unavailable in the environment; compilation,
+  conformance, boundary, `git diff --check` and immutable-tag checks passed.
+- Commit: isolated corrective `fix(portfolio): align projection cardinality and identity handoff`;
+  uncommitted G5 implementation and legacy state remain excluded.

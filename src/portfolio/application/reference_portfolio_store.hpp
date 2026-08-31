@@ -21,6 +21,9 @@ public:
                       const std::vector<ProjectionEvent>& events) override;
     ReplaceResult replace_repository_stream(const RepositorySnapshot& snapshot,
                                             std::uint64_t expected_cursor) override;
+    ApplyResult reidentify_repository_stream(
+        const RepositoryReidentification& reidentification,
+        std::uint64_t expected_cursor) override;
     CursorEpochManifest stream_state(const RepositoryStreamKey& stream) const override;
     StreamProjection inspect_repository_stream(const RepositoryStreamKey& stream,
                                                std::size_t max_entities) const override;
@@ -48,6 +51,7 @@ private:
     mutable std::mutex mutex_;
     std::map<RepositoryStreamKey, StreamData> streams_;
     std::map<std::string, EventReceipt> receipts_;
+    std::map<std::string, RepositoryReidentification> reidentifications_;
 };
 
 } // namespace axon::portfolio

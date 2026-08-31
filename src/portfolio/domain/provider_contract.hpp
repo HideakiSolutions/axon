@@ -12,6 +12,7 @@ namespace axon::portfolio {
 enum class ProviderCapability {
     AtomicApply,
     ReplaceRepositoryStream,
+    ReidentifyRepositoryStream,
     ValidateMaintenance,
     CompactMaintenance,
     RebuildDerivedMaintenance,
@@ -26,6 +27,10 @@ struct ProviderCapabilities {
     ProviderRole role = ProviderRole::PortfolioStore;
     std::vector<ProviderCapability> supported;
     std::size_t max_batch_size = 0;
+    // max_batch_size is retained as the v1 alias for max_events_per_batch.
+    std::size_t max_events_per_batch = 0;
+    std::size_t max_mutations_per_event = 0;
+    std::size_t max_snapshot_entities = 0;
 
     bool supports(ProviderCapability capability) const;
 };
@@ -88,6 +93,21 @@ struct RepositorySnapshot {
     bool stale = false;
     bool removed = false;
     std::vector<ProjectionMutation> entities;
+};
+
+struct RepositoryReidentification {
+    RepositoryStreamKey previous_stream;
+    RepositoryStreamKey current_stream;
+    std::uint64_t sequence = 0;
+    std::string event_id;
+    std::string epoch;
+    std::optional<std::string> manifest;
+    std::string old_binding_id;
+    std::string new_binding_id;
+    std::string approval_reference;
+    std::string reason;
+
+    bool operator==(const RepositoryReidentification&) const = default;
 };
 
 struct StreamProjection {

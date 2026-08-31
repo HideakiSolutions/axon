@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G4 manifest correction independently accepted and committed; G5 resumed
+Status: G4 cardinality/reidentification correction independently accepted; G5 resumes after commit
 
 ## Current Mini-Goal
 
-G5 — DuckDB local portfolio projector.
+G5 — DuckDB local portfolio projector, resuming on the corrected G4 contract.
 
 ## Progress
 
@@ -22,6 +22,13 @@ G5 — DuckDB local portfolio projector.
 - G6-G16 implementation: not started.
 - G5 discovery: the owner authorized the required bounded G4 reopening. The correction is
   independently accepted and committed in its isolated corrective commit. G5 is resumed.
+- G5 implementation: real DuckDB store/projector and 16 directed tests are executor-green, but the
+  node is not accepted or committed because G3 permits 10,000 affected entities per event while G4
+  permits only 500 mutations and has no repository reidentification/partition-transfer operation.
+- G4 correction 4: the owner-authorized cardinality/reidentification reopening is independently
+  accepted. The port now distinguishes 500 events/apply, 10,000 mutations/event and 10,000
+  snapshot entities, and defines optional capability-advertised atomic identity transfer keyed by
+  the persistent physical stream with typed provenance and idempotent chained replay.
 
 ## Current Evidence
 
@@ -49,6 +56,9 @@ G5 — DuckDB local portfolio projector.
   Present repository contracts are revalidated on every open and malformed/divergent identities
   fail closed. Thirteen real-DuckDB tests, four call-resolution tests and the full 32-test CTest
   registry pass with no failures (2 optional embedding skips); the final verifier accepted the node.
+- The uncommitted G5 target passes 16/16 tests under `ccache`, `nice -n 10`, `-j1`, including three
+  byte-identical read-only source databases, replay/rollback, reconcile/rebuild, stale lifecycle,
+  removal/return, root containment and symlink rejection.
 
 ## Risks and Gaps
 
@@ -60,6 +70,9 @@ G5 — DuckDB local portfolio projector.
 - Provider namespaces and credentials are intentionally unprovisioned.
 - PostgreSQL/Qdrant/FalkorDB production adapter dependencies/build strategy require accepted ADR and
   supply-chain review before code.
+- The prior G4 cardinality and identity-transfer blockers are corrected and independently accepted;
+  the uncommitted DuckDB adapter/projector must now implement the accepted contract before G5 can
+  receive acceptance credit.
 
 ## Rollback
 
@@ -68,4 +81,5 @@ runtime/schema/infrastructure mutation has occurred.
 
 ## Next Action
 
-Resume G5 DuckDB local portfolio projector without fabricating historical state.
+Create the isolated corrective G4 commit, update the uncommitted DuckDB adapter/projector to the
+accepted limits and handoff semantics, then complete independent G5 verification.
