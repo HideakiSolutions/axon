@@ -7,6 +7,8 @@
 #include "../core/ccr.hpp"
 #include "../core/dialogue.hpp"
 #include "../core/telemetry.hpp"
+#include "../portfolio/delivery/portfolio_capability_catalog.hpp"
+#include "../portfolio/infrastructure/http/keycloak_oidc_auth.hpp"
 #include <nlohmann/json.hpp>
 #ifdef _WIN32
 #include <winsock2.h>
@@ -23,6 +25,8 @@ typedef int ssize_t; // MinGW defines ssize_t; MSVC does not
 #endif
 #include <csignal> // SIGINT, signal() — available on all platforms
 #include <chrono>
+#include <cctype>
+#include <cmath>
 #include <unordered_set>
 #include <sstream>
 #include <iostream>
@@ -37,14 +41,16 @@ static volatile bool g_running = true;
 static void build_response(int fd, int status, const std::string& body,
                            const std::string& content_type = "application/json") {
     std::string status_text =
-        (status == 200) ? "OK" : (status == 404 ? "Not Found" : "Bad Request");
+        (status == 200) ? "OK" : (status == 400 ? "Bad Request" :
+        (status == 401 ? "Unauthorized" : (status == 404 ? "Not Found" :
+        (status == 503 ? "Service Unavailable" : "Internal Server Error"))));
     std::ostringstream oss;
     oss << "HTTP/1.1 " << status << " " << status_text << "\r\n"
         << "Content-Type: " << content_type << "; charset=utf-8\r\n"
         << "Content-Length: " << body.size() << "\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
         << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-        << "Access-Control-Allow-Headers: Content-Type\r\n"
+        << "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
         << "Connection: close\r\n\r\n"
         << body;
     std::string response = oss.str();
@@ -82,6 +88,37 @@ static std::string get_query_param(const std::string& query, const std::string& 
     size_t end = query.find('&', pos + prefix.size());
     return query.substr(pos + prefix.size(),
                         end == std::string::npos ? std::string::npos : end - pos - prefix.size());
+}
+
+static std::string request_header(const std::string& request, const std::string& name) {
+    const std::string needle = name + ":";
+    std::size_t begin = request.find("\r\n") + 2;
+    while (begin > 1 && begin < request.size()) {
+        const auto end = request.find("\r\n", begin);
+        if (end == std::string::npos || end == begin) break;
+        const auto line = request.substr(begin, end - begin);
+        if (line.size() >= needle.size() && std::equal(needle.begin(), needle.end(), line.begin(),
+            [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); })) {
+            auto value = line.substr(needle.size());
+            while (!value.empty() && value.front() == ' ') value.erase(value.begin());
+            return value;
+        }
+        begin = end + 2;
+    }
+    return {};
+}
+
+static std::optional<int> strict_positive_int(const std::string& value) {
+    if (value.empty() || value.size() > 8) return std::nullopt;
+    std::size_t consumed = 0;
+    try { const int parsed = std::stoi(value, &consumed); if (consumed != value.size() || parsed < 1 || parsed > 10000) return std::nullopt; return parsed; }
+    catch (...) { return std::nullopt; }
+}
+static std::optional<double> strict_threshold(const std::string& value) {
+    if (value.empty()) return 0.0;
+    std::size_t consumed = 0;
+    try { const double parsed = std::stod(value, &consumed); if (consumed != value.size() || !std::isfinite(parsed) || parsed < 0 || parsed > 1) return std::nullopt; return parsed; }
+    catch (...) { return std::nullopt; }
 }
 
 // URL decode simples
@@ -252,7 +289,7 @@ static std::string web_index_html() {
 
 static std::string handle_request(const std::string& method, const std::string& path,
                                   const std::string& query, const std::string& body,
-                                  ServerContext& ctx, const HttpConfig& cfg, int& http_status) {
+                                  const std::string& authorization, ServerContext& ctx, const HttpConfig& cfg, int& http_status) {
     // Escape SQL strings
     auto sq = [](const std::string& s) {
         std::string out;
@@ -270,6 +307,44 @@ static std::string handle_request(const std::string& method, const std::string& 
     // GET /api/metrics
     if (method == "GET" && path == "/api/metrics") {
         return axon::metrics_json(ctx.cfg, ctx.db.get()).dump();
+    }
+
+    // Versioned portfolio endpoints deliberately share the catalog used by CLI and MCP.  They
+    // expose metadata only and never use the HTTP server's project database as a write target.
+    if (path.rfind("/api/v1/portfolio/", 0) == 0 || path.rfind("/api/v1/capabilities", 0) == 0) {
+        // Authentication failures are deliberately distinct from validation and service errors.
+        // The Keycloak shared-infra contract is fail-closed: an unset verifier is never bypassed.
+        const char* issuer = std::getenv("AXON_KEYCLOAK_ISSUER");
+        const char* audience = std::getenv("AXON_KEYCLOAK_AUDIENCE");
+        const char* jwks = std::getenv("AXON_KEYCLOAK_JWKS_JSON");
+        if (!issuer || !audience || !jwks) { http_status = 401; return json{{"error","portfolio API authentication is not configured"}}.dump(); }
+        try {
+            axon::portfolio::KeycloakOidcAuthenticator authenticator({issuer, audience, jwks});
+            (void)authenticator.authenticate_bearer(authorization);
+        } catch (const std::exception& error) { http_status=401; return json{{"error",error.what()}}.dump(); }
+        try {
+            axon::portfolio::PortfolioCapabilityCatalog catalog;
+            if (method == "GET" && path == "/api/v1/portfolio/status") { const auto status=catalog.status(); json repos=json::array(); for(const auto& item:status.repositories) repos.push_back({{"repository_id",item.repository_id},{"index_stream_id",item.index_stream_id},{"status",item.status},{"detail",item.detail}}); http_status=status.degraded?503:200; return json{{"catalog_path",catalog.path().string()},{"capabilities",catalog.list({},10000).size()},{"degraded",status.degraded},{"repositories",repos}}.dump(); }
+            if (method == "POST" && path == "/api/v1/portfolio/sync") {
+                json input = body.empty() ? json::object() : json::parse(body);
+                if (!input.is_object()) { http_status=400; return json{{"error","object body required"}}.dump(); }
+                for (const auto& entry : input.items()) if (entry.key() != "group" && entry.key() != "rebuild") { http_status=400; return json{{"error","unknown sync field"}}.dump(); }
+                std::optional<std::string> group; if(input.contains("group")) { if(!input["group"].is_string()) { http_status=400; return json{{"error","group must be string"}}.dump(); } group=input["group"]; }
+                if (input.contains("rebuild") && !input["rebuild"].is_boolean()) { http_status=400; return json{{"error","rebuild must be boolean"}}.dump(); }
+                const auto report=catalog.sync(group,input.value("rebuild",false)); json repositories=json::array(); for(const auto& item:report.repositories) repositories.push_back({{"repository_id",item.repository_id},{"index_stream_id",item.index_stream_id},{"status",item.status},{"detail",item.detail},{"signatures",item.signatures}}); http_status=report.degraded?503:200; return json{{"degraded",report.degraded},{"repositories",repositories}}.dump();
+            }
+            if (method == "GET" && path == "/api/v1/capabilities") {
+                const auto repo=url_decode(get_query_param(query,"repository_id")); const auto limit_text=get_query_param(query,"limit"); const auto limit=limit_text.empty()?std::optional<int>{200}:strict_positive_int(limit_text); if(!limit) { http_status=400; return json{{"error","limit must be 1..10000"}}.dump(); } json output=json::array(); for(const auto& s:catalog.list(repo.empty()?std::nullopt:std::optional<std::string>{repo},*limit)) output.push_back({{"id",s.signature_id},{"repository_id",s.stream.repository_id},{"name",s.normalized_name},{"path",s.path.value_or("")},{"epoch",s.index_epoch}}); return json{{"capabilities",output}}.dump();
+            }
+            if (method == "GET" && path == "/api/v1/capabilities/search") { const auto q=url_decode(get_query_param(query,"q")); if(q.empty()) { http_status=400; return json{{"error","q is required"}}.dump(); } json output=json::array(); for(const auto& s:catalog.search(q)) output.push_back({{"id",s.signature_id},{"repository_id",s.stream.repository_id},{"name",s.normalized_name},{"path",s.path.value_or("")}}); return json{{"capabilities",output}}.dump(); }
+            if (method == "GET" && path == "/api/v1/capabilities/duplicates") { const auto threshold=strict_threshold(get_query_param(query,"threshold")); if(!threshold) { http_status=400; return json{{"error","threshold must be finite and 0..1"}}.dump(); } json output=json::array(); for(const auto& c:catalog.duplicates(*threshold)) output.push_back({{"id",c.candidate_id},{"left",c.left_capability_id},{"right",c.right_capability_id},{"score",c.final_score},{"classification",axon::portfolio::to_string(c.classification)},{"differences",c.differences},{"invalidators",c.invalidators}}); return json{{"candidates",output}}.dump(); }
+            if (method == "GET" && path.rfind("/api/v1/capabilities/compare/",0)==0) { const auto id=url_decode(path.substr(29)); for(const auto& c:catalog.duplicates(0,10000)) if(c.candidate_id==id) return json{{"id",c.candidate_id},{"score",c.final_score},{"classification",axon::portfolio::to_string(c.classification)},{"differences",c.differences},{"invalidators",c.invalidators}}.dump(); http_status=404; return json{{"error","candidate not found"}}.dump(); }
+            if (method == "GET" && path.rfind("/api/v1/capabilities/consumers/",0)==0) { const auto id=url_decode(path.substr(31)); for(const auto& s:catalog.list({},10000)) if(s.signature_id==id) return json{{"capability_id",id},{"repositories",json::array({s.stream.repository_id})},{"evidence",s.path?json::array({*s.path}):json::array()}}.dump(); http_status=404; return json{{"error","capability not found"}}.dump(); }
+            if (method == "GET" && path == "/api/v1/capabilities/drift") { const auto root=url_decode(get_query_param(query,"graph_root")); const auto fragment=url_decode(get_query_param(query,"fragment")); if(root.empty()||fragment.empty()) { http_status=400; return json{{"error","graph_root and fragment are required"}}.dump(); } const auto result=catalog.drift(root,fragment); return json{{"matches",result.matches.size()},{"drift",result.drift.size()}}.dump(); }
+        } catch(const json::exception& error) { http_status=400; return json{{"error","invalid JSON body"}}.dump(); }
+        catch(const std::invalid_argument& error) { http_status=400; return json{{"error",error.what()}}.dump(); }
+        catch(const std::exception& error) { http_status=500; return json{{"error","portfolio service failure"}}.dump(); }
+        http_status=404; return json{{"error","unknown portfolio endpoint"}}.dump();
     }
 
     // GET /api/graph
@@ -923,7 +998,7 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             if (method == "OPTIONS") {
                 response_body = "";
             } else {
-                response_body = handle_request(method, path, query, body, ctx, cfg, http_status);
+                response_body = handle_request(method, path, query, body, request_header(request, "Authorization"), ctx, cfg, http_status);
             }
             if (path != "/api/metrics") {
                 int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(

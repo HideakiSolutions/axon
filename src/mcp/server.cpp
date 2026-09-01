@@ -16,6 +16,7 @@
 #include "../core/telemetry.hpp"
 #include "../core/pending_writes.hpp"
 #include "../core/memory_search.hpp"
+#include "../portfolio/delivery/portfolio_capability_catalog.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -84,7 +85,7 @@ static json tools_list() {
              {{{"name", "run_pipeline"},
                {"description", "Index the project: parse source files, build dependency graph, "
                                "compute embeddings."},
-               {"inputSchema",
+              {"inputSchema",
                 {{"type", "object"}, {"properties", {{"root", {{"type", "string"}}}}}}}},
               {{"name", "index_paths"},
                {"description",
@@ -256,6 +257,14 @@ static json tools_list() {
                    {"group",
                     {{"type", "string"},
                      {"description", "Optional: limit to repos in this group"}}}}}}}},
+              {{"name", "portfolio_status"}, {"description", "Report the derived portfolio capability catalog status."}, {"inputSchema", {{"type","object"},{"properties",json::object()}}}},
+              {{"name", "portfolio_sync"}, {"description", "Synchronize registered project indexes into the derived portfolio catalog, read-only at every source."}, {"inputSchema", {{"type","object"},{"properties",{{"group",{{"type","string"}}},{"rebuild",{{"type","boolean"},{"default",false}}}}}}}},
+              {{"name", "capability_list"}, {"description", "List observed portfolio capabilities."}, {"inputSchema", {{"type","object"},{"properties",{{"repository_id",{{"type","string"}}},{"limit",{{"type","integer"},{"minimum",1},{"maximum",10000}}}}}}}},
+              {{"name", "capability_search"}, {"description", "Search observed capability metadata."}, {"inputSchema", {{"type","object"},{"required",{"query"}},{"properties",{{"query",{{"type","string"}}},{"limit",{{"type","integer"},{"minimum",1},{"maximum",10000}}}}}}}},
+              {{"name", "capability_duplicates"}, {"description", "Return explainable multi-signal duplicate candidates."}, {"inputSchema", {{"type","object"},{"properties",{{"threshold",{{"type","number"},{"minimum",0},{"maximum",1}}}}}}}},
+              {{"name", "capability_compare"}, {"description", "Return one candidate's scores and invalidators."}, {"inputSchema", {{"type","object"},{"required",{"candidate_id"}},{"properties",{{"candidate_id",{{"type","string"}}}}}}}},
+              {{"name", "capability_consumers"}, {"description", "Return the repository and evidence references for an observed capability."}, {"inputSchema", {{"type","object"},{"required",{"capability_id"}},{"properties",{{"capability_id",{{"type","string"}}}}}}}},
+              {{"name", "capability_drift"}, {"description", "Compare observed capabilities with a read-only Git declaration fragment."}, {"inputSchema", {{"type","object"},{"required",{"graph_root","fragment"}},{"properties",{{"graph_root",{{"type","string"}}},{"fragment",{{"type","string"}}}}}}}},
               // ── Dialogue Layer ─────────────────────────────────────────────────────
               {{"name", "thread_create"},
                {"description", "Create a named conversation thread. kind: project|person|topic."},
@@ -1624,6 +1633,37 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                                  {"handler_file", handler_file},
                                  {"impacted_files", impacted},
                                  {"impacted_count", (int)impacted.size()}});
+    }
+
+    if (name == "portfolio_status" || name == "portfolio_sync" || name == "capability_list" ||
+        name == "capability_search" || name == "capability_duplicates" || name == "capability_compare" ||
+        name == "capability_consumers" || name == "capability_drift") {
+        try {
+            portfolio::PortfolioCapabilityCatalog catalog;
+            if (name == "portfolio_status") { const auto status=catalog.status(); json repos=json::array(); for(const auto& item:status.repositories) repos.push_back({{"repository_id",item.repository_id},{"index_stream_id",item.index_stream_id},{"status",item.status},{"detail",item.detail}}); return make_tool_result({{"catalog_path", catalog.path().string()}, {"capabilities", catalog.list({}, 10000).size()}, {"degraded",status.degraded}, {"repositories",repos}}); }
+            if (name == "portfolio_sync") {
+                if (args.contains("group") && !args["group"].is_string()) return make_tool_result({{"error","group must be a string"}},true);
+                if (args.contains("rebuild") && !args["rebuild"].is_boolean()) return make_tool_result({{"error","rebuild must be a boolean"}},true);
+                const auto group = args.contains("group") ? std::optional<std::string>{args["group"]} : std::nullopt;
+                const auto report = catalog.sync(group, args.value("rebuild", false)); json repositories=json::array();
+                for(const auto& item:report.repositories) repositories.push_back({{"repository_id",item.repository_id},{"index_stream_id",item.index_stream_id},{"status",item.status},{"detail",item.detail},{"signatures",item.signatures}});
+                return make_tool_result({{"degraded",report.degraded},{"repositories",repositories}});
+            }
+            if (name == "capability_list" || name == "capability_search") {
+                if(args.contains("limit") && !args["limit"].is_number_integer()) return make_tool_result({{"error","limit must be an integer"}},true);
+                const auto limit=args.value("limit",50);
+                if(limit<1||limit>10000) return make_tool_result({{"error","limit must be 1..10000"}},true);
+                std::vector<portfolio::CapabilitySignature> signatures;
+                if(name=="capability_list") { std::optional<std::string> repo; if(args.contains("repository_id")) { if(!args["repository_id"].is_string()) return make_tool_result({{"error","repository_id must be a string"}},true); repo=args["repository_id"]; } signatures=catalog.list(repo,limit); }
+                else { const auto query=args.value("query",""); if(query.empty()) return make_tool_result({{"error","query is required"}},true); signatures=catalog.search(query,limit); }
+                json output=json::array(); for(const auto& s:signatures) output.push_back({{"id",s.signature_id},{"repository_id",s.stream.repository_id},{"name",s.normalized_name},{"path",s.path.value_or("")},{"epoch",s.index_epoch}}); return make_tool_result({{"capabilities",output}});
+            }
+            if (name == "capability_duplicates" || name == "capability_compare") {
+                const auto candidates=catalog.duplicates(args.value("threshold",0.0),10000); const auto wanted=args.value("candidate_id",""); json output=json::array(); for(const auto& c:candidates) if(wanted.empty()||c.candidate_id==wanted) output.push_back({{"id",c.candidate_id},{"left",c.left_capability_id},{"right",c.right_capability_id},{"score",c.final_score},{"classification",portfolio::to_string(c.classification)},{"differences",c.differences},{"invalidators",c.invalidators}}); if(!wanted.empty()&&output.empty()) return make_tool_result({{"error","candidate not found"}},true); return make_tool_result({{"candidates",output}});
+            }
+            if (name == "capability_consumers") { const auto id=args.value("capability_id",""); if(id.empty()) return make_tool_result({{"error","capability_id is required"}},true); for(const auto& s:catalog.list({},10000)) if(s.signature_id==id) return make_tool_result({{"capability_id",id},{"repositories",json::array({s.stream.repository_id})},{"evidence",s.path?json::array({*s.path}):json::array()}}); return make_tool_result({{"error","capability not found"}},true); }
+            const auto root=args.value("graph_root",""); const auto fragment=args.value("fragment",""); if(root.empty()||fragment.empty()) return make_tool_result({{"error","graph_root and fragment are required"}},true); const auto result=catalog.drift(root,fragment); return make_tool_result({{"matches",result.matches.size()},{"drift",result.drift.size()}});
+        } catch(const std::exception& error) { return make_tool_result({{"error",error.what()}},true); }
     }
 
     if (name == "group_list") {

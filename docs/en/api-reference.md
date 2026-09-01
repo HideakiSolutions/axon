@@ -490,3 +490,8 @@ One pattern per line — matched against `path.filename()`:
 third_party
 models
 ```
+# Portfolio Capability Intelligence
+
+`axon web` exposes additive routes under `/api/v1`. Sync reads registered project indexes in
+read-only mode and stores only signature metadata, digests and provenance in a rebuildable catalog
+under `AXON_REGISTRY_DIR`. See [`portfolio-openapi.yaml`](../api/portfolio-openapi.yaml).
