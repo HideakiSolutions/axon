@@ -12,6 +12,8 @@ constexpr const char* kFirstRepository="7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb";
 constexpr const char* kFirstStream="4b809f2e-5606-4f45-b050-e4dbb30cde53";
 constexpr const char* kSecondRepository="11c79d58-b6d0-4bdf-a2d4-3f3c1f0a8d91";
 constexpr const char* kSecondStream="618f802b-e97d-4f24-9cf7-62b09e4d1e62";
+constexpr const char* kThirdRepository="8b0539ee-b809-4f81-b2f6-df2f2b425a5a";
+constexpr const char* kThirdStream="214c6637-9a08-4227-a83e-0d73a2539e99";
 
 std::string bytes(const fs::path& path) {
     std::ifstream in(path,std::ios::binary);
@@ -47,28 +49,32 @@ TEST(PortfolioCapabilityCatalog, SyncsRealReadOnlySourcesAndSearchesMetadata) {
     fs::remove_all(base);
     fs::create_directories(base/"repo/.axon");
     fs::create_directories(base/"repo-two/.axon");
+    fs::create_directories(base/"repo-three/.axon");
     const auto source=base/"repo/.axon/index.duckdb";
     const auto second_source=base/"repo-two/.axon/index.duckdb";
+    const auto third_source=base/"repo-three/.axon/index.duckdb";
     create_source(source,kFirstRepository,kFirstStream,"src/payment.cpp",true);
     create_source(second_source,kSecondRepository,kSecondStream,"src/payment.cpp",false);
+    create_source(third_source,kThirdRepository,kThirdStream,"src/payment.cpp",false);
     const auto before=bytes(source);
     const auto second_before=bytes(second_source);
     fs::create_directories(base/"registry");
     std::ofstream(base/"registry/registry.json")
         <<"{\"schema_version\":\"axon-registry/v2\",\"repos\":["
         <<"{\"name\":\"repo\",\"root\":\""<<(base/"repo").string()<<"\",\"db_path\":\""<<source.string()<<"\",\"repository_id\":\""<<kFirstRepository<<"\",\"index_stream_id\":\""<<kFirstStream<<"\",\"default_for_profiles\":[\"local\"]},"
-        <<"{\"name\":\"repo-two\",\"root\":\""<<(base/"repo-two").string()<<"\",\"db_path\":\""<<second_source.string()<<"\",\"repository_id\":\""<<kSecondRepository<<"\",\"index_stream_id\":\""<<kSecondStream<<"\",\"default_for_profiles\":[\"local\"]}],"
+        <<"{\"name\":\"repo-two\",\"root\":\""<<(base/"repo-two").string()<<"\",\"db_path\":\""<<second_source.string()<<"\",\"repository_id\":\""<<kSecondRepository<<"\",\"index_stream_id\":\""<<kSecondStream<<"\",\"default_for_profiles\":[\"local\"]},"
+        <<"{\"name\":\"repo-three\",\"root\":\""<<(base/"repo-three").string()<<"\",\"db_path\":\""<<third_source.string()<<"\",\"repository_id\":\""<<kThirdRepository<<"\",\"index_stream_id\":\""<<kThirdStream<<"\",\"default_for_profiles\":[\"local\"]}],"
         <<"\"storage_profiles\":{\"local\":{\"role\":\"portfolio_local\",\"transport\":\"local\",\"default\":true,\"portfolio_store\":{\"provider\":\"duckdb\",\"path\":\"x\"}}}}";
     setenv("AXON_REGISTRY_DIR",(base/"registry").c_str(),1);
     axon::portfolio::PortfolioCapabilityCatalog catalog(base/"catalog.duckdb");
     const auto report=catalog.sync();
     ASSERT_FALSE(report.degraded);
-    ASSERT_EQ(report.repositories.size(),2u);
+    ASSERT_EQ(report.repositories.size(),3u);
     EXPECT_EQ(bytes(source),before);
     EXPECT_EQ(bytes(second_source),second_before);
-    EXPECT_EQ(catalog.search("payment").size(),2u);
+    EXPECT_EQ(catalog.search("payment").size(),3u);
     const auto signatures=catalog.list({},10);
-    ASSERT_EQ(signatures.size(),3u);
+    ASSERT_EQ(signatures.size(),4u);
     const auto search=std::find_if(signatures.begin(),signatures.end(),[](const auto& signature) {
         return signature.path && *signature.path=="src/search.cpp";
     });
@@ -77,7 +83,7 @@ TEST(PortfolioCapabilityCatalog, SyncsRealReadOnlySourcesAndSearchesMetadata) {
     EXPECT_EQ(std::count_if(signatures.begin(),signatures.end(),[](const auto& signature) {
         return signature.path && *signature.path=="src/payment.cpp" &&
             signature.external_dependencies==std::vector<std::string>({"@axon/shared-contracts"});
-    }),2);
+    }),3);
     EXPECT_FALSE(catalog.duplicates(0.0,10).empty());
 }
 }
