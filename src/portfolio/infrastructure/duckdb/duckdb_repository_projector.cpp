@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <stdexcept>
 #include <unordered_set>
@@ -238,7 +239,8 @@ std::vector<JournalEvent> read_events(Source& source, std::uint64_t after, std::
         "SELECT sequence,event_id,index_epoch,manifest_hash,payload_json,schema_version,"
         "repository_id,event_type FROM index_events WHERE index_stream_id=$1 AND sequence>$2 "
         "ORDER BY sequence LIMIT $3");
-    auto result = statement->Execute(source.stream.index_stream_id, after, limit);
+    auto result =
+        statement->Execute(source.stream.index_stream_id, after, static_cast<std::int64_t>(limit));
     require_ok(result, "read source journal");
     std::vector<JournalEvent> events;
     while (auto rows = result->Fetch())
