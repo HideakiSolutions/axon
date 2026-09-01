@@ -13,6 +13,13 @@ axon::portfolio::CapabilitySignature signature(const std::string& repo, const st
 }
 TEST(FalkorDbCapabilityGraph, ReplaceIsolatedAndBounded) {
     axon::portfolio::FalkorDbCapabilityGraph graph("127.0.0.1", 6379, "axon_portfolio_g10_test");
+    try {
+        graph.replace_repository({"00000000-0000-0000-0000-000000000000", "availability_probe"},
+                                 "probe", {});
+    } catch (const std::runtime_error& error) {
+        if (std::string(error.what()) == "FalkorDB unavailable") GTEST_SKIP() << error.what();
+        throw;
+    }
     const axon::portfolio::RepositoryStreamKey first{"11111111-1111-1111-1111-111111111111",
                                                      "stream_one"};
     const axon::portfolio::RepositoryStreamKey second{"22222222-2222-2222-2222-222222222222",

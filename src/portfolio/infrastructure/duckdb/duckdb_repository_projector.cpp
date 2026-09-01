@@ -54,7 +54,7 @@ Source open_source(const std::filesystem::path& registered_root,
                    const std::filesystem::path& index_path) {
     std::error_code error;
     const auto absolute_root = std::filesystem::absolute(registered_root, error).lexically_normal();
-    if (error || path_has_symlink(absolute_root.root_path(), absolute_root))
+    if (error || std::filesystem::is_symlink(std::filesystem::symlink_status(absolute_root, error)))
         throw std::invalid_argument("registered repository root contains a symbolic link");
     const auto root = std::filesystem::canonical(registered_root, error);
     if (error || !std::filesystem::is_directory(root))

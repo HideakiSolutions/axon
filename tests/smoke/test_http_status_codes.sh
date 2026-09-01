@@ -58,7 +58,11 @@ echo 'export const stale = true;' > "$missing/src/stale.ts"
 (cd "$secondary" && "$axon_bin" index . > /dev/null 2>&1)
 (cd "$missing" && "$axon_bin" index . > /dev/null 2>&1)
 rm "$missing/.axon/index.duckdb"
-secondary_hash_before="$(sha256sum "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+if command -v sha256sum >/dev/null 2>&1; then
+  secondary_hash_before="$(sha256sum "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+else
+  secondary_hash_before="$(shasum -a 256 "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+fi
 
 port=$((20000 + RANDOM % 20000))
 # Launch the serve as a direct child (no subshell wrapper): $! must be the
@@ -127,7 +131,11 @@ else
   fail=1
 fi
 
-secondary_hash_after="$(sha256sum "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+if command -v sha256sum >/dev/null 2>&1; then
+  secondary_hash_after="$(sha256sum "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+else
+  secondary_hash_after="$(shasum -a 256 "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+fi
 check "secondary database remains byte-identical" "$secondary_hash_before" "$secondary_hash_after"
 
 # A syntactically valid registry with a wrong field type must not abort or be
