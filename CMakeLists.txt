@@ -4,6 +4,9 @@ project(axon VERSION 1.3.1 LANGUAGES C CXX ASM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
+add_executable(portfolio_eval evals/portfolio/portfolio_eval.cpp src/portfolio/domain/capability_signature.cpp src/portfolio/application/candidates/capability_candidates.cpp)
+target_include_directories(portfolio_eval PRIVATE src third_party/blake3/c)
+target_link_libraries(portfolio_eval PRIVATE blake3_lib)
 
 # ── Version + git SHA ────────────────────────────────────────────────────────
 execute_process(

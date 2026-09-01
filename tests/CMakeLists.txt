@@ -301,6 +301,9 @@ target_include_directories(test_capability_candidates PRIVATE
 target_compile_definitions(test_capability_candidates PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_capability_candidates PRIVATE blake3_lib GTest::gtest_main)
 add_test(NAME test_capability_candidates COMMAND test_capability_candidates)
+add_test(NAME test_portfolio_eval
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/evals/portfolio/run_portfolio_eval.py
+            --evaluator $<TARGET_FILE:portfolio_eval>)
 
 add_executable(test_capability_declarations
     integration/test_capability_declarations.cpp
