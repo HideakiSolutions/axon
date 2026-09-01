@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G11 multi-signal candidate generation accepted; ready to commit and proceed to declaration drift
+Status: G12 immutable Git declaration import and typed drift accepted; ready for delivery surfaces
 
 ## Current Mini-Goal
 
-G11 — Multi-signal candidates and explanations; accepted.
+G12 — Git declaration import and observed/declaration drift; accepted.
 
 ## Progress
 
@@ -49,6 +49,9 @@ G11 — Multi-signal candidates and explanations; accepted.
   after the owner-authorized third correction. Behavioral specialization, final fan-out bounds and
   material-signal explainability are all covered by adversarial tests; no candidate can promote
   solely from name or semantic evidence.
+- G12 implementation: declarations are imported read-only from immutable Git `commit:path` blobs,
+  never from a worktree. The importer rejects path escapes and symlinks, supports linked worktrees,
+  disables local replacement refs and preserves ambiguous matches as unowned typed drift.
 
 ## Current Evidence
 
@@ -113,5 +116,5 @@ the shared-infrastructure owner.
 
 ## Next Action
 
-Commit G11, then import Git declarations read-only and calculate typed drift. Keep deployment,
-release and external capability-graph writes behind their separate gates.
+Commit G12, then expose bounded, additive CLI, MCP and HTTP portfolio/capability surfaces. Keep
+deployment, release and external capability-graph writes behind their separate gates.

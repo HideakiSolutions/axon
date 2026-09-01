@@ -302,6 +302,19 @@ target_compile_definitions(test_capability_candidates PRIVATE AXON_SOURCE_DIR="$
 target_link_libraries(test_capability_candidates PRIVATE blake3_lib GTest::gtest_main)
 add_test(NAME test_capability_candidates COMMAND test_capability_candidates)
 
+add_executable(test_capability_declarations
+    integration/test_capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/declarations/capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/git/git_capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/git/git_process.cpp
+)
+target_include_directories(test_capability_declarations PRIVATE ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
+target_compile_definitions(test_capability_declarations PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_capability_declarations PRIVATE blake3_lib GTest::gtest_main)
+add_test(NAME test_capability_declarations COMMAND test_capability_declarations)
+
 # G5 real DuckDB adapter runs the exact G4 conformance source through the common PortfolioStore
 # factory seam, plus persistence/migration/lifecycle integration cases.
 add_executable(test_portfolio_duckdb
