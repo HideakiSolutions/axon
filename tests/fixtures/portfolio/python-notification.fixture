@@ -1,0 +1,13 @@
+entity_key=py:send_notification
+name=send_notification
+language=python
+path=services/notify.py
+content_digest=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+ast_digest=ffffffffffffffffffffffffffffffff
+symbol=send_notification
+public_symbols=send_notification
+routes=
+contracts=NotificationPayload
+events=notification.sent
+external_dependencies=mailer
+tests=tests/test_notify.py

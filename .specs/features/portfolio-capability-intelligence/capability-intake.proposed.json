@@ -1,0 +1,71 @@
+{
+  "$schema": "platform-core/governance/capability-intake/v2",
+  "schema_version": 2,
+  "request_id": "f261633a-415f-5c60-96fc-04ee97330aa4",
+  "submitted_at": "2026-08-30T03:28:30Z",
+  "source": {
+    "repository": "axon",
+    "path": ".specs/features/portfolio-capability-intelligence/spec.md",
+    "need": "Federated, explainable portfolio capability intelligence over independent project indexes and Git declarations."
+  },
+  "classification": "shared",
+  "decision": "promote",
+  "target": {
+    "capability_id": "architecture.portfolio-capability-intelligence",
+    "owner": "platform-core",
+    "contract_id": "platform-core/architecture/portfolio-capability-intelligence/v1"
+  },
+  "evidence": {
+    "graph_query": {
+      "graph_id": "hideakisolutions-platform-capabilities",
+      "schema_version": "1.0.0",
+      "queried_at": "2026-08-30T03:28:30Z",
+      "terms": [
+        "architecture.portfolio-capability-intelligence",
+        "platform-core/architecture/portfolio-capability-intelligence/v1",
+        "module.portfolio-capability-intelligence",
+        "owner.platform-core-maintainers"
+      ],
+      "result": "none",
+      "matched_node_ids": []
+    },
+    "semantic_discovery": {
+      "status": "unavailable",
+      "query": "federated capability graph PostgreSQL Qdrant FalkorDB derived projection",
+      "reason": "The mandatory pinned federated-corpus validator is absent from the current enterprise-hseos checkout; second-brain recall is adjacent advisory evidence and cannot substitute for this gate.",
+      "candidates": []
+    },
+    "existing_implementations": [
+      "axon multi-repository live aggregation",
+      "second-brain semantic and graph derived projections",
+      "Graphify global graph and FalkorDB export",
+      "MemPalace multi-provider storage contracts"
+    ],
+    "candidate_consumers": ["axon"],
+    "strategic_adr": "axon/.specs/decisions/ADR-0003-federated-portfolio-capability-intelligence.md (Accepted by responsible owner on 2026-08-30)",
+    "compatibility_assessment": "Additive Axon projection and query capability; preserves project DuckDB authority and Git capability ownership. No existing package is replaced. Exact federated queries returned no target node, while the migration-view validator also reported two unrelated preexisting registry drifts and exited nonzero. Only Axon is an evidenced initial consumer. The responsible owner approved the promote disposition to platform-core on 2026-08-30; external graph materialization remains a separate prohibited write in this goal."
+  },
+  "graph_update": {
+    "owning_fragment": "platform-core/.platform/capability-graph.fragment.json",
+    "proposed_node_ids": ["architecture.portfolio-capability-intelligence"],
+    "conformance_evidence": [
+      "Axon event and signature JSON schemas",
+      "provider conformance suite",
+      "three-repository E2E truth set",
+      "observed-versus-declared drift tests"
+    ]
+  },
+  "hardening": {
+    "risk_domains": ["public-contract", "identity", "authorization", "secrets", "provider", "data", "runtime"],
+    "failure_mode": "fail-closed",
+    "verification": [
+      "ADR and intake disposition accepted before production code",
+      "publisher principal, stream binding, approval grants and HMAC key lifecycle security-reviewed",
+      "all provider adapters pass real integration conformance",
+      "full rebuild equals incremental projection",
+      "no writes to project secondaries or Git capability graph"
+    ],
+    "rollback": "Disable shared profile, route to local live aggregation, stop projectors and rebuild or remove derived stores."
+  },
+  "rationale": "Only Axon is currently evidenced as a consumer. Promotion was approved by the responsible owner under the accepted strategic-ADR path because the contract governs portfolio-wide authority and shared projections. Semantic discovery remains unavailable and explicitly degraded; approval does not claim a discovered existing node or authorize external graph writes. Fail-closed applies to target, authentication and governance validation; local indexing and unavailable derived read models remain fail-soft."
+}

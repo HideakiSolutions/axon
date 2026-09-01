@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.axon.local/portfolio/v1/projection-delta.schema.json",
+  "title": "Axon Projection Delta v1",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "tombstone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_kind", "entity_key", "deleted_sequence", "deleted_epoch"],
+      "properties": {
+        "entity_kind": {"enum": ["capability-signature", "observed-capability", "file", "symbol", "contract", "route", "handler", "event", "schema", "dto", "test", "dependency"]},
+        "entity_key": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "deleted_sequence": {"type": "integer", "minimum": 1},
+        "deleted_epoch": {"type": "string", "minLength": 16, "maxLength": 128}
+      }
+    }
+  },
+  "required": ["schema_version", "repository_id", "index_stream_id", "source_sequence", "index_epoch", "capability_upserts", "observed_capability_changes", "tombstones"],
+  "properties": {
+    "schema_version": {"const": "axon/projection-delta/v1"},
+    "repository_id": {"type": "string", "format": "uuid"},
+    "index_stream_id": {"type": "string", "format": "uuid"},
+    "source_sequence": {"type": "integer", "minimum": 1},
+    "index_epoch": {"type": "string", "minLength": 16, "maxLength": 128},
+    "capability_upserts": {"type": "array", "maxItems": 2000, "items": {"$ref": "https://schemas.axon.local/portfolio/v1/capability-signature.schema.json"}},
+    "observed_capability_changes": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability_id", "operation"],
+        "properties": {
+          "capability_id": {"type": "string", "minLength": 16, "maxLength": 128},
+          "signature_id": {"type": ["string", "null"], "minLength": 16, "maxLength": 128},
+          "operation": {"enum": ["upsert", "delete"]}
+        }
+      }
+    },
+    "tombstones": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {"$ref": "https://schemas.axon.local/portfolio/v1/projection-delta.schema.json#/$defs/tombstone"}
+    }
+  }
+}

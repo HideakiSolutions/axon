@@ -116,12 +116,16 @@ add_test(NAME test_ccr COMMAND test_ccr)
 add_executable(test_call_resolution unit/test_call_resolution.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_call_resolution PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
 )
 target_link_libraries(test_call_resolution PRIVATE
+    blake3_lib
     duckdb_lib
     GTest::gtest_main
 )
@@ -153,6 +157,7 @@ add_executable(test_dialogue unit/test_dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_dialogue PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -161,6 +166,7 @@ target_include_directories(test_dialogue PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
 )
 target_link_libraries(test_dialogue PRIVATE
+    blake3_lib
     duckdb_lib
     llama
     ggml
@@ -180,6 +186,7 @@ add_executable(test_objectives unit/test_objectives.cpp
     ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
     ${CMAKE_SOURCE_DIR}/src/core/git.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_objectives PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -200,19 +207,240 @@ target_link_libraries(test_objectives PRIVATE
 )
 add_test(NAME test_objectives COMMAND test_objectives)
 
-# Registry tests — pure filesystem + JSON, no DuckDB/llama.cpp. Runs entirely
-# under an isolated AXON_REGISTRY_DIR.
+# Registry tests — isolated registry plus real DuckDB read-only secondary checks.
 add_executable(test_registry unit/test_registry.cpp
     ${CMAKE_SOURCE_DIR}/src/core/registry.cpp
 )
 target_include_directories(test_registry PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
     ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
 )
 target_link_libraries(test_registry PRIVATE
+    duckdb_lib
     GTest::gtest_main
 )
 add_test(NAME test_registry COMMAND test_registry)
+
+# Portfolio journal: real DuckDB, real parser, transactional fault injection.
+add_executable(test_portfolio_journal unit/test_portfolio_journal.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/routes.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skip_dirs.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/config.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
+)
+target_include_directories(test_portfolio_journal PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+)
+target_link_libraries(test_portfolio_journal PRIVATE
+    axon_parser_objs
+    duckdb_lib
+    blake3_lib
+    GTest::gtest_main
+)
+add_test(NAME test_portfolio_journal COMMAND test_portfolio_journal)
+
+# Pure portfolio provider contract and deterministic reference adapter. Keep this target free of
+# DuckDB, JSON, HTTP and provider-client libraries so real adapters can share its semantics.
+set(PORTFOLIO_PURE_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.hpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/portfolio_store.hpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/reference_portfolio_store.hpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/reference_portfolio_store.cpp
+)
+foreach(portfolio_source IN LISTS PORTFOLIO_PURE_SOURCES)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${portfolio_source})
+    file(READ ${portfolio_source} portfolio_source_text)
+    if(portfolio_source_text MATCHES "#[ \t]*include[ \t]*[<\"](duckdb|nlohmann|libpq|pqxx|curl|hiredis|qdrant)")
+        message(FATAL_ERROR "portfolio domain/application boundary imports infrastructure: ${portfolio_source}")
+    endif()
+endforeach()
+add_executable(test_portfolio_store_contract
+    unit/test_portfolio_store_contract.cpp
+    ${PORTFOLIO_PURE_SOURCES}
+)
+target_include_directories(test_portfolio_store_contract PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_portfolio_store_contract PRIVATE GTest::gtest_main)
+add_test(NAME test_portfolio_store_contract COMMAND test_portfolio_store_contract)
+
+# G8 capability signatures are a metadata-only deterministic extraction boundary. This target is
+# deliberately independent of DuckDB, providers, embeddings and network clients.
+add_executable(test_capability_signature
+    unit/test_capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/extract/capability_signature_extractor.cpp
+)
+target_include_directories(test_capability_signature PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+)
+target_compile_definitions(test_capability_signature PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_capability_signature PRIVATE blake3_lib GTest::gtest_main)
+add_test(NAME test_capability_signature COMMAND test_capability_signature)
+
+# G11 candidate generation is deterministic and provider-independent; semantic rankings are
+# supplied as bounded hints, so this target does not require Qdrant, pgvector or network access.
+add_executable(test_capability_candidates
+    unit/test_capability_candidates.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/candidates/capability_candidates.cpp
+)
+target_include_directories(test_capability_candidates PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+)
+target_compile_definitions(test_capability_candidates PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_capability_candidates PRIVATE blake3_lib GTest::gtest_main)
+add_test(NAME test_capability_candidates COMMAND test_capability_candidates)
+add_test(NAME test_portfolio_eval
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/evals/portfolio/run_portfolio_eval.py
+            --evaluator $<TARGET_FILE:portfolio_eval>)
+
+add_executable(test_capability_declarations
+    integration/test_capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/declarations/capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/git/git_capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/git/git_process.cpp
+)
+target_include_directories(test_capability_declarations PRIVATE ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
+target_compile_definitions(test_capability_declarations PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_capability_declarations PRIVATE blake3_lib GTest::gtest_main)
+add_test(NAME test_capability_declarations COMMAND test_capability_declarations)
+
+add_executable(test_portfolio_capability_catalog integration/test_portfolio_capability_catalog.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/registry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/routes.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skip_dirs.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/config.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/candidates/capability_candidates.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/declarations/capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/git/git_capability_declarations.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/git/git_process.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/delivery/portfolio_capability_catalog.cpp)
+target_include_directories(test_portfolio_capability_catalog PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party/duckdb ${CMAKE_SOURCE_DIR}/third_party/blake3/c ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
+target_link_libraries(test_portfolio_capability_catalog PRIVATE axon_parser_objs duckdb_lib blake3_lib GTest::gtest_main)
+add_test(NAME test_portfolio_capability_catalog COMMAND test_portfolio_capability_catalog)
+
+# G5 real DuckDB adapter runs the exact G4 conformance source through the common PortfolioStore
+# factory seam, plus persistence/migration/lifecycle integration cases.
+add_executable(test_portfolio_duckdb
+    unit/test_portfolio_store_contract.cpp
+    integration/test_portfolio_duckdb.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/duckdb/duckdb_repository_projector.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/duckdb/duckdb_portfolio_store.cpp
+)
+target_include_directories(test_portfolio_duckdb PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/include
+)
+target_compile_definitions(test_portfolio_duckdb PRIVATE
+    AXON_PORTFOLIO_STORE_FACTORY_HEADER="portfolio/infrastructure/duckdb/duckdb_portfolio_store.hpp"
+    AXON_PORTFOLIO_STORE_FACTORY=std::make_unique\<axon::portfolio::DuckdbPortfolioStore\>
+)
+target_link_libraries(test_portfolio_duckdb PRIVATE duckdb_lib blake3_lib GTest::gtest_main)
+add_test(NAME test_portfolio_duckdb COMMAND test_portfolio_duckdb)
+
+# G7 remote transport: signed Keycloak access tokens are verified with OpenSSL in a hermetic
+# fixture. No Keycloak credential, user or shared service is contacted by this test.
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+    add_executable(test_portfolio_reconcile
+        integration/test_portfolio_reconcile.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/reference_portfolio_store.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/remote_ingest.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/http/keycloak_oidc_auth.cpp
+    )
+    target_include_directories(test_portfolio_reconcile PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+    )
+    target_link_libraries(test_portfolio_reconcile PRIVATE OpenSSL::Crypto GTest::gtest_main)
+    add_test(NAME test_portfolio_reconcile COMMAND test_portfolio_reconcile)
+endif()
+
+# G6 PostgreSQL provider. The binary is built whenever libpq is available, but the real integration
+# test is registered only when explicitly enabled with an isolated disposable test DSN.
+find_package(PostgreSQL QUIET)
+if(AXON_ENABLE_POSTGRES_TESTS AND NOT PostgreSQL_FOUND)
+    message(FATAL_ERROR "AXON_ENABLE_POSTGRES_TESTS requires PostgreSQL/libpq development files")
+endif()
+if(AXON_ENABLE_POSTGRES_TESTS AND NOT DEFINED ENV{AXON_POSTGRES_TEST_DSN})
+    message(FATAL_ERROR "AXON_ENABLE_POSTGRES_TESTS requires AXON_POSTGRES_TEST_DSN")
+endif()
+if(PostgreSQL_FOUND)
+    add_executable(test_portfolio_semantic
+        integration/test_portfolio_semantic.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/search/semantic_capability_store.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/search/fail_soft_semantic_search.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/postgresql/pgvector_semantic_store.cpp
+    )
+    target_include_directories(test_portfolio_semantic PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party/blake3/c)
+    target_link_libraries(test_portfolio_semantic PRIVATE PostgreSQL::PostgreSQL blake3_lib GTest::gtest_main)
+    add_test(NAME test_portfolio_semantic COMMAND test_portfolio_semantic)
+    add_executable(test_portfolio_postgresql
+        unit/test_portfolio_store_contract.cpp
+        integration/test_portfolio_postgresql.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/provider_contract.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/postgresql/postgresql_portfolio_store.cpp
+    )
+    target_include_directories(test_portfolio_postgresql PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+    )
+    target_compile_definitions(test_portfolio_postgresql PRIVATE
+        AXON_PORTFOLIO_STORE_FACTORY_HEADER="portfolio/infrastructure/postgresql/postgresql_portfolio_store.hpp"
+        AXON_PORTFOLIO_STORE_FACTORY=axon::portfolio::make_postgresql_conformance_store
+    )
+    target_link_libraries(test_portfolio_postgresql PRIVATE
+        PostgreSQL::PostgreSQL blake3_lib GTest::gtest_main)
+    if(AXON_ENABLE_POSTGRES_TESTS AND DEFINED ENV{AXON_POSTGRES_TEST_DSN})
+        add_test(NAME test_portfolio_postgresql COMMAND test_portfolio_postgresql)
+        set_tests_properties(test_portfolio_postgresql PROPERTIES
+            ENVIRONMENT "AXON_POSTGRES_TEST_DSN=$ENV{AXON_POSTGRES_TEST_DSN}")
+    endif()
+endif()
+find_package(CURL QUIET)
+if(CURL_FOUND AND TARGET test_portfolio_semantic)
+    target_sources(test_portfolio_semantic PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/qdrant/qdrant_semantic_store.cpp)
+    target_link_libraries(test_portfolio_semantic PRIVATE CURL::libcurl)
+    target_compile_definitions(test_portfolio_semantic PRIVATE AXON_HAVE_QDRANT=1)
+    target_include_directories(test_portfolio_semantic PRIVATE
+        ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
+endif()
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
+find_library(HIREDIS_LIBRARY NAMES hiredis)
+if(HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
+    add_executable(test_portfolio_graph
+        integration/test_portfolio_graph.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/graph/capability_graph_projection.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/falkordb/falkordb_capability_graph.cpp)
+    target_include_directories(test_portfolio_graph PRIVATE ${CMAKE_SOURCE_DIR}/src ${HIREDIS_INCLUDE_DIR})
+    target_link_libraries(test_portfolio_graph PRIVATE ${HIREDIS_LIBRARY} blake3_lib GTest::gtest_main)
+    add_test(NAME test_portfolio_graph COMMAND test_portfolio_graph)
+endif()
 
 # Capsule budget tests — drive assemble_capsule end-to-end; require the real
 # GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
@@ -227,6 +455,7 @@ add_executable(test_capsule_budget unit/test_capsule_budget.cpp
     ${CMAKE_SOURCE_DIR}/src/core/graph.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
     ${CMAKE_SOURCE_DIR}/src/core/git.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_capsule_budget PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -253,6 +482,7 @@ add_executable(test_semantic unit/test_semantic.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_semantic PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -261,6 +491,7 @@ target_include_directories(test_semantic PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include
 )
 target_link_libraries(test_semantic PRIVATE
+    blake3_lib
     duckdb_lib
     llama
     ggml
@@ -305,6 +536,10 @@ add_test(
 add_test(
     NAME test_http_status_codes
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_http_status_codes.sh $<TARGET_FILE:axon>
+)
+add_test(
+    NAME test_portfolio_web
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_portfolio_web.py $<TARGET_FILE:axon>
 )
 
 add_test(
@@ -379,6 +614,7 @@ set_tests_properties(
     test_mcp_memory_search
     test_cpp_header_impl
     test_http_status_codes
+    test_portfolio_web
     test_docs_freshness
     test_shell_guard_hook
     test_auto_index_project_key

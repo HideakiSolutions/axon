@@ -4,6 +4,9 @@ project(axon VERSION 1.3.1 LANGUAGES C CXX ASM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
+add_executable(portfolio_eval evals/portfolio/portfolio_eval.cpp src/portfolio/domain/capability_signature.cpp src/portfolio/application/candidates/capability_candidates.cpp)
+target_include_directories(portfolio_eval PRIVATE src third_party/blake3/c third_party/nlohmann-json/single_include)
+target_link_libraries(portfolio_eval PRIVATE blake3_lib)
 
 # ── Version + git SHA ────────────────────────────────────────────────────────
 execute_process(
@@ -249,6 +252,28 @@ endif()
 # ── axon executable ──────────────────────────────────────────────────────────
 file(GLOB_RECURSE AXON_SOURCES src/*.cpp)
 
+# Optional shared-server adapters must never make the local-first binary unbuildable. They are
+# compiled into the executable whenever their system dependency is present; provider conformance
+# targets select the same sources explicitly. A missing dependency leaves only that additive role
+# unavailable and does not change the authoritative local DuckDB behavior.
+find_package(PostgreSQL QUIET)
+find_package(OpenSSL QUIET)
+find_package(CURL QUIET)
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
+find_library(HIREDIS_LIBRARY NAMES hiredis)
+if(NOT PostgreSQL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/postgresql/.*\\.cpp$")
+endif()
+if(NOT OpenSSL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/http/.*\\.cpp$")
+endif()
+if(NOT CURL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/qdrant/.*\\.cpp$")
+endif()
+if(NOT HIREDIS_INCLUDE_DIR OR NOT HIREDIS_LIBRARY)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/falkordb/.*\\.cpp$")
+endif()
+
 add_executable(axon ${AXON_SOURCES})
 
 target_include_directories(axon PRIVATE
@@ -259,6 +284,10 @@ target_include_directories(axon PRIVATE
     third_party/llama.cpp/include
     third_party/nlohmann-json/single_include
 )
+if(HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
+    target_include_directories(axon PRIVATE ${HIREDIS_INCLUDE_DIR})
+    target_link_libraries(axon PRIVATE ${HIREDIS_LIBRARY})
+endif()
 
 target_link_libraries(axon PRIVATE
     duckdb_lib
@@ -285,6 +314,15 @@ target_link_libraries(axon PRIVATE
     ggml
     blake3_lib
 )
+if(PostgreSQL_FOUND)
+    target_link_libraries(axon PRIVATE PostgreSQL::PostgreSQL)
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(axon PRIVATE OpenSSL::Crypto)
+endif()
+if(CURL_FOUND)
+    target_link_libraries(axon PRIVATE CURL::libcurl)
+endif()
 
 if(APPLE)
     set_target_properties(axon PROPERTIES

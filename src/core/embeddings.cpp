@@ -1,4 +1,5 @@
 #include "embeddings.hpp"
+#include "portfolio/domain/index_journal.hpp"
 #include "db.hpp"
 #include <llama.h>
 #include <stdexcept>
@@ -118,18 +119,6 @@ std::vector<float> deserialize_embedding(const uint8_t* data, size_t byte_len) {
 }
 
 int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
-    auto sq2 = [](const std::string& s) {
-        std::string r;
-        r.reserve(s.size());
-        for (char c : s) {
-            if (c == '\'')
-                r += "''";
-            else
-                r += c;
-        }
-        return r;
-    };
-
     auto syms = db.conn().Query("SELECT id, name, kind, signature "
                                 "FROM symbols WHERE embedding IS NULL LIMIT " +
                                 std::to_string(limit));
@@ -148,6 +137,9 @@ int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
 
     auto embeddings = model.embed_batch(texts);
     int dims = model.dims();
+    portfolio::Transaction transaction(db.conn());
+    transaction.mark_index_mutation();
+    std::vector<portfolio::AffectedEntity> affected;
 
     for (size_t i = 0; i < ids.size(); i++) {
         std::ostringstream sql;
@@ -162,7 +154,13 @@ int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
         if (r->HasError())
             throw std::runtime_error("UPDATE symbols failed (id=" + std::to_string(ids[i]) +
                                      "): " + r->GetError());
+        affected.push_back({"symbol", std::to_string(ids[i]), "upsert", std::nullopt});
     }
+    portfolio::trigger_journal_failpoint_for_testing("after_mutation");
+    const std::string manifest = portfolio::compute_manifest_hash(db.conn());
+    portfolio::append_index_event(transaction, db.conn(), "IndexSymbolsUpdated", affected,
+                                  manifest);
+    transaction.commit();
     return (int)ids.size();
 }
 

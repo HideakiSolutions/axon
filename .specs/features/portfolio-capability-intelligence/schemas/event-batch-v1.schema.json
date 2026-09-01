@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.axon.local/portfolio/v1/event-batch.schema.json",
+  "title": "Axon Remote Event Batch v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "target", "publisher_binding", "repository_id", "index_stream_id", "base_cursor", "final_sequence", "idempotency_key", "entries"],
+  "properties": {
+    "schema_version": {"const": "axon/event-batch/v1"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instance_id", "namespace", "protocol_version"],
+      "properties": {
+        "instance_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "namespace": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"},
+        "protocol_version": {"const": "axon/portfolio-sync/v1"}
+      }
+    },
+    "repository_id": {"type": "string", "format": "uuid"},
+    "index_stream_id": {"type": "string", "format": "uuid"},
+    "publisher_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id", "binding_id", "index_stream_id", "identity_epoch", "root_fingerprint"],
+      "properties": {
+        "principal_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "binding_id": {"type": "string", "minLength": 16, "maxLength": 128},
+        "index_stream_id": {"type": "string", "format": "uuid"},
+        "identity_epoch": {"type": "integer", "minimum": 1},
+        "root_fingerprint": {"type": "string", "minLength": 16, "maxLength": 128},
+        "repository_contract_digest": {"type": ["string", "null"], "minLength": 16, "maxLength": 128}
+      }
+    },
+    "base_cursor": {"type": "integer", "minimum": 0},
+    "final_sequence": {"type": "integer", "minimum": 1},
+    "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 128},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event", "delta"],
+        "properties": {
+          "event": {"$ref": "https://schemas.axon.local/portfolio/v1/index-event.schema.json"},
+          "delta": {"$ref": "https://schemas.axon.local/portfolio/v1/projection-delta.schema.json"}
+        }
+      }
+    }
+  }
+}

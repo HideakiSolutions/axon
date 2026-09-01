@@ -48,7 +48,7 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 31 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 39 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
@@ -601,7 +601,7 @@ src/
 ├── parser/
 │   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (18 langs)
 └── mcp/
-    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 33 MCP tool handlers
+    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 41 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
@@ -690,7 +690,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| 33 MCP tools | ✅ Done | Code context + dialogue/handoff layer + CCR artifact retrieval tools |
+| 41 MCP tools | ✅ Done | Code context, dialogue/handoff, CCR artifact retrieval, and portfolio capability tools |
 | HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
 | Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |

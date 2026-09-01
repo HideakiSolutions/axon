@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info: {title: Axon Portfolio Capability Intelligence API, version: v1, description: Read-only metadata API protected by Keycloak bearer authentication.}
+security: [{bearerAuth: []}]
+components:
+  securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
+  schemas:
+    Error: {type: object, required: [error], properties: {error: {type: string}}}
+    Capability: {type: object, required: [id, repository_id, name], properties: {id: {type: string}, repository_id: {type: string}, name: {type: string}, path: {type: string}, epoch: {type: string}}}
+    Candidate: {type: object, required: [id, left, right, score, classification], properties: {id: {type: string}, left: {type: string}, right: {type: string}, score: {type: number}, classification: {type: string}}}
+  parameters:
+    CandidateId: {name: candidate_id, in: path, required: true, schema: {type: string}}
+    CapabilityId: {name: capability_id, in: path, required: true, schema: {type: string}}
+paths:
+  /api/v1/portfolio/topology: {get: {summary: Bounded observed capability subgraph, parameters: [{name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}], responses: {'200': {description: Nodes and convergence edges; node evidence is capped and carries a truncated flag}, '400': {description: Invalid bound}, '401': {description: Authentication required}}}}
+  /api/v1/portfolio/status: {get: {summary: Report derived catalog status, responses: {'200': {description: Catalog status}, '401': {description: Authentication required}, '503': {description: Sources stale}}}}
+  /api/v1/portfolio/sync: {post: {summary: Synchronize registered local indexes read-only, requestBody: {required: false, content: {application/json: {schema: {type: object, properties: {group: {type: string}, rebuild: {type: boolean}}, additionalProperties: false}}}}, responses: {'200': {description: Synchronized}, '400': {description: Invalid body}, '401': {description: Authentication required}, '503': {description: Sources stale}}}}
+  /api/v1/capabilities: {get: {summary: List observed capabilities, parameters: [{name: repository_id, in: query, schema: {type: string}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10000}}], responses: {'200': {description: Capability metadata}, '400': {description: Invalid limit}, '401': {description: Authentication required}}}}
+  /api/v1/capabilities/search: {get: {summary: Search observed capabilities, parameters: [{name: q, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 256}}], responses: {'200': {description: Search results}, '400': {description: Missing query}, '401': {description: Authentication required}}}}
+  /api/v1/capabilities/duplicates: {get: {summary: Explainable duplicate candidates, parameters: [{name: threshold, in: query, schema: {type: number, minimum: 0, maximum: 1}}], responses: {'200': {description: Candidates}, '400': {description: Invalid threshold}, '401': {description: Authentication required}}}}
+  /api/v1/capabilities/compare/{candidate_id}: {get: {summary: Compare one candidate, parameters: [{$ref: '#/components/parameters/CandidateId'}], responses: {'200': {description: Candidate}, '401': {description: Authentication required}, '404': {description: Candidate unavailable}}}}
+  /api/v1/capabilities/consumers/{capability_id}: {get: {summary: Get bounded observed consumers, parameters: [{$ref: '#/components/parameters/CapabilityId'}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}], responses: {'200': {description: Consumers and unresolved import specifiers, each bounded with a truncated flag}, '400': {description: Invalid bound}, '401': {description: Authentication required}, '404': {description: Capability unavailable}}}}
+  /api/v1/capabilities/drift: {get: {summary: Read-only declaration drift from a registered root, parameters: [{name: graph_root, in: query, required: true, schema: {type: string}}, {name: fragment, in: query, required: true, schema: {type: string}}], responses: {'200': {description: Drift}, '400': {description: Invalid registered root or fragment}, '401': {description: Authentication required}}}}

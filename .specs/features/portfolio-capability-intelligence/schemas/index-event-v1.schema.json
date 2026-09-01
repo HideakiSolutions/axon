@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.axon.local/portfolio/v1/index-event.schema.json",
+  "title": "Axon Index Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository_id", "index_stream_id", "sequence", "event_id", "event_type", "index_epoch", "occurred_at", "affected"],
+  "properties": {
+    "schema_version": {"const": "axon/index-event/v1"},
+    "repository_id": {"type": "string", "format": "uuid"},
+    "index_stream_id": {"type": "string", "format": "uuid"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "event_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "event_type": {"enum": ["IndexSnapshotCompleted", "IndexFilesUpdated", "IndexFilesDeleted", "IndexSymbolsUpdated", "IndexContractsUpdated", "IndexRoutesUpdated", "RepositoryReidentified", "RepositoryRemoved"]},
+    "index_epoch": {"type": "string", "minLength": 16, "maxLength": 128},
+    "previous_epoch": {"type": ["string", "null"], "minLength": 16, "maxLength": 128},
+    "source_ref": {"type": ["string", "null"], "maxLength": 512},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "manifest_hash": {"type": ["string", "null"], "minLength": 16, "maxLength": 128},
+    "correlation_id": {"type": ["string", "null"], "maxLength": 128},
+    "causation_id": {"type": ["string", "null"], "maxLength": 128},
+    "identity_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["old_repository_id", "new_repository_id", "handoff_sequence", "old_binding_id", "new_binding_id", "approval_reference", "reason"],
+      "properties": {
+        "old_repository_id": {"type": "string", "format": "uuid"},
+        "new_repository_id": {"type": "string", "format": "uuid"},
+        "handoff_sequence": {"type": "integer", "minimum": 1},
+        "old_binding_id": {"type": "string", "minLength": 16, "maxLength": 128},
+        "new_binding_id": {"type": "string", "minLength": 16, "maxLength": 128},
+        "approval_reference": {"type": "string", "minLength": 1, "maxLength": 512},
+        "reason": {"enum": ["contract-adopted", "collision-repaired", "repository-moved", "owner-approved"]}
+      }
+    },
+    "affected": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "key", "operation"],
+        "properties": {
+          "kind": {"enum": ["file", "symbol", "contract", "route", "handler", "event", "schema", "dto", "test", "dependency", "tombstone", "repository"]},
+          "key": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "operation": {"enum": ["upsert", "delete", "snapshot"]},
+          "digest": {"type": ["string", "null"], "minLength": 16, "maxLength": 128}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"event_type": {"const": "IndexSnapshotCompleted"}}, "required": ["event_type"]},
+      "then": {"required": ["manifest_hash"], "properties": {"manifest_hash": {"type": "string", "minLength": 16, "maxLength": 128}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "RepositoryReidentified"}}, "required": ["event_type"]},
+      "then": {"required": ["identity_change"]}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "IndexFilesDeleted"}}, "required": ["event_type"]},
+      "then": {"properties": {"affected": {"minItems": 1, "contains": {"properties": {"operation": {"const": "delete"}}, "required": ["operation"]}}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "RepositoryRemoved"}}, "required": ["event_type"]},
+      "then": {"properties": {"affected": {"minItems": 1, "contains": {"properties": {"kind": {"const": "repository"}, "operation": {"const": "delete"}}, "required": ["kind", "operation"]}}}}
+    }
+  ]
+}

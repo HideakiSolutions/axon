@@ -14,6 +14,7 @@
 #include "mcp/http_server.hpp"
 #include "mcp/peer.hpp"
 #include "lsp/server.hpp"
+#include "portfolio/delivery/portfolio_capability_catalog.hpp"
 #include "version.hpp"
 #include <iostream>
 #include <string>
@@ -77,6 +78,8 @@ Usage:
   axon metrics [--json]                 Show per-layer telemetry (token savings, latency)
   axon doctor locks [--json]            Diagnose registered DuckDB lock owners
   axon registry prune                   Drop registry entries whose repo root is gone
+  axon portfolio <sync|reconcile|rebuild|status> [--group=<name>] [--json]
+  axon capability <list|search|duplicates|compare|drift> ...
   axon help                             Show this help
   axon --version | -V                   Print version and git SHA
 
@@ -797,6 +800,139 @@ int main(int argc, char* argv[]) {
         std::cout << "Edges:    " << em.GetValue<int64_t>(0, 0) << "\n";
         std::cout << "Embedded: " << embm.GetValue<int64_t>(0, 0) << " symbols\n";
         return 0;
+    }
+
+    // ── axon portfolio / capability ───────────────────────────────────────
+    // These commands are deliberately backed by the derived local catalog, rather than by
+    // ad-hoc scans, so all delivery surfaces observe the same bounded projection.
+    if (cmd == "portfolio" || cmd == "capability") {
+        if (argc < 3) {
+            std::cerr << "portfolio/capability subcommand required\n";
+            return 1;
+        }
+        const std::string sub = argv[2];
+        std::optional<std::string> group, repo;
+        double threshold = 0.0;
+        std::vector<std::string> positional;
+        for (int i = 3; i < argc; ++i) {
+            const std::string argument = argv[i];
+            if (argument == "--json")
+                continue; // portfolio output is intentionally JSON-stable
+            else if (argument.rfind("--group=", 0) == 0)
+                group = argument.substr(8);
+            else if (argument.rfind("--repo=", 0) == 0)
+                repo = argument.substr(7);
+            else if (argument.rfind("--threshold=", 0) == 0) {
+                try {
+                    threshold = std::stod(argument.substr(12));
+                } catch (...) {
+                    std::cerr << "invalid threshold\n";
+                    return 1;
+                }
+            } else
+                positional.push_back(argument);
+        }
+        try {
+            axon::portfolio::PortfolioCapabilityCatalog catalog;
+            auto signature_json = [](const axon::portfolio::CapabilitySignature& signature) {
+                return nlohmann::json{{"id", signature.signature_id},
+                                      {"repository_id", signature.stream.repository_id},
+                                      {"index_stream_id", signature.stream.index_stream_id},
+                                      {"name", signature.normalized_name},
+                                      {"path", signature.path.value_or("")},
+                                      {"epoch", signature.index_epoch},
+                                      {"summary", signature.deterministic_summary},
+                                      {"routes", signature.routes},
+                                      {"contracts", signature.contracts}};
+            };
+            if (cmd == "portfolio") {
+                if (sub == "sync" || sub == "reconcile" || sub == "rebuild") {
+                    const auto report = catalog.sync(group, sub == "rebuild");
+                    nlohmann::json items = nlohmann::json::array();
+                    for (const auto& item : report.repositories)
+                        items.push_back({{"repository_id", item.repository_id},
+                                         {"index_stream_id", item.index_stream_id},
+                                         {"status", item.status},
+                                         {"detail", item.detail},
+                                         {"signatures", item.signatures}});
+                    std::cout << nlohmann::json{{"degraded", report.degraded},
+                                                {"repositories", items}}
+                                     .dump(2)
+                              << "\n";
+                    return report.degraded ? 2 : 0;
+                }
+                if (sub == "status") {
+                    const auto status = catalog.status();
+                    nlohmann::json repos = nlohmann::json::array();
+                    for (const auto& item : status.repositories)
+                        repos.push_back({{"repository_id", item.repository_id},
+                                         {"index_stream_id", item.index_stream_id},
+                                         {"status", item.status},
+                                         {"detail", item.detail}});
+                    std::cout << nlohmann::json{{"catalog_path", catalog.path().string()},
+                                                {"capabilities", catalog.list({}, 10000).size()},
+                                                {"degraded", status.degraded},
+                                                {"repositories", repos}}
+                                     .dump(2)
+                              << "\n";
+                    return status.degraded ? 2 : 0;
+                }
+            } else if (sub == "list") {
+                nlohmann::json output = nlohmann::json::array();
+                for (const auto& signature : catalog.list(repo, 200))
+                    output.push_back(signature_json(signature));
+                std::cout << output.dump(2) << "\n";
+                return 0;
+            } else if (sub == "search" && positional.size() == 1) {
+                nlohmann::json output = nlohmann::json::array();
+                for (const auto& signature : catalog.search(positional[0]))
+                    output.push_back(signature_json(signature));
+                std::cout << output.dump(2) << "\n";
+                return 0;
+            } else if (sub == "duplicates") {
+                nlohmann::json output = nlohmann::json::array();
+                for (const auto& candidate : catalog.duplicates(threshold))
+                    output.push_back(
+                        {{"id", candidate.candidate_id},
+                         {"left", candidate.left_capability_id},
+                         {"right", candidate.right_capability_id},
+                         {"score", candidate.final_score},
+                         {"classification", axon::portfolio::to_string(candidate.classification)},
+                         {"recommendation", axon::portfolio::to_string(candidate.recommendation)},
+                         {"differences", candidate.differences},
+                         {"invalidators", candidate.invalidators}});
+                std::cout << output.dump(2) << "\n";
+                return 0;
+            } else if (sub == "compare" && positional.size() == 1) {
+                for (const auto& candidate : catalog.duplicates(0.0, 10000))
+                    if (candidate.candidate_id == positional[0]) {
+                        std::cout << nlohmann::json{{"id", candidate.candidate_id},
+                                                    {"score", candidate.final_score},
+                                                    {"classification",
+                                                     axon::portfolio::to_string(
+                                                         candidate.classification)},
+                                                    {"signals", candidate.signals.size()},
+                                                    {"differences", candidate.differences},
+                                                    {"invalidators", candidate.invalidators}}
+                                         .dump(2)
+                                  << "\n";
+                        return 0;
+                    }
+                std::cerr << "candidate not found\n";
+                return 1;
+            } else if (sub == "drift" && positional.size() == 2) {
+                const auto drift = catalog.drift(positional[0], positional[1]);
+                nlohmann::json output = {{"matches", drift.matches.size()},
+                                         {"drift", drift.drift.size()}};
+                std::cout << output.dump(2) << "\n";
+                return 0;
+            }
+            std::cerr << "invalid portfolio/capability command arguments\n";
+            return 1;
+        } catch (const std::exception& error) {
+            std::cerr << "portfolio: " << error.what() << "\n";
+            return 1;
+        }
     }
 
     // ── axon metrics [--json] ──────────────────────────────────────────────

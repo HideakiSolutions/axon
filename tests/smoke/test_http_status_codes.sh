@@ -33,15 +33,43 @@ export function login(user: string): boolean {
   return user.length > 0;
 }
 TS
+cat > "$sandbox/src/module.ts" <<'TS'
+export const sharedValue = 42;
+TS
 
 (cd "$sandbox" && "$axon_bin" index . > /dev/null 2>&1)
+
+# Two registered secondaries: one healthy graph and one deliberately stale
+# registration. Both HTTP aggregation and MCP group_impact must expose typed
+# failures, and neither is allowed to modify the healthy secondary database.
+secondary="$tmpdir/secondary"
+missing="$tmpdir/missing"
+mkdir -p "$secondary/.git" "$secondary/src" "$missing/.git" "$missing/src"
+echo "ref: refs/heads/main" > "$secondary/.git/HEAD"
+echo "ref: refs/heads/main" > "$missing/.git/HEAD"
+cat > "$secondary/src/module.ts" <<'TS'
+export const sharedValue = 42;
+TS
+cat > "$secondary/src/consumer.ts" <<'TS'
+import { sharedValue } from './module';
+export const consumed = sharedValue;
+TS
+echo 'export const stale = true;' > "$missing/src/stale.ts"
+(cd "$secondary" && "$axon_bin" index . > /dev/null 2>&1)
+(cd "$missing" && "$axon_bin" index . > /dev/null 2>&1)
+rm "$missing/.axon/index.duckdb"
+if command -v sha256sum >/dev/null 2>&1; then
+  secondary_hash_before="$(sha256sum "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+else
+  secondary_hash_before="$(shasum -a 256 "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+fi
 
 port=$((20000 + RANDOM % 20000))
 # Launch the serve as a direct child (no subshell wrapper): $! must be the
 # real axon pid so cleanup's kill reaches the process that holds the DuckDB
 # lock — under MSYS, killing a wrapper subshell leaves the native exe alive.
 cd "$sandbox"
-"$axon_bin" serve --http --port="$port" > "$tmpdir/serve.log" 2>&1 &
+"$axon_bin" serve --http --port="$port" --all > "$tmpdir/serve.log" 2>&1 &
 serve_pid=$!
 # Step back out: cleanup removes $tmpdir, and Windows cannot delete the
 # current directory of a live process.
@@ -76,5 +104,61 @@ else
   echo "FAIL: /api/capsule with q -> got $code, want 200 or 503"
   fail=1
 fi
+
+graph_response="$(curl -sf "http://127.0.0.1:${port}/api/graph")"
+if grep -q 'secondary_errors' <<<"$graph_response" &&
+   grep -q 'database_unavailable' <<<"$graph_response" &&
+   grep -q 'secondary/src/consumer.ts\|secondary/consumer.ts' <<<"$graph_response"; then
+  echo "PASS: /api/graph aggregates read-only and reports typed secondary failures"
+else
+  echo "FAIL: /api/graph missing aggregated graph or typed secondary failure"
+  fail=1
+fi
+
+kill "$serve_pid" 2>/dev/null || true
+wait "$serve_pid" 2>/dev/null || true
+serve_pid=""
+
+mcp_request='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"group_impact","arguments":{"file":"src/module.ts"}}}'
+mcp_response="$(cd "$sandbox" && printf '%s\n' "$mcp_request" | "$axon_bin" serve 2>"$tmpdir/mcp.log")"
+if grep -q 'consumer.ts' <<<"$mcp_response" &&
+   grep -q 'database_unavailable' <<<"$mcp_response" &&
+   grep -q 'failures' <<<"$mcp_response"; then
+  echo "PASS: group_impact uses current edge columns and reports typed failures"
+else
+  echo "FAIL: group_impact result was incomplete"
+  cat "$tmpdir/mcp.log"
+  fail=1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  secondary_hash_after="$(sha256sum "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+else
+  secondary_hash_after="$(shasum -a 256 "$secondary/.axon/index.duckdb" | awk '{print $1}')"
+fi
+check "secondary database remains byte-identical" "$secondary_hash_before" "$secondary_hash_after"
+
+# A syntactically valid registry with a wrong field type must not abort or be
+# overwritten during serve startup. The tool reports the load error fail-closed.
+group_list_request='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"group_list","arguments":{}}}'
+for malformed_registry in \
+  '{"schema_version":2,"repos":[],"groups":{},"storage_profiles":{}}' \
+  '{"schema_version":"axon-registry/v2","repos":{},"groups":{},"storage_profiles":{}}'; do
+  printf '%s' "$malformed_registry" > "$AXON_REGISTRY_DIR/registry.json"
+  set +e
+  malformed_response="$(cd "$sandbox" && printf '%s\n' "$group_list_request" | "$axon_bin" serve 2>"$tmpdir/malformed.log")"
+  malformed_status=$?
+  set -e
+  registry_after="$(<"$AXON_REGISTRY_DIR/registry.json")"
+  if [[ "$malformed_status" == "0" ]] &&
+     grep -q 'invalid_registry_type' <<<"$malformed_response" &&
+     [[ "$registry_after" == "$malformed_registry" ]]; then
+    echo "PASS: malformed registry type fails closed without abort or overwrite"
+  else
+    echo "FAIL: malformed registry handling status=$malformed_status response=$malformed_response"
+    cat "$tmpdir/malformed.log"
+    fail=1
+  fi
+done
 
 exit $fail

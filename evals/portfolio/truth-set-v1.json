@@ -1,0 +1,13 @@
+{
+  "schema_version": "axon/portfolio-candidate-truth-set/v1",
+  "cases": [
+    {"id": "exact-duplicate", "expected": "exact_duplicate", "signals": ["name", "contracts", "endpoints", "events", "structure"]},
+    {"id": "convergent", "expected": "convergent_capability", "signals": ["name", "contracts", "endpoints", "events"]},
+    {"id": "shared-primitive", "expected": "shared_primitive_candidate", "signals": ["contracts", "endpoints", "events"]},
+    {"id": "local-specialization", "expected": "local_specialization", "signals": ["contracts", "structure"], "difference": "routes"},
+    {"id": "same-name-different-domain", "expected": "semantic_coincidence", "invalidator": "bounded_context mismatch"},
+    {"id": "semantic-only", "expected": "insufficient_evidence", "signals": ["semantic"]}
+  ],
+  "baselines": ["name-only", "semantic-only", "multi-signal"],
+  "human_review": "Classifications are recommendations only; no ownership or code change follows from this corpus."
+}

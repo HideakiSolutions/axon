@@ -19,6 +19,13 @@ require_ok(std::unique_ptr<duckdb::MaterializedQueryResult>& res, const std::str
     return *res;
 }
 
+inline void require_success(std::unique_ptr<duckdb::MaterializedQueryResult> res,
+                            const std::string& ctx = "") {
+    if (res->HasError())
+        throw std::runtime_error("DuckDB error" + (ctx.empty() ? "" : " [" + ctx + "]") + ": " +
+                                 res->GetError());
+}
+
 // Helper: run a query and return materialized result
 inline std::unique_ptr<duckdb::MaterializedQueryResult> dq(duckdb::Connection& c,
                                                            const std::string& sql) {
@@ -46,6 +53,7 @@ public:
     void run_migrations();
 
 private:
+    std::filesystem::path db_path_;
     duckdb::DuckDB db_;
     std::unique_ptr<duckdb::Connection> conn_;
     std::unique_ptr<duckdb::MaterializedQueryResult> last_result_; // keeps result alive

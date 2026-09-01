@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.axon.local/portfolio/v1/capability-signature.schema.json",
+  "title": "Axon Capability Signature v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "signature_id", "repository_id", "index_stream_id", "source_sequence", "index_epoch", "manifest_hash", "extracted_at", "normalized_name", "evidence", "provenance"],
+  "properties": {
+    "schema_version": {"const": "axon/capability-signature/v1"},
+    "signature_id": {"type": "string", "minLength": 16, "maxLength": 128},
+    "repository_id": {"type": "string", "format": "uuid"},
+    "index_stream_id": {"type": "string", "format": "uuid"},
+    "source_sequence": {"type": "integer", "minimum": 1},
+    "index_epoch": {"type": "string", "minLength": 16, "maxLength": 128},
+    "manifest_hash": {"type": "string", "minLength": 16, "maxLength": 128},
+    "extracted_at": {"type": "string", "format": "date-time"},
+    "bounded_context": {"type": ["string", "null"], "maxLength": 256},
+    "module": {"type": ["string", "null"], "maxLength": 1024},
+    "namespace": {"type": ["string", "null"], "maxLength": 1024},
+    "path": {"type": ["string", "null"], "maxLength": 4096},
+    "normalized_name": {"type": "string", "minLength": 1, "maxLength": 512},
+    "deterministic_summary": {"type": ["string", "null"], "maxLength": 4096},
+    "public_symbols": {"type": "array", "maxItems": 2000, "items": {"type": "string", "maxLength": 1024}},
+    "routes": {"type": "array", "maxItems": 1000, "items": {"type": "string", "maxLength": 2048}},
+    "handlers": {"type": "array", "maxItems": 2000, "items": {"type": "string", "maxLength": 2048}},
+    "contracts": {"type": "array", "maxItems": 2000, "items": {"type": "string", "maxLength": 2048}},
+    "events": {"type": "array", "maxItems": 2000, "items": {"type": "string", "maxLength": 1024}},
+    "schemas": {"type": "array", "maxItems": 2000, "items": {"type": "string", "maxLength": 2048}},
+    "dtos": {"type": "array", "maxItems": 2000, "items": {"type": "string", "maxLength": 2048}},
+    "internal_dependencies": {"type": "array", "maxItems": 5000, "items": {"type": "string", "maxLength": 1024}},
+    "external_dependencies": {"type": "array", "maxItems": 5000, "items": {"type": "string", "maxLength": 1024}},
+    "call_graph_neighborhood": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["direction", "relation", "entity_key", "distance"],
+        "properties": {
+          "direction": {"enum": ["incoming", "outgoing"]},
+          "relation": {"enum": ["calls", "implements", "imports", "publishes", "consumes", "depends-on"]},
+          "entity_key": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "distance": {"type": "integer", "minimum": 1, "maximum": 8},
+          "digest": {"type": ["string", "null"], "minLength": 16, "maxLength": 128}
+        }
+      }
+    },
+    "tests": {"type": "array", "maxItems": 2000, "items": {"type": "string", "maxLength": 4096}},
+    "technologies": {"type": "array", "maxItems": 256, "items": {"type": "string", "maxLength": 256}},
+    "ast_fingerprints": {"type": "array", "maxItems": 2000, "items": {"type": "string", "minLength": 16, "maxLength": 128}},
+    "embedding": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["model_id", "dimension", "metric", "normalization", "vector_ref"],
+      "properties": {
+        "model_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "dimension": {"type": "integer", "minimum": 1, "maximum": 65536},
+        "metric": {"enum": ["cosine", "dot", "euclidean"]},
+        "normalization": {"enum": ["none", "l2"]},
+        "vector_ref": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "entity_key", "digest", "source_sequence", "extractor_version"],
+        "properties": {
+          "kind": {"enum": ["file", "symbol", "route", "handler", "contract", "event", "schema", "dto", "test", "dependency", "call-edge"]},
+          "entity_key": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "path": {"type": ["string", "null"], "maxLength": 4096},
+          "symbol": {"type": ["string", "null"], "maxLength": 2048},
+          "digest": {"type": "string", "minLength": 16, "maxLength": 128},
+          "source_sequence": {"type": "integer", "minimum": 1},
+          "extractor_version": {"type": "string", "minLength": 1, "maxLength": 128},
+          "line_start": {"type": ["integer", "null"], "minimum": 1},
+          "line_end": {"type": ["integer", "null"], "minimum": 1}
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["extractor_id", "extractor_version", "source_schema_version", "configuration_digest"],
+      "properties": {
+        "extractor_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "extractor_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source_schema_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "configuration_digest": {"type": "string", "minLength": 16, "maxLength": 128}
+      }
+    }
+  }
+}
