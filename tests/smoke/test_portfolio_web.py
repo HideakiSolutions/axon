@@ -169,7 +169,7 @@ def main(binary):
         key = temporary / "key.pem"
         subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         issuer, audience = "https://keycloak.example.test/realms/axon", "axon-portfolio-api"
-        environment = base_environment | {"AXON_REGISTRY_DIR": str(fixture / "registry"), "AXON_KEYCLOAK_ISSUER": issuer, "AXON_KEYCLOAK_AUDIENCE": audience, "AXON_KEYCLOAK_JWKS_JSON": jwks_from_key(key)}
+        environment = base_environment | {"AXON_REGISTRY_DIR": str(fixture / "registry"), "AXON_KEYCLOAK_ISSUER": issuer, "AXON_KEYCLOAK_AUDIENCE": audience, "AXON_KEYCLOAK_JWKS_JSON": jwks_from_key(key), "AXON_KEYCLOAK_BROWSER_CLIENT_ID": "portfolio-web-smoke"}
         authorization = {"Authorization": "Bearer " + token(key, issuer, audience)}
         port = random.randrange(24000, 34000)
         process = subprocess.Popen([binary, "serve", "--http", f"--port={port}"], cwd=project, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -197,9 +197,9 @@ def main(binary):
         assert elements["detail"][1].get("tabindex") == "-1"
         # SVG uses the standards-defined namespace URI while creating elements; it is data, not a
         # network endpoint.  Every other absolute HTTP(S) reference remains forbidden.
-        offline_html = html.replace("http://www.w3.org/2000/svg", "")
+        offline_html = html.replace("http://www.w3.org/2000/svg", "").replace(issuer, "")
         assert "https://" not in offline_html and "http://" not in offline_html and "cdn." not in html.lower()
-        for marker in ("/api/v1/portfolio/topology?limit=", "/api/v1/capabilities/consumers/", "/api/v1/capabilities/compare/", "/api/v1/capabilities/drift?graph_root=", "encodeURIComponent", "prefers-reduced-motion", "Interactive capability topology", "Drag to pan; wheel to zoom", "Package hints"):
+        for marker in ("/api/v1/portfolio/topology?limit=", "/api/v1/capabilities/consumers/", "/api/v1/capabilities/compare/", "/api/v1/capabilities/drift?graph_root=", "encodeURIComponent", "prefers-reduced-motion", "Interactive capability topology", "Drag to pan; wheel to zoom", "Package hints", "keycloak-login", "code_challenge_method:'S256'"):
             assert marker in html, f"missing UI behavior marker: {marker}"
         run_browser_journey(html)
         status, _, _, _ = response(port, "/api/v1/portfolio/status")
