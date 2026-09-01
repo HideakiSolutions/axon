@@ -140,16 +140,16 @@ TEST(PortfolioCapabilityCatalog, SyncsRealReadOnlySourcesAndSearchesMetadata) {
     fs::create_directories(base / "registry");
     std::ofstream(base / "registry/registry.json")
         << "{\"schema_version\":\"axon-registry/v2\",\"repos\":["
-        << "{\"name\":\"repo\",\"root\":\"" << (base / "repo").string() << "\",\"db_path\":\""
-        << source.string() << "\",\"repository_id\":\"" << kFirstRepository
-        << "\",\"index_stream_id\":\"" << kFirstStream
+        << "{\"name\":\"repo\",\"root\":\"" << (base / "repo").generic_string()
+        << "\",\"db_path\":\"" << source.generic_string() << "\",\"repository_id\":\""
+        << kFirstRepository << "\",\"index_stream_id\":\"" << kFirstStream
         << "\",\"default_for_profiles\":[\"local\"]},"
-        << "{\"name\":\"repo-two\",\"root\":\"" << (base / "repo-two").string()
-        << "\",\"db_path\":\"" << second_source.string() << "\",\"repository_id\":\""
+        << "{\"name\":\"repo-two\",\"root\":\"" << (base / "repo-two").generic_string()
+        << "\",\"db_path\":\"" << second_source.generic_string() << "\",\"repository_id\":\""
         << kSecondRepository << "\",\"index_stream_id\":\"" << kSecondStream
         << "\",\"default_for_profiles\":[\"local\"]},"
-        << "{\"name\":\"repo-three\",\"root\":\"" << (base / "repo-three").string()
-        << "\",\"db_path\":\"" << third_source.string() << "\",\"repository_id\":\""
+        << "{\"name\":\"repo-three\",\"root\":\"" << (base / "repo-three").generic_string()
+        << "\",\"db_path\":\"" << third_source.generic_string() << "\",\"repository_id\":\""
         << kThirdRepository << "\",\"index_stream_id\":\"" << kThirdStream
         << "\",\"default_for_profiles\":[\"local\"]}],"
         << "\"storage_profiles\":{\"local\":{\"role\":\"portfolio_local\",\"transport\":\"local\","
@@ -276,8 +276,8 @@ TEST(PortfolioCapabilityCatalog, ProjectsIndexerProducedEvidenceFromThreeReposit
     for (std::size_t i = 0; i < repos.size(); ++i) {
         if (i) registry << ',';
         const auto& repo = repos[i];
-        registry << "{\"name\":\"r" << i << "\",\"root\":\"" << repo.root.string()
-                 << "\",\"db_path\":\"" << (repo.root / ".axon/index.duckdb").string()
+        registry << "{\"name\":\"r" << i << "\",\"root\":\"" << repo.root.generic_string()
+                 << "\",\"db_path\":\"" << (repo.root / ".axon/index.duckdb").generic_string()
                  << "\",\"repository_id\":\"" << repo.id << "\",\"index_stream_id\":\""
                  << streams[i] << "\",\"default_for_profiles\":[\"local\"]}";
     }
