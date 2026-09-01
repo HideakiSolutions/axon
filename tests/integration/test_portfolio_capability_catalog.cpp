@@ -23,6 +23,14 @@ constexpr const char* kSecondStream = "618f802b-e97d-4f24-9cf7-62b09e4d1e62";
 constexpr const char* kThirdRepository = "8b0539ee-b809-4f81-b2f6-df2f2b425a5a";
 constexpr const char* kThirdStream = "214c6637-9a08-4227-a83e-0d73a2539e99";
 
+void set_registry_dir(const fs::path& path) {
+#ifdef _WIN32
+    _putenv_s("AXON_REGISTRY_DIR", path.string().c_str());
+#else
+    setenv("AXON_REGISTRY_DIR", path.c_str(), 1);
+#endif
+}
+
 std::string bytes(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(in), {}};
@@ -146,7 +154,7 @@ TEST(PortfolioCapabilityCatalog, SyncsRealReadOnlySourcesAndSearchesMetadata) {
         << "\",\"default_for_profiles\":[\"local\"]}],"
         << "\"storage_profiles\":{\"local\":{\"role\":\"portfolio_local\",\"transport\":\"local\","
            "\"default\":true,\"portfolio_store\":{\"provider\":\"duckdb\",\"path\":\"x\"}}}}";
-    setenv("AXON_REGISTRY_DIR", (base / "registry").c_str(), 1);
+    set_registry_dir(base / "registry");
     axon::portfolio::PortfolioCapabilityCatalog catalog(base / "catalog.duckdb");
     const auto report = catalog.sync();
     ASSERT_FALSE(report.degraded);
@@ -277,7 +285,7 @@ TEST(PortfolioCapabilityCatalog, ProjectsIndexerProducedEvidenceFromThreeReposit
                 "\"local\",\"default\":true,\"portfolio_store\":{\"provider\":\"duckdb\",\"path\":"
                 "\"x\"}}}}";
     registry.close();
-    setenv("AXON_REGISTRY_DIR", (base / "registry").c_str(), 1);
+    set_registry_dir(base / "registry");
     {
         auto cfg = axon::make_config(repos[0].root);
         axon::Database db(cfg.db_path);
