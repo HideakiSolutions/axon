@@ -43,7 +43,7 @@ void append_bounded(CommandResult& result, const char* bytes, std::size_t count,
     const auto available = result.stdout_text.size() < maximum_output_bytes
                                ? maximum_output_bytes - result.stdout_text.size()
                                : 0U;
-    const auto copied = std::min(available, count);
+    const auto copied = std::min<std::size_t>(available, count);
     result.stdout_text.append(bytes, copied);
     result.output_truncated = result.output_truncated || copied != count;
 }

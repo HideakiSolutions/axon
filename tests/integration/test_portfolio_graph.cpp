@@ -1,6 +1,7 @@
 #include "portfolio/infrastructure/falkordb/falkordb_capability_graph.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <memory>
 
 namespace {
 axon::portfolio::CapabilitySignature signature(const std::string& repo, const std::string& stream,
@@ -12,14 +13,17 @@ axon::portfolio::CapabilitySignature signature(const std::string& repo, const st
     return value;
 }
 TEST(FalkorDbCapabilityGraph, ReplaceIsolatedAndBounded) {
-    axon::portfolio::FalkorDbCapabilityGraph graph("127.0.0.1", 6379, "axon_portfolio_g10_test");
+    std::unique_ptr<axon::portfolio::FalkorDbCapabilityGraph> graph_ptr;
     try {
-        graph.replace_repository({"00000000-0000-0000-0000-000000000000", "availability_probe"},
-                                 "probe", {});
+        graph_ptr = std::make_unique<axon::portfolio::FalkorDbCapabilityGraph>(
+            "127.0.0.1", 6379, "axon_portfolio_g10_test");
+        graph_ptr->replace_repository(
+            {"00000000-0000-0000-0000-000000000000", "availability_probe"}, "probe", {});
     } catch (const std::runtime_error& error) {
         if (std::string(error.what()) == "FalkorDB unavailable") GTEST_SKIP() << error.what();
         throw;
     }
+    auto& graph = *graph_ptr;
     const axon::portfolio::RepositoryStreamKey first{"11111111-1111-1111-1111-111111111111",
                                                      "stream_one"};
     const axon::portfolio::RepositoryStreamKey second{"22222222-2222-2222-2222-222222222222",
