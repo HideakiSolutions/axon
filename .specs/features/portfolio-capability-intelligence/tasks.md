@@ -351,6 +351,18 @@ own these requirement sets:
 - **stop_condition:** CI multi-OS or human-gated operation remains unverified.
 - **commit:** `docs(portfolio): complete federated intelligence delivery`.
 
+## Post-delivery backlog — Graph RAG assessment
+
+- **status:** pending; intentionally outside this delivery.
+- **objective:** assess whether a Graph RAG model adds measurable value over the implemented
+  federated capability graph, deterministic multi-signal retrieval and optional semantic providers.
+- **entry criteria:** production corpus, access-control model, latency/resource baseline and an
+  owner-approved evaluation protocol are available.
+- **required evidence before adoption:** comparative retrieval quality, provenance/explainability,
+  tenant and Keycloak authorization boundaries, graph freshness/rebuild behaviour, cost/resource
+  envelope, failure/rollback plan and a human approval gate. No graph-to-code or graph-to-registry
+  mutation may be automated.
+
 ## Dynamic Discovery Rule
 
 Expansion is allowed only for directly relevant existing implementations/call sites, required
