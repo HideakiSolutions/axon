@@ -14,8 +14,8 @@ bool RepositoryStreamKey::operator<(const RepositoryStreamKey& other) const {
            std::tie(other.repository_id, other.index_stream_id);
 }
 
-PortfolioStoreError::PortfolioStoreError(PortfolioStoreErrorCode code,
-                                         const std::string& message)
-    : std::runtime_error(message), code_(code) {}
+PortfolioStoreError::PortfolioStoreError(PortfolioStoreErrorCode code, const std::string& message)
+    : std::runtime_error(message), code_(code) {
+}
 
 } // namespace axon::portfolio

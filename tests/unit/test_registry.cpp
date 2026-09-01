@@ -166,16 +166,13 @@ TEST_F(RegistryTest, V2ProfilesAndWorktreeStreamsRoundTrip) {
     reg.schema_version = "axon-registry/v2";
     reg.storage_profiles = {
         axon::StorageProfile{"local", "portfolio_local", "", "", "",
-                             axon::ProviderTarget{"duckdb", "portfolio.duckdb", ""},
-                             std::nullopt, std::nullopt, std::nullopt, true},
-        axon::StorageProfile{"shared-dev", "portfolio_shared", "axon_http",
-                             "http://127.0.0.1:7071", "axon",
-                             axon::ProviderTarget{"postgresql", "", ""},
-                             axon::ProviderTarget{"qdrant", "", ""},
-                             axon::ProviderTarget{"falkordb", "", ""},
-                             axon::TargetMarker{"shared-1", "axon",
-                                                "axon/portfolio-sync/v1"},
-                             false}};
+                             axon::ProviderTarget{"duckdb", "portfolio.duckdb", ""}, std::nullopt,
+                             std::nullopt, std::nullopt, true},
+        axon::StorageProfile{
+            "shared-dev", "portfolio_shared", "axon_http", "http://127.0.0.1:7071", "axon",
+            axon::ProviderTarget{"postgresql", "", ""}, axon::ProviderTarget{"qdrant", "", ""},
+            axon::ProviderTarget{"falkordb", "", ""},
+            axon::TargetMarker{"shared-1", "axon", "axon/portfolio-sync/v1"}, false}};
     axon::RepoEntry main;
     main.name = "repo-main";
     main.root = (home / "main").string();
@@ -220,8 +217,7 @@ TEST_F(RegistryTest, V2ProfilesAndWorktreeStreamsRoundTrip) {
     EXPECT_EQ(saved["schema_version"], "axon-registry/v2");
     EXPECT_EQ(saved["groups"]["core"][0], main.repository_id);
     EXPECT_EQ(saved["storage_profiles"]["local"]["role"], "portfolio_local");
-    EXPECT_EQ(saved["storage_profiles"]["shared-dev"]["providers"]["semantic_index"],
-              "qdrant");
+    EXPECT_EQ(saved["storage_profiles"]["shared-dev"]["providers"]["semantic_index"], "qdrant");
 }
 
 TEST_F(RegistryTest, V2RejectsDuplicateStreamAndAmbiguousDefaults) {
@@ -229,8 +225,8 @@ TEST_F(RegistryTest, V2RejectsDuplicateStreamAndAmbiguousDefaults) {
     reg.schema_version = "axon-registry/v2";
     reg.storage_profiles = {
         axon::StorageProfile{"local", "portfolio_local", "", "", "",
-                             axon::ProviderTarget{"duckdb", "portfolio.duckdb", ""},
-                             std::nullopt, std::nullopt, std::nullopt, true}};
+                             axon::ProviderTarget{"duckdb", "portfolio.duckdb", ""}, std::nullopt,
+                             std::nullopt, std::nullopt, true}};
     axon::RepoEntry first;
     first.root = "/repo/a";
     first.repository_id = "7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb";
@@ -242,7 +238,8 @@ TEST_F(RegistryTest, V2RejectsDuplicateStreamAndAmbiguousDefaults) {
 
     auto issues = axon::validate_registry(reg);
     std::unordered_set<std::string> codes;
-    for (const auto& issue : issues) codes.insert(issue.code);
+    for (const auto& issue : issues)
+        codes.insert(issue.code);
     EXPECT_TRUE(codes.count("duplicate_stream_binding"));
     EXPECT_TRUE(codes.count("ambiguous_default_stream"));
     EXPECT_TRUE(axon::aggregation_repos(reg).repos.empty());
@@ -253,9 +250,8 @@ TEST_F(RegistryTest, V2RejectsTargetMarkerMismatch) {
     axon::RegistryData reg;
     reg.schema_version = "axon-registry/v2";
     reg.storage_profiles = {
-        axon::StorageProfile{"shared", "portfolio_shared", "axon_http",
-                             "http://127.0.0.1:7071", "axon",
-                             axon::ProviderTarget{"postgresql", "", ""}, std::nullopt,
+        axon::StorageProfile{"shared", "portfolio_shared", "axon_http", "http://127.0.0.1:7071",
+                             "axon", axon::ProviderTarget{"postgresql", "", ""}, std::nullopt,
                              std::nullopt, axon::TargetMarker{"instance", "other", "v1"}, true}};
     auto issues = axon::validate_registry(reg);
     ASSERT_FALSE(issues.empty());
@@ -270,11 +266,12 @@ TEST_F(RegistryTest, V2RejectsUnsupportedVersionAndCombinedTarget) {
     reg.schema_version = "axon-registry/v3";
     reg.storage_profiles = {
         axon::StorageProfile{"local", "portfolio_local", "", "https://wrong.example", "",
-                             axon::ProviderTarget{"duckdb", "portfolio.duckdb", ""},
-                             std::nullopt, std::nullopt, std::nullopt, true}};
+                             axon::ProviderTarget{"duckdb", "portfolio.duckdb", ""}, std::nullopt,
+                             std::nullopt, std::nullopt, true}};
     auto issues = axon::validate_registry(reg);
     std::unordered_set<std::string> codes;
-    for (const auto& issue : issues) codes.insert(issue.code);
+    for (const auto& issue : issues)
+        codes.insert(issue.code);
     EXPECT_TRUE(codes.count("unsupported_schema_version"));
     EXPECT_TRUE(codes.count("invalid_local_target"));
     EXPECT_FALSE(axon::aggregation_repos(reg).issues.empty());
@@ -283,14 +280,10 @@ TEST_F(RegistryTest, V2RejectsUnsupportedVersionAndCombinedTarget) {
 TEST_F(RegistryTest, V2RejectsNonTlsNonLoopbackEndpoint) {
     axon::RegistryData reg;
     reg.schema_version = "axon-registry/v2";
-    reg.storage_profiles = {
-        axon::StorageProfile{"shared", "portfolio_shared", "axon_http",
-                             "http://10.0.0.5:7071", "axon",
-                             axon::ProviderTarget{"postgresql", "", ""}, std::nullopt,
-                             std::nullopt,
-                             axon::TargetMarker{"instance", "axon",
-                                                "axon/portfolio-sync/v1"},
-                             true}};
+    reg.storage_profiles = {axon::StorageProfile{
+        "shared", "portfolio_shared", "axon_http", "http://10.0.0.5:7071", "axon",
+        axon::ProviderTarget{"postgresql", "", ""}, std::nullopt, std::nullopt,
+        axon::TargetMarker{"instance", "axon", "axon/portfolio-sync/v1"}, true}};
     auto issues = axon::validate_registry(reg);
     EXPECT_TRUE(std::any_of(issues.begin(), issues.end(), [](const auto& issue) {
         return issue.code == "invalid_shared_endpoint";
@@ -314,8 +307,7 @@ TEST_F(RegistryTest, MalformedFieldTypesFailClosedWithoutOverwrite) {
 
     axon::register_repo((home / "must-not-appear").string(), "index.duckdb");
     std::ifstream input(home / "registry.json");
-    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input),
-                          std::istreambuf_iterator<char>()),
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()),
               malformed);
 }
 
@@ -325,19 +317,15 @@ TEST_F(RegistryTest, MalformedStructuralTypesFailClosedWithoutOverwrite) {
         {R"({"repos":{}})", "$.repos"},
         {R"({"repos":[1]})", "$.repos[0]"},
         {R"({"repos":[{"name":1}]})", "$.repos[0].name"},
-        {R"({"repos":[{"default_for_profiles":{}}]})",
-         "$.repos[0].default_for_profiles"},
-        {R"({"repos":[{"default_for_profiles":[1]}]})",
-         "$.repos[0].default_for_profiles[0]"},
+        {R"({"repos":[{"default_for_profiles":{}}]})", "$.repos[0].default_for_profiles"},
+        {R"({"repos":[{"default_for_profiles":[1]}]})", "$.repos[0].default_for_profiles[0]"},
         {R"({"groups":[]})", "$.groups"},
         {R"({"groups":{"core":{}}})", "$.groups.core"},
         {R"({"groups":{"core":[1]}})", "$.groups.core[0]"},
         {R"({"storage_profiles":[]})", "$.storage_profiles"},
         {R"({"storage_profiles":{"local":[]}})", "$.storage_profiles.local"},
-        {R"({"storage_profiles":{"local":{"role":1}}})",
-         "$.storage_profiles.local.role"},
-        {R"({"storage_profiles":{"local":{"default":"yes"}}})",
-         "$.storage_profiles.local.default"},
+        {R"({"storage_profiles":{"local":{"role":1}}})", "$.storage_profiles.local.role"},
+        {R"({"storage_profiles":{"local":{"default":"yes"}}})", "$.storage_profiles.local.default"},
         {R"({"storage_profiles":{"local":{"portfolio_store":[]}}})",
          "$.storage_profiles.local.portfolio_store"},
         {R"({"storage_profiles":{"local":{"semantic_index":"qdrant"}}})",
@@ -361,55 +349,53 @@ TEST_F(RegistryTest, MalformedStructuralTypesFailClosedWithoutOverwrite) {
         }
         auto loaded = axon::load_registry();
         ASSERT_FALSE(loaded.load_issues.empty());
-        EXPECT_TRUE(std::any_of(loaded.load_issues.begin(), loaded.load_issues.end(),
-                                [&](const auto& issue) {
-                                    return issue.code == "invalid_registry_type" &&
-                                           issue.path == cases[i].second;
-                                }));
+        EXPECT_TRUE(std::any_of(
+            loaded.load_issues.begin(), loaded.load_issues.end(), [&](const auto& issue) {
+                return issue.code == "invalid_registry_type" && issue.path == cases[i].second;
+            }));
         auto selected = axon::aggregation_repos(loaded);
         EXPECT_TRUE(selected.repos.empty());
         EXPECT_FALSE(selected.issues.empty());
 
         axon::register_repo((home / "must-not-appear").string(), "index.duckdb");
         std::ifstream input(home / "registry.json");
-        EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input),
-                              std::istreambuf_iterator<char>()),
-                  cases[i].first);
+        EXPECT_EQ(
+            std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()),
+            cases[i].first);
     }
 }
 
 TEST_F(RegistryTest, LoadsAcceptedCanonicalV2Json) {
-    nlohmann::json document = {
-        {"schema_version", "axon-registry/v2"},
-        {"repos",
-         {{{"repository_id", "7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb"},
-           {"index_stream_id", "11111111-1111-4111-8111-111111111111"},
-           {"name", "axon"},
-           {"root", "/opt/hideakisolutions/axon"},
-           {"db_path", "/opt/hideakisolutions/axon/.axon/index.duckdb"},
-           {"variant", "main"},
-           {"default_for_profiles", {"local", "team"}}}}},
-        {"groups", {{"core", {"7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb"}}}},
-        {"storage_profiles",
-         {{"local",
-           {{"role", "portfolio_local"},
-            {"provider", "duckdb"},
-            {"path", "${AXON_REGISTRY_DIR}/portfolio.duckdb"},
-            {"default", true}}},
-          {"team",
-           {{"role", "portfolio_shared"},
-            {"transport", "axon_http"},
-            {"endpoint", "https://axon.internal.example"},
-            {"namespace", "hideaki-portfolio"},
-            {"providers",
-             {{"portfolio_store", "postgresql"},
-              {"semantic_index", "qdrant"},
-              {"graph_projection", "falkordb"}}},
-            {"target_marker",
-             {{"instance_id", "shared-1"},
-              {"namespace", "hideaki-portfolio"},
-              {"protocol_version", "axon/portfolio-sync/v1"}}},
-            {"default", false}}}}}};
+    nlohmann::json document = {{"schema_version", "axon-registry/v2"},
+                               {"repos",
+                                {{{"repository_id", "7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb"},
+                                  {"index_stream_id", "11111111-1111-4111-8111-111111111111"},
+                                  {"name", "axon"},
+                                  {"root", "/opt/hideakisolutions/axon"},
+                                  {"db_path", "/opt/hideakisolutions/axon/.axon/index.duckdb"},
+                                  {"variant", "main"},
+                                  {"default_for_profiles", {"local", "team"}}}}},
+                               {"groups", {{"core", {"7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb"}}}},
+                               {"storage_profiles",
+                                {{"local",
+                                  {{"role", "portfolio_local"},
+                                   {"provider", "duckdb"},
+                                   {"path", "${AXON_REGISTRY_DIR}/portfolio.duckdb"},
+                                   {"default", true}}},
+                                 {"team",
+                                  {{"role", "portfolio_shared"},
+                                   {"transport", "axon_http"},
+                                   {"endpoint", "https://axon.internal.example"},
+                                   {"namespace", "hideaki-portfolio"},
+                                   {"providers",
+                                    {{"portfolio_store", "postgresql"},
+                                     {"semantic_index", "qdrant"},
+                                     {"graph_projection", "falkordb"}}},
+                                   {"target_marker",
+                                    {{"instance_id", "shared-1"},
+                                     {"namespace", "hideaki-portfolio"},
+                                     {"protocol_version", "axon/portfolio-sync/v1"}}},
+                                   {"default", false}}}}}};
     {
         std::ofstream output(home / "registry.json");
         output << document.dump(2) << '\n';
@@ -459,9 +445,7 @@ TEST_F(RegistryTest, SecondaryRejectsSymlinkAndPathOutsideRoot) {
     fs::create_directories(repo / ".axon");
     fs::create_directories(outside);
     fs::path external_db = outside / "index.duckdb";
-    {
-        duckdb::DuckDB db(external_db.string());
-    }
+    { duckdb::DuckDB db(external_db.string()); }
     axon::RepoEntry outside_entry;
     outside_entry.root = repo.string();
     outside_entry.db_path = external_db.string();

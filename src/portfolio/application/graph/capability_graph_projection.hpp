@@ -14,14 +14,13 @@ struct GraphTraversal {
 };
 
 class CapabilityGraphProjection {
-  public:
+public:
     virtual ~CapabilityGraphProjection() = default;
     virtual void replace_repository(const RepositoryStreamKey& stream,
-                                   const std::string& generation,
-                                   const std::vector<CapabilitySignature>& signatures) = 0;
+                                    const std::string& generation,
+                                    const std::vector<CapabilitySignature>& signatures) = 0;
     virtual GraphTraversal traverse(const RepositoryStreamKey& stream,
-                                    const std::string& signature_id,
-                                    std::size_t max_depth,
+                                    const std::string& signature_id, std::size_t max_depth,
                                     std::size_t max_nodes) const = 0;
 };
 

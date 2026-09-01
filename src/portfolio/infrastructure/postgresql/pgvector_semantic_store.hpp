@@ -14,7 +14,9 @@ public:
     ~PgvectorSemanticStore() override;
     void upsert(const SemanticRecord&) override;
     void erase(const std::string&, const std::string&) override;
-    std::vector<SemanticHit> search(const std::vector<float>&, const SemanticIdentity&, std::size_t) const override;
+    std::vector<SemanticHit> search(const std::vector<float>&, const SemanticIdentity&,
+                                    std::size_t) const override;
+
 private:
     void migrate();
     std::uint32_t dimension_;

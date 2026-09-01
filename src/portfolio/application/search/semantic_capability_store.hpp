@@ -23,7 +23,10 @@ struct SemanticRecord {
     SemanticIdentity identity;
     std::vector<float> vector;
 };
-struct SemanticHit { std::string signature_id; float score = 0; };
+struct SemanticHit {
+    std::string signature_id;
+    float score = 0;
+};
 
 class SemanticCapabilityStore {
 public:

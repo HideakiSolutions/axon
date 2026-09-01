@@ -45,8 +45,10 @@ ProviderCapabilities ReferencePortfolioStore::capabilities() const {
             {ProviderCapability::AtomicApply, ProviderCapability::ReplaceRepositoryStream,
              ProviderCapability::ReidentifyRepositoryStream,
              ProviderCapability::ValidateMaintenance},
-            kReferenceMaxEventsPerBatch, kReferenceMaxEventsPerBatch,
-            kReferenceMaxMutationsPerEvent, kReferenceMaxSnapshotEntities};
+            kReferenceMaxEventsPerBatch,
+            kReferenceMaxEventsPerBatch,
+            kReferenceMaxMutationsPerEvent,
+            kReferenceMaxSnapshotEntities};
 }
 
 ProviderHealth ReferencePortfolioStore::health() const {
@@ -79,7 +81,8 @@ void ReferencePortfolioStore::validate_event(const ProjectionEvent& event,
         (event.manifest && (event.manifest->size() < 16 || event.manifest->size() > 128)) ||
         event.mutations.size() > max_batch_size)
         fail(PortfolioStoreErrorCode::InvalidInput, "projection event bounds are invalid");
-    for (const auto& mutation : event.mutations) validate_mutation(mutation);
+    for (const auto& mutation : event.mutations)
+        validate_mutation(mutation);
 }
 
 ApplyResult ReferencePortfolioStore::apply(const RepositoryStreamKey& stream,
@@ -96,8 +99,7 @@ ApplyResult ReferencePortfolioStore::apply(const RepositoryStreamKey& stream,
     std::uint64_t validated_sequence = expected_cursor;
     for (const auto& event : events) {
         if (validated_sequence == std::numeric_limits<std::uint64_t>::max())
-            fail(PortfolioStoreErrorCode::CursorConflict,
-                 "portfolio stream sequence is exhausted");
+            fail(PortfolioStoreErrorCode::CursorConflict, "portfolio stream sequence is exhausted");
         validate_event(event, stream, ++validated_sequence, kReferenceMaxMutationsPerEvent);
     }
 
@@ -111,8 +113,7 @@ ApplyResult ReferencePortfolioStore::apply(const RepositoryStreamKey& stream,
         }
     }
     if (exact_replay) {
-        if (existing != streams_.end())
-            return {ApplyDisposition::Duplicate, current.state, 0};
+        if (existing != streams_.end()) return {ApplyDisposition::Duplicate, current.state, 0};
         for (const auto& [key, data] : streams_)
             if (key.index_stream_id == stream.index_stream_id)
                 return {ApplyDisposition::Duplicate, data.state, 0};
@@ -153,8 +154,9 @@ ApplyResult ReferencePortfolioStore::apply(const RepositoryStreamKey& stream,
         }
         next.events[event.sequence] = event;
         next_receipts.emplace(event.event_id, EventReceipt{stream, event.sequence, event});
-        next.state = {true, event.sequence, event.epoch,
-                      event.manifest.value_or(next.state.manifest), false, false};
+        next.state = {true,        event.sequence,
+                      event.epoch, event.manifest.value_or(next.state.manifest),
+                      false,       false};
     }
     streams_[stream] = std::move(next);
     receipts_ = std::move(next_receipts);
@@ -178,9 +180,8 @@ ReferencePortfolioStore::snapshot_entities(const RepositorySnapshot& snapshot,
     return entities;
 }
 
-ReplaceResult
-ReferencePortfolioStore::replace_repository_stream(const RepositorySnapshot& snapshot,
-                                                   std::uint64_t expected_cursor) {
+ReplaceResult ReferencePortfolioStore::replace_repository_stream(const RepositorySnapshot& snapshot,
+                                                                 std::uint64_t expected_cursor) {
     validate_stream(snapshot.stream);
     if (snapshot.cursor == 0 || snapshot.epoch.size() < 16 || snapshot.epoch.size() > 128 ||
         snapshot.manifest.size() < 16 || snapshot.manifest.size() > 128 ||
@@ -191,9 +192,8 @@ ReferencePortfolioStore::replace_repository_stream(const RepositorySnapshot& sna
     std::lock_guard<std::mutex> lock(mutex_);
     const auto existing = streams_.find(snapshot.stream);
     const StreamData current = existing == streams_.end() ? StreamData{} : existing->second;
-    const CursorEpochManifest replacement_state = {true, snapshot.cursor, snapshot.epoch,
-                                                    snapshot.manifest, snapshot.stale,
-                                                    snapshot.removed};
+    const CursorEpochManifest replacement_state = {
+        true, snapshot.cursor, snapshot.epoch, snapshot.manifest, snapshot.stale, snapshot.removed};
     if (current.state == replacement_state && current.entities == entities)
         return {ApplyDisposition::Duplicate, current.state, 0};
     if (existing == streams_.end()) {
@@ -223,11 +223,11 @@ ApplyResult ReferencePortfolioStore::reidentify_repository_stream(
             reidentification.current_stream.repository_id ||
         reidentification.previous_stream.index_stream_id !=
             reidentification.current_stream.index_stream_id ||
-        reidentification.sequence == 0 ||
-        reidentification.event_id.size() < 16 || reidentification.event_id.size() > 128 ||
-        reidentification.epoch.size() < 16 || reidentification.epoch.size() > 128 ||
-        (reidentification.manifest && (reidentification.manifest->size() < 16 ||
-                                       reidentification.manifest->size() > 128)) ||
+        reidentification.sequence == 0 || reidentification.event_id.size() < 16 ||
+        reidentification.event_id.size() > 128 || reidentification.epoch.size() < 16 ||
+        reidentification.epoch.size() > 128 ||
+        (reidentification.manifest &&
+         (reidentification.manifest->size() < 16 || reidentification.manifest->size() > 128)) ||
         reidentification.old_binding_id.size() < 16 ||
         reidentification.old_binding_id.size() > 128 ||
         reidentification.new_binding_id.size() < 16 ||
@@ -265,8 +265,7 @@ ApplyResult ReferencePortfolioStore::reidentify_repository_stream(
              "reidentification event_id is already bound to a projection event");
     const auto previous = streams_.find(reidentification.previous_stream);
     if (previous == streams_.end() || previous->second.state.cursor != expected_cursor)
-        fail(PortfolioStoreErrorCode::CursorConflict,
-             "reidentification previous cursor conflict");
+        fail(PortfolioStoreErrorCode::CursorConflict, "reidentification previous cursor conflict");
     if (previous->second.state.removed)
         fail(PortfolioStoreErrorCode::InvalidInput,
              "removed repository stream cannot be reidentified");
@@ -277,24 +276,21 @@ ApplyResult ReferencePortfolioStore::reidentify_repository_stream(
     StreamData transferred = previous->second;
     transferred.state.cursor = reidentification.sequence;
     transferred.state.epoch = reidentification.epoch;
-    transferred.state.manifest =
-        reidentification.manifest.value_or(transferred.state.manifest);
+    transferred.state.manifest = reidentification.manifest.value_or(transferred.state.manifest);
     transferred.state.stale = false;
     transferred.state.removed = false;
     transferred.entities.erase(
         EntityKey{"repository", reidentification.previous_stream.repository_id});
-    transferred.entities[EntityKey{"repository", reidentification.current_stream.repository_id}] =
-        {"repository", reidentification.current_stream.repository_id,
-         ProjectionOperation::Upsert, std::nullopt};
+    transferred.entities[EntityKey{"repository", reidentification.current_stream.repository_id}] = {
+        "repository", reidentification.current_stream.repository_id, ProjectionOperation::Upsert,
+        std::nullopt};
     streams_.erase(previous);
     streams_.emplace(reidentification.current_stream, std::move(transferred));
     reidentifications_.emplace(reidentification.event_id, reidentification);
-    return {ApplyDisposition::Applied,
-            streams_.at(reidentification.current_stream).state, 2};
+    return {ApplyDisposition::Applied, streams_.at(reidentification.current_stream).state, 2};
 }
 
-CursorEpochManifest
-ReferencePortfolioStore::stream_state(const RepositoryStreamKey& stream) const {
+CursorEpochManifest ReferencePortfolioStore::stream_state(const RepositoryStreamKey& stream) const {
     validate_stream(stream);
     std::lock_guard<std::mutex> lock(mutex_);
     const auto found = streams_.find(stream);

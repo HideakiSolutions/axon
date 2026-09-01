@@ -11,7 +11,8 @@ bool canonical_uuid(const std::string& value) {
     for (std::size_t i = 0; i < value.size(); ++i) {
         if (i == 8 || i == 13 || i == 18 || i == 23) {
             if (value[i] != '-') return false;
-        } else if (!std::isxdigit(static_cast<unsigned char>(value[i]))) return false;
+        } else if (!std::isxdigit(static_cast<unsigned char>(value[i])))
+            return false;
     }
     return true;
 }
@@ -65,9 +66,11 @@ void RemoteIngestService::register_pending_reidentification_binding(
     validate_binding(binding);
     std::lock_guard<std::mutex> lock(mutex_);
     const auto old = bindings_.find(old_binding_id);
-    if (old == bindings_.end() || old->second.stream.index_stream_id != binding.stream.index_stream_id ||
+    if (old == bindings_.end() ||
+        old->second.stream.index_stream_id != binding.stream.index_stream_id ||
         old->second.stream.repository_id == binding.stream.repository_id ||
-        old->second.principal_id != binding.principal_id || bindings_.count(binding.binding_id) != 0)
+        old->second.principal_id != binding.principal_id ||
+        bindings_.count(binding.binding_id) != 0)
         throw PortfolioStoreError(PortfolioStoreErrorCode::InvalidInput,
                                   "pending reidentification binding is invalid");
     bindings_.emplace(binding.binding_id, binding);
@@ -103,8 +106,9 @@ void RemoteIngestService::require_registered(const AuthenticatedPrincipal& princ
         found->second.root_fingerprint != binding.root_fingerprint ||
         found->second.repository_contract_digest != binding.repository_contract_digest ||
         principal.principal_id() != found->second.principal_id)
-        throw PortfolioStoreError(PortfolioStoreErrorCode::IdempotencyConflict,
-                                  "remote publisher binding does not match authenticated principal");
+        throw PortfolioStoreError(
+            PortfolioStoreErrorCode::IdempotencyConflict,
+            "remote publisher binding does not match authenticated principal");
 }
 
 ApplyResult RemoteIngestService::ingest(const AuthenticatedPrincipal& principal,
@@ -116,7 +120,8 @@ ApplyResult RemoteIngestService::ingest(const AuthenticatedPrincipal& principal,
     std::lock_guard<std::mutex> lock(mutex_);
     require_registered(principal, batch.binding);
     if (batch.reidentification) {
-        if (!batch.events.empty() || batch.reidentification->previous_stream != batch.binding.stream ||
+        if (!batch.events.empty() ||
+            batch.reidentification->previous_stream != batch.binding.stream ||
             batch.reidentification->old_binding_id != batch.binding.binding_id)
             throw PortfolioStoreError(PortfolioStoreErrorCode::InvalidInput,
                                       "remote reidentification batch is invalid");
@@ -140,8 +145,8 @@ ApplyResult RemoteIngestService::ingest(const AuthenticatedPrincipal& principal,
     return store_.apply(batch.binding.stream, batch.expected_cursor, batch.events);
 }
 
-CursorEpochManifest RemoteIngestService::cursor_probe(
-    const AuthenticatedPrincipal& principal, const RemotePublisherBinding& binding) const {
+CursorEpochManifest RemoteIngestService::cursor_probe(const AuthenticatedPrincipal& principal,
+                                                      const RemotePublisherBinding& binding) const {
     std::lock_guard<std::mutex> lock(mutex_);
     require_registered(principal, binding);
     return store_.stream_state(binding.stream);

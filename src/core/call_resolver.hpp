@@ -19,7 +19,6 @@ class Transaction;
 int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
                        const std::vector<CallSite>& calls);
 int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
-                       const std::vector<CallSite>& calls,
-                       portfolio::Transaction& transaction);
+                       const std::vector<CallSite>& calls, portfolio::Transaction& transaction);
 
 } // namespace axon

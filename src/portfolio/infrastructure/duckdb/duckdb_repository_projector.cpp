@@ -75,7 +75,8 @@ Source open_source(const std::filesystem::path& registered_root,
     source.connection = std::make_unique<duckdb::Connection>(*source.database);
     require_ok(source.connection->Query("BEGIN TRANSACTION"), "begin read-only source snapshot");
     auto metadata = source.connection->Query(
-        "SELECT repository_id,index_stream_id,current_epoch,current_manifest,removed,schema_version "
+        "SELECT "
+        "repository_id,index_stream_id,current_epoch,current_manifest,removed,schema_version "
         "FROM index_metadata WHERE singleton=true");
     require_ok(metadata, "read source metadata");
     if (metadata->RowCount() != 1) throw std::runtime_error("source index identity is missing");
@@ -108,8 +109,8 @@ JournalEvent parse_event(const RepositoryStreamKey& physical_stream, duckdb::Dat
 
     parsed.event_type = rows.GetValue(7, row).ToString();
     static const std::unordered_set<std::string> event_types = {
-        "IndexSnapshotCompleted", "IndexFilesUpdated", "IndexFilesDeleted",
-        "IndexSymbolsUpdated", "IndexContractsUpdated", "IndexRoutesUpdated",
+        "IndexSnapshotCompleted", "IndexFilesUpdated",     "IndexFilesDeleted",
+        "IndexSymbolsUpdated",    "IndexContractsUpdated", "IndexRoutesUpdated",
         "RepositoryReidentified", "RepositoryRemoved"};
     if (event_types.count(parsed.event_type) == 0)
         throw std::runtime_error("unsupported source index event type");
@@ -121,8 +122,7 @@ JournalEvent parse_event(const RepositoryStreamKey& physical_stream, duckdb::Dat
         throw std::runtime_error("invalid payload_json for event " + event.event_id + ": " +
                                  error.what());
     }
-    if (!payload.is_object() || !payload.contains("affected") ||
-        !payload.at("affected").is_array())
+    if (!payload.is_object() || !payload.contains("affected") || !payload.at("affected").is_array())
         throw std::runtime_error("invalid index event payload shape");
     if (payload.at("affected").size() > 10000)
         throw std::runtime_error("index event affected set exceeds schema bound");
@@ -132,14 +132,14 @@ JournalEvent parse_event(const RepositoryStreamKey& physical_stream, duckdb::Dat
             throw std::runtime_error("unknown index event payload field");
     }
     static const std::unordered_set<std::string> entity_kinds = {
-        "file", "symbol", "contract", "route", "handler", "event", "schema", "dto",
-        "test", "dependency", "tombstone", "repository"};
+        "file",   "symbol", "contract", "route",      "handler",   "event",
+        "schema", "dto",    "test",     "dependency", "tombstone", "repository"};
     bool has_delete = false;
     bool has_repository_delete = false;
     for (const auto& item : payload.at("affected")) {
         if (!item.is_object() || !item.contains("kind") || !item.at("kind").is_string() ||
-            !item.contains("key") || !item.at("key").is_string() ||
-            !item.contains("operation") || !item.at("operation").is_string() ||
+            !item.contains("key") || !item.at("key").is_string() || !item.contains("operation") ||
+            !item.at("operation").is_string() ||
             (item.contains("digest") && !item.at("digest").is_string() &&
              !item.at("digest").is_null()))
             throw std::runtime_error("invalid affected entity shape");
@@ -150,15 +150,13 @@ JournalEvent parse_event(const RepositoryStreamKey& physical_stream, duckdb::Dat
         }
         const auto operation = item.at("operation").get<std::string>();
         const auto kind = item.at("kind").get<std::string>();
-        if (entity_kinds.count(kind) == 0)
-            throw std::runtime_error("invalid affected entity kind");
+        if (entity_kinds.count(kind) == 0) throw std::runtime_error("invalid affected entity kind");
         if (operation != "upsert" && operation != "delete" && operation != "snapshot")
             throw std::runtime_error("invalid affected entity operation");
         has_delete = has_delete || operation == "delete";
-        has_repository_delete = has_repository_delete ||
-                                (kind == "repository" && operation == "delete");
-        ProjectionMutation mutation{kind,
-                                    item.at("key").get<std::string>(),
+        has_repository_delete =
+            has_repository_delete || (kind == "repository" && operation == "delete");
+        ProjectionMutation mutation{kind, item.at("key").get<std::string>(),
                                     operation == "delete" ? ProjectionOperation::Delete
                                                           : ProjectionOperation::Upsert,
                                     std::nullopt};
@@ -176,9 +174,13 @@ JournalEvent parse_event(const RepositoryStreamKey& physical_stream, duckdb::Dat
         if (!payload.contains("identity_change") || !payload.at("identity_change").is_object())
             throw std::runtime_error("reidentification event has no typed identity change");
         const auto& identity = payload.at("identity_change");
-        static const std::unordered_set<std::string> identity_fields = {
-            "old_repository_id", "new_repository_id", "handoff_sequence", "old_binding_id",
-            "new_binding_id", "approval_reference", "reason"};
+        static const std::unordered_set<std::string> identity_fields = {"old_repository_id",
+                                                                        "new_repository_id",
+                                                                        "handoff_sequence",
+                                                                        "old_binding_id",
+                                                                        "new_binding_id",
+                                                                        "approval_reference",
+                                                                        "reason"};
         for (const auto& field : identity_fields)
             if (!identity.contains(field))
                 throw std::runtime_error("reidentification identity field is missing");
@@ -214,13 +216,17 @@ JournalEvent parse_event(const RepositoryStreamKey& physical_stream, duckdb::Dat
         }
         if (event.mutations.size() != 2 || !old_delete || !new_upsert)
             throw std::runtime_error("reidentification affected set is not canonical");
-        parsed.reidentification = RepositoryReidentification{
-            {old_id, physical_stream.index_stream_id}, {new_id, physical_stream.index_stream_id},
-            event.sequence, event.event_id, event.epoch, event.manifest,
-            identity.at("old_binding_id").get<std::string>(),
-            identity.at("new_binding_id").get<std::string>(),
-            identity.at("approval_reference").get<std::string>(),
-            identity.at("reason").get<std::string>()};
+        parsed.reidentification =
+            RepositoryReidentification{{old_id, physical_stream.index_stream_id},
+                                       {new_id, physical_stream.index_stream_id},
+                                       event.sequence,
+                                       event.event_id,
+                                       event.epoch,
+                                       event.manifest,
+                                       identity.at("old_binding_id").get<std::string>(),
+                                       identity.at("new_binding_id").get<std::string>(),
+                                       identity.at("approval_reference").get<std::string>(),
+                                       identity.at("reason").get<std::string>()};
     } else if (payload.contains("identity_change")) {
         throw std::runtime_error("identity_change is only valid for reidentification events");
     }
@@ -258,8 +264,8 @@ void validate_source_identity_chain(Source& source) {
             if (event.projection.stream.repository_id != *logical_repository_id)
                 throw std::runtime_error("source journal logical identity chain is invalid");
             if (event.reidentification) {
-                const auto validation = duckdb_detail::validate_reidentification(
-                    *event.reidentification, cursor);
+                const auto validation =
+                    duckdb_detail::validate_reidentification(*event.reidentification, cursor);
                 if (!validation) throw std::runtime_error(validation.message);
                 logical_repository_id = event.reidentification->current_stream.repository_id;
             }
@@ -285,8 +291,8 @@ AdvanceResult advance(Source& source, PortfolioStore& store, std::uint64_t curso
             return event.reidentification.has_value();
         });
         if (handoff == events.begin()) {
-            const auto applied = store.reidentify_repository_stream(
-                *handoff->reidentification, result.cursor);
+            const auto applied =
+                store.reidentify_repository_stream(*handoff->reidentification, result.cursor);
             result.cursor = applied.state.cursor;
             if (applied.disposition == ApplyDisposition::Applied) ++result.applied;
             continue;
@@ -321,24 +327,26 @@ RepositorySnapshot fold_source(Source& source) {
             if (event.manifest) manifest = *event.manifest;
             for (const auto& mutation : event.mutations) {
                 auto key = std::make_pair(mutation.entity_kind, mutation.entity_key);
-                if (mutation.operation == ProjectionOperation::Delete) entities.erase(key);
-                else entities[key] = mutation;
+                if (mutation.operation == ProjectionOperation::Delete)
+                    entities.erase(key);
+                else
+                    entities[key] = mutation;
             }
         }
     }
     if (cursor == 0 || manifest.empty() || (!source.epoch.empty() && epoch != source.epoch))
         throw std::runtime_error("source journal has no rebuildable verified state");
     std::vector<ProjectionMutation> flattened;
-    for (const auto& [key, entity] : entities) flattened.push_back(entity);
-    return {source.stream, cursor, epoch, manifest, false, source.removed,
-            std::move(flattened)};
+    for (const auto& [key, entity] : entities)
+        flattened.push_back(entity);
+    return {source.stream, cursor, epoch, manifest, false, source.removed, std::move(flattened)};
 }
 
 } // namespace
 
-RepositoryProjectionResult DuckdbRepositoryProjector::sync(
-    const std::filesystem::path& registered_root, const std::filesystem::path& index_path,
-    std::size_t batch_size) {
+RepositoryProjectionResult
+DuckdbRepositoryProjector::sync(const std::filesystem::path& registered_root,
+                                const std::filesystem::path& index_path, std::size_t batch_size) {
     if (batch_size == 0 || batch_size > 500) throw std::invalid_argument("invalid sync batch size");
     auto source = open_source(registered_root, index_path);
     validate_source_identity_chain(source);
@@ -350,8 +358,7 @@ RepositoryProjectionResult DuckdbRepositoryProjector::sync(
     const auto final_state = store_.stream_state(source.stream);
     if (final_state.cursor != 0 &&
         ((!source.epoch.empty() && final_state.epoch != source.epoch) ||
-         (!source.verified_manifest.empty() &&
-          final_state.manifest != source.verified_manifest) ||
+         (!source.verified_manifest.empty() && final_state.manifest != source.verified_manifest) ||
          final_state.removed != source.removed))
         return rebuild(registered_root, index_path);
     if (final_state.exists && final_state.stale) {
@@ -362,15 +369,16 @@ RepositoryProjectionResult DuckdbRepositoryProjector::sync(
         if (projection.truncated)
             throw std::runtime_error("stale partition exceeds bounded recovery replace");
         const RepositorySnapshot recovered = {
-            source.stream, final_state.cursor, final_state.epoch, final_state.manifest,
-            false, final_state.removed, projection.entities};
+            source.stream, final_state.cursor,  final_state.epoch,  final_state.manifest,
+            false,         final_state.removed, projection.entities};
         store_.replace_repository_stream(recovered, final_state.cursor);
     }
     return result;
 }
 
-RepositoryProjectionResult DuckdbRepositoryProjector::rebuild(
-    const std::filesystem::path& registered_root, const std::filesystem::path& index_path) {
+RepositoryProjectionResult
+DuckdbRepositoryProjector::rebuild(const std::filesystem::path& registered_root,
+                                   const std::filesystem::path& index_path) {
     auto source = open_source(registered_root, index_path);
     validate_source_identity_chain(source);
     auto before = store_.stream_state(source.stream);
@@ -392,8 +400,8 @@ bool DuckdbRepositoryProjector::mark_stale(const RepositoryStreamKey& stream) {
     const auto projection = store_.inspect_repository_stream(stream, limit);
     if (projection.truncated)
         throw std::runtime_error("stale partition exceeds provider snapshot bound");
-    RepositorySnapshot snapshot{stream, state.cursor, state.epoch, state.manifest, true,
-                                state.removed, projection.entities};
+    RepositorySnapshot snapshot{stream, state.cursor,  state.epoch,        state.manifest,
+                                true,   state.removed, projection.entities};
     store_.replace_repository_stream(snapshot, state.cursor);
     return true;
 }

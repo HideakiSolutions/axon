@@ -31,8 +31,8 @@ inline bool is_uuid(const std::string& value) {
     return true;
 }
 
-inline ReidentificationValidation validate_reidentification(
-    const RepositoryReidentification& value, std::uint64_t expected_cursor) {
+inline ReidentificationValidation validate_reidentification(const RepositoryReidentification& value,
+                                                            std::uint64_t expected_cursor) {
     static const std::unordered_set<std::string> reasons = {
         "contract-adopted", "collision-repaired", "repository-moved", "owner-approved"};
     if (!is_uuid(value.previous_stream.repository_id) ||

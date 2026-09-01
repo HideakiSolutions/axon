@@ -4,7 +4,8 @@
 
 namespace axon::portfolio {
 
-std::string graph_capability_id(const RepositoryStreamKey& stream, const std::string& signature_id) {
+std::string graph_capability_id(const RepositoryStreamKey& stream,
+                                const std::string& signature_id) {
     if (stream.repository_id.empty() || stream.index_stream_id.empty() || signature_id.empty()) {
         throw std::invalid_argument("graph capability identity is required");
     }

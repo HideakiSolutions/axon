@@ -22,8 +22,8 @@ public:
                                                     std::uint64_t expected_cursor) = 0;
     // Optional additive capability. Existing providers remain source-compatible and must advertise
     // ReidentifyRepositoryStream only when they override this operation atomically.
-    virtual ApplyResult reidentify_repository_stream(
-        const RepositoryReidentification&, std::uint64_t) {
+    virtual ApplyResult reidentify_repository_stream(const RepositoryReidentification&,
+                                                     std::uint64_t) {
         throw PortfolioStoreError(PortfolioStoreErrorCode::UnsupportedCapability,
                                   "repository reidentification is unsupported");
     }

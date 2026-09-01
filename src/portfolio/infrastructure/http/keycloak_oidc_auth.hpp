@@ -20,9 +20,9 @@ struct KeycloakOidcConfig {
 class KeycloakOidcAuthenticator {
 public:
     explicit KeycloakOidcAuthenticator(KeycloakOidcConfig config);
-    AuthenticatedPrincipal authenticate_bearer(const std::string& authorization,
-                                               std::chrono::system_clock::time_point now =
-                                                   std::chrono::system_clock::now()) const;
+    AuthenticatedPrincipal authenticate_bearer(
+        const std::string& authorization,
+        std::chrono::system_clock::time_point now = std::chrono::system_clock::now()) const;
 
 private:
     KeycloakOidcConfig config_;

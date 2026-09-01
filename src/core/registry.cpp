@@ -135,11 +135,11 @@ std::vector<RegistryValidationIssue> validate_registry_json_shape(const json& do
                     add_type_issue(issues, path, "object");
                     continue;
                 }
-                for (const char* field : {"name", "root", "db_path", "owner_token",
-                                          "repository_id", "index_stream_id", "variant"})
+                for (const char* field : {"name", "root", "db_path", "owner_token", "repository_id",
+                                          "index_stream_id", "variant"})
                     validate_string_field(repo, field, path, issues);
-                for (const char* field : {"owner_pid", "owner_port", "owner_started_at",
-                                          "owner_heartbeat_at"})
+                for (const char* field :
+                     {"owner_pid", "owner_port", "owner_started_at", "owner_heartbeat_at"})
                     validate_integer_field(repo, field, path, issues);
                 if (repo.contains("default_for_profiles")) {
                     const auto& defaults = repo["default_for_profiles"];
@@ -148,8 +148,9 @@ std::vector<RegistryValidationIssue> validate_registry_json_shape(const json& do
                     } else {
                         for (size_t j = 0; j < defaults.size(); ++j)
                             if (!defaults[j].is_string())
-                                add_type_issue(issues, path + ".default_for_profiles[" +
-                                                           std::to_string(j) + "]",
+                                add_type_issue(issues,
+                                               path + ".default_for_profiles[" + std::to_string(j) +
+                                                   "]",
                                                "string");
                     }
                 }
@@ -186,13 +187,12 @@ std::vector<RegistryValidationIssue> validate_registry_json_shape(const json& do
                     add_type_issue(issues, path, "object");
                     continue;
                 }
-                for (const char* field : {"role", "transport", "endpoint", "namespace",
-                                          "provider", "path"})
+                for (const char* field :
+                     {"role", "transport", "endpoint", "namespace", "provider", "path"})
                     validate_string_field(profile, field, path, issues);
                 if (profile.contains("default") && !profile["default"].is_boolean())
                     add_type_issue(issues, path + ".default", "boolean");
-                for (const char* field : {"portfolio_store", "semantic_index",
-                                          "graph_projection"})
+                for (const char* field : {"portfolio_store", "semantic_index", "graph_projection"})
                     if (profile.contains(field))
                         validate_provider_object(profile[field], path + "." + field, issues);
                 if (profile.contains("providers")) {
@@ -210,8 +210,7 @@ std::vector<RegistryValidationIssue> validate_registry_json_shape(const json& do
                     if (!marker.is_object()) {
                         add_type_issue(issues, path + ".target_marker", "object");
                     } else {
-                        for (const char* field : {"instance_id", "namespace",
-                                                  "protocol_version"})
+                        for (const char* field : {"instance_id", "namespace", "protocol_version"})
                             validate_string_field(marker, field, path + ".target_marker", issues);
                     }
                 }
@@ -264,80 +263,80 @@ RegistryData load_registry() {
     try {
         reg.schema_version = j.value("schema_version", "");
 
-    if (j.contains("repos") && j["repos"].is_array()) {
-        for (const auto& r : j["repos"]) {
-            RepoEntry entry;
-            entry.name = r.value("name", "");
-            entry.root = r.value("root", "");
-            entry.db_path = r.value("db_path", "");
-            entry.owner_pid = r.value("owner_pid", 0LL);
-            entry.owner_port = r.value("owner_port", 0);
-            entry.owner_token = r.value("owner_token", "");
-            entry.owner_started_at = r.value("owner_started_at", 0LL);
-            entry.owner_heartbeat_at = r.value("owner_heartbeat_at", 0LL);
-            entry.repository_id = r.value("repository_id", "");
-            entry.index_stream_id = r.value("index_stream_id", "");
-            entry.variant = r.value("variant", "");
-            if (r.contains("default_for_profiles") && r["default_for_profiles"].is_array()) {
-                for (const auto& profile : r["default_for_profiles"])
-                    if (profile.is_string())
-                        entry.default_for_profiles.push_back(profile.get<std::string>());
+        if (j.contains("repos") && j["repos"].is_array()) {
+            for (const auto& r : j["repos"]) {
+                RepoEntry entry;
+                entry.name = r.value("name", "");
+                entry.root = r.value("root", "");
+                entry.db_path = r.value("db_path", "");
+                entry.owner_pid = r.value("owner_pid", 0LL);
+                entry.owner_port = r.value("owner_port", 0);
+                entry.owner_token = r.value("owner_token", "");
+                entry.owner_started_at = r.value("owner_started_at", 0LL);
+                entry.owner_heartbeat_at = r.value("owner_heartbeat_at", 0LL);
+                entry.repository_id = r.value("repository_id", "");
+                entry.index_stream_id = r.value("index_stream_id", "");
+                entry.variant = r.value("variant", "");
+                if (r.contains("default_for_profiles") && r["default_for_profiles"].is_array()) {
+                    for (const auto& profile : r["default_for_profiles"])
+                        if (profile.is_string())
+                            entry.default_for_profiles.push_back(profile.get<std::string>());
+                }
+                if (!entry.root.empty()) reg.repos.push_back(entry);
             }
-            if (!entry.root.empty()) reg.repos.push_back(entry);
         }
-    }
 
-    if (j.contains("storage_profiles") && j["storage_profiles"].is_object()) {
-        for (const auto& [name, value] : j["storage_profiles"].items()) {
-            if (!value.is_object()) continue;
-            StorageProfile profile;
-            profile.name = name;
-            profile.role = value.value("role", "");
-            profile.transport = value.value("transport", "");
-            profile.endpoint = value.value("endpoint", "");
-            profile.namespace_name = value.value("namespace", "");
-            profile.is_default = value.value("default", false);
-            if (value.contains("portfolio_store"))
-                profile.portfolio_store = provider_from_json(value["portfolio_store"]);
-            profile.portfolio_store.provider =
-                value.value("provider", profile.portfolio_store.provider);
-            profile.portfolio_store.path = value.value("path", profile.portfolio_store.path);
-            if (value.contains("providers") && value["providers"].is_object()) {
-                const auto& providers = value["providers"];
+        if (j.contains("storage_profiles") && j["storage_profiles"].is_object()) {
+            for (const auto& [name, value] : j["storage_profiles"].items()) {
+                if (!value.is_object()) continue;
+                StorageProfile profile;
+                profile.name = name;
+                profile.role = value.value("role", "");
+                profile.transport = value.value("transport", "");
+                profile.endpoint = value.value("endpoint", "");
+                profile.namespace_name = value.value("namespace", "");
+                profile.is_default = value.value("default", false);
+                if (value.contains("portfolio_store"))
+                    profile.portfolio_store = provider_from_json(value["portfolio_store"]);
                 profile.portfolio_store.provider =
-                    providers.value("portfolio_store", profile.portfolio_store.provider);
-                if (providers.contains("semantic_index") &&
-                    providers["semantic_index"].is_string())
-                    profile.semantic_index =
-                        ProviderTarget{providers["semantic_index"].get<std::string>(), "", ""};
-                if (providers.contains("graph_projection") &&
-                    providers["graph_projection"].is_string())
-                    profile.graph_projection =
-                        ProviderTarget{providers["graph_projection"].get<std::string>(), "", ""};
+                    value.value("provider", profile.portfolio_store.provider);
+                profile.portfolio_store.path = value.value("path", profile.portfolio_store.path);
+                if (value.contains("providers") && value["providers"].is_object()) {
+                    const auto& providers = value["providers"];
+                    profile.portfolio_store.provider =
+                        providers.value("portfolio_store", profile.portfolio_store.provider);
+                    if (providers.contains("semantic_index") &&
+                        providers["semantic_index"].is_string())
+                        profile.semantic_index =
+                            ProviderTarget{providers["semantic_index"].get<std::string>(), "", ""};
+                    if (providers.contains("graph_projection") &&
+                        providers["graph_projection"].is_string())
+                        profile.graph_projection = ProviderTarget{
+                            providers["graph_projection"].get<std::string>(), "", ""};
+                }
+                if (value.contains("semantic_index"))
+                    profile.semantic_index = provider_from_json(value["semantic_index"]);
+                if (value.contains("graph_projection"))
+                    profile.graph_projection = provider_from_json(value["graph_projection"]);
+                if (value.contains("target_marker") && value["target_marker"].is_object()) {
+                    const auto& marker = value["target_marker"];
+                    profile.target_marker =
+                        TargetMarker{marker.value("instance_id", ""), marker.value("namespace", ""),
+                                     marker.value("protocol_version", "")};
+                }
+                reg.storage_profiles.push_back(std::move(profile));
             }
-            if (value.contains("semantic_index"))
-                profile.semantic_index = provider_from_json(value["semantic_index"]);
-            if (value.contains("graph_projection"))
-                profile.graph_projection = provider_from_json(value["graph_projection"]);
-            if (value.contains("target_marker") && value["target_marker"].is_object()) {
-                const auto& marker = value["target_marker"];
-                profile.target_marker = TargetMarker{marker.value("instance_id", ""),
-                                                     marker.value("namespace", ""),
-                                                     marker.value("protocol_version", "")};
-            }
-            reg.storage_profiles.push_back(std::move(profile));
         }
-    }
 
-    if (j.contains("groups") && j["groups"].is_object()) {
-        for (auto& [gname, members] : j["groups"].items()) {
-            std::vector<std::string> repos;
-            if (members.is_array())
-                for (const auto& m : members)
-                    repos.push_back(m.get<std::string>());
-            reg.groups.emplace_back(gname, std::move(repos));
+        if (j.contains("groups") && j["groups"].is_object()) {
+            for (auto& [gname, members] : j["groups"].items()) {
+                std::vector<std::string> repos;
+                if (members.is_array())
+                    for (const auto& m : members)
+                        repos.push_back(m.get<std::string>());
+                reg.groups.emplace_back(gname, std::move(repos));
+            }
         }
-    }
     } catch (const json::exception&) {
         RegistryData invalid;
         invalid.load_issues.push_back(
@@ -364,8 +363,7 @@ void save_registry(const RegistryData& reg) {
         if (!r.repository_id.empty()) entry["repository_id"] = r.repository_id;
         if (!r.index_stream_id.empty()) entry["index_stream_id"] = r.index_stream_id;
         if (!r.variant.empty()) entry["variant"] = r.variant;
-        if (!r.default_for_profiles.empty())
-            entry["default_for_profiles"] = r.default_for_profiles;
+        if (!r.default_for_profiles.empty()) entry["default_for_profiles"] = r.default_for_profiles;
         j["repos"].push_back(entry);
     }
     j["groups"] = json::object();
@@ -395,10 +393,10 @@ void save_registry(const RegistryData& reg) {
             if (!profile.endpoint.empty()) value["endpoint"] = profile.endpoint;
             if (!profile.namespace_name.empty()) value["namespace"] = profile.namespace_name;
             if (profile.target_marker) {
-                value["target_marker"] = {{"instance_id", profile.target_marker->instance_id},
-                                           {"namespace", profile.target_marker->namespace_name},
-                                           {"protocol_version",
-                                            profile.target_marker->protocol_version}};
+                value["target_marker"] = {
+                    {"instance_id", profile.target_marker->instance_id},
+                    {"namespace", profile.target_marker->namespace_name},
+                    {"protocol_version", profile.target_marker->protocol_version}};
             }
             j["storage_profiles"][profile.name] = std::move(value);
         }
@@ -589,8 +587,7 @@ std::vector<RepoEntry> get_group_repos(const RegistryData& reg, const std::strin
         for (const auto& member : members) {
             for (const auto& r : reg.repos) {
                 if (r.name == member || (!r.repository_id.empty() && r.repository_id == member)) {
-                    const std::string key =
-                        r.index_stream_id.empty() ? r.root : r.index_stream_id;
+                    const std::string key = r.index_stream_id.empty() ? r.root : r.index_stream_id;
                     if (selected.insert(key).second) result.push_back(r);
                 }
             }
@@ -675,8 +672,7 @@ std::vector<RegistryValidationIssue> validate_registry(const RegistryData& reg) 
         if (profile.role == "portfolio_shared" && !valid_shared_endpoint(profile.endpoint))
             add("invalid_shared_endpoint", base + ".endpoint",
                 "shared endpoint requires HTTPS, except HTTP on explicit loopback hosts");
-        if (profile.role == "portfolio_shared" &&
-            profile.portfolio_store.provider != "postgresql")
+        if (profile.role == "portfolio_shared" && profile.portfolio_store.provider != "postgresql")
             add("invalid_shared_store", base + ".portfolio_store.provider",
                 "axon_http profile requires postgresql for the durable portfolio store");
         if (profile.semantic_index && profile.semantic_index->provider != "qdrant")

@@ -41,7 +41,8 @@ std::vector<std::string> command_arguments(const std::filesystem::path& root,
 void append_bounded(CommandResult& result, const char* bytes, std::size_t count,
                     const std::size_t maximum_output_bytes) {
     const auto available = result.stdout_text.size() < maximum_output_bytes
-        ? maximum_output_bytes - result.stdout_text.size() : 0U;
+                               ? maximum_output_bytes - result.stdout_text.size()
+                               : 0U;
     const auto copied = std::min(available, count);
     result.stdout_text.append(bytes, copied);
     result.output_truncated = result.output_truncated || copied != count;
@@ -64,9 +65,14 @@ std::wstring quote_windows_argument(const std::wstring& argument) {
     std::wstring result{L"\""};
     std::size_t backslashes = 0;
     for (const auto character : argument) {
-        if (character == L'\\') { ++backslashes; continue; }
-        if (character == L'\"') result.append(backslashes * 2U + 1U, L'\\');
-        else result.append(backslashes, L'\\');
+        if (character == L'\\') {
+            ++backslashes;
+            continue;
+        }
+        if (character == L'\"')
+            result.append(backslashes * 2U + 1U, L'\\');
+        else
+            result.append(backslashes, L'\\');
         backslashes = 0;
         result.push_back(character);
     }
@@ -81,7 +87,8 @@ std::wstring quote_windows_argument(const std::wstring& argument) {
 CommandResult run(const std::filesystem::path& repository_root,
                   const std::vector<std::string>& arguments,
                   const std::size_t maximum_output_bytes) {
-    if (maximum_output_bytes == 0U) throw std::invalid_argument("Git output limit must be positive");
+    if (maximum_output_bytes == 0U)
+        throw std::invalid_argument("Git output limit must be positive");
     const auto argv = command_arguments(repository_root, arguments);
     CommandResult result;
 
@@ -141,7 +148,8 @@ CommandResult run(const std::filesystem::path& repository_root,
         close(pipefd[1]);
         std::vector<char*> exec_argv;
         exec_argv.reserve(argv.size() + 1U);
-        for (const auto& argument : argv) exec_argv.push_back(const_cast<char*>(argument.c_str()));
+        for (const auto& argument : argv)
+            exec_argv.push_back(const_cast<char*>(argument.c_str()));
         exec_argv.push_back(nullptr);
         execvp("git", exec_argv.data());
         _exit(127);
@@ -155,7 +163,9 @@ CommandResult run(const std::filesystem::path& repository_root,
     close(pipefd[0]);
     int status = 0;
     pid_t waited = -1;
-    do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+    do {
+        waited = waitpid(child, &status, 0);
+    } while (waited < 0 && errno == EINTR);
     if (waited < 0) throw std::runtime_error("unable to wait for Git process");
     result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128;
 #endif

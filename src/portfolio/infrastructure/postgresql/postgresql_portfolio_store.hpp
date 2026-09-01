@@ -28,7 +28,8 @@ public:
     ApplyResult reidentify_repository_stream(const RepositoryReidentification&,
                                              std::uint64_t) override;
     CursorEpochManifest stream_state(const RepositoryStreamKey&) const override;
-    StreamProjection inspect_repository_stream(const RepositoryStreamKey&, std::size_t) const override;
+    StreamProjection inspect_repository_stream(const RepositoryStreamKey&,
+                                               std::size_t) const override;
     MaintenanceResult maintenance(MaintenanceKind) override;
 
     std::size_t pending_outbox_count() const;

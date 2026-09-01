@@ -195,14 +195,13 @@ int index_routes(const Config& cfg, Database& db) {
         auto fid_res = conn.Query(fid_sql);
         require_ok(fid_res, "resolve route handler file");
         std::string fid_str = "NULL";
-        if (fid_res->RowCount() > 0)
-            fid_str = std::to_string(fid_res->GetValue<int64_t>(0, 0));
+        if (fid_res->RowCount() > 0) fid_str = std::to_string(fid_res->GetValue<int64_t>(0, 0));
 
         require_success(conn.Query("INSERT INTO routes (id, method, path, handler_file, framework, "
                                    "file_id) VALUES (nextval('seq_id'), '" +
                                    sq(r.method) + "', '" + sq(r.path) + "', '" +
-                                   sq(r.handler_file) + "', '" + sq(r.framework) + "', " +
-                                   fid_str + ")"),
+                                   sq(r.handler_file) + "', '" + sq(r.framework) + "', " + fid_str +
+                                   ")"),
                         "insert route");
         const std::string route_key = r.method + " " + r.path + "@" + r.handler_file;
         current_keys.insert(route_key);
@@ -217,13 +216,11 @@ int index_routes(const Config& cfg, Database& db) {
         }
     if (!affected.empty()) {
         for (const auto& route_key : current_keys)
-            portfolio::clear_tombstone(
-                conn, {"route", route_key, "upsert", std::nullopt});
+            portfolio::clear_tombstone(conn, {"route", route_key, "upsert", std::nullopt});
         portfolio::trigger_journal_failpoint_for_testing("after_mutation");
         const std::string manifest = portfolio::compute_manifest_hash(conn);
-        const uint64_t sequence =
-            portfolio::append_index_event(transaction, conn, "IndexRoutesUpdated", affected,
-                                          manifest);
+        const uint64_t sequence = portfolio::append_index_event(
+            transaction, conn, "IndexRoutesUpdated", affected, manifest);
         const std::string epoch = portfolio::index_identity(conn).current_epoch;
         for (const auto& route : deleted)
             portfolio::upsert_tombstone(conn, route, sequence, epoch);

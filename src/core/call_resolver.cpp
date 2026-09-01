@@ -137,8 +137,7 @@ struct Candidate {
 } // namespace
 
 int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
-                       const std::vector<CallSite>& calls,
-                       portfolio::Transaction& transaction) {
+                       const std::vector<CallSite>& calls, portfolio::Transaction& transaction) {
     int inserted_edges = 0;
     for (const auto& call : calls) {
         if (call.caller_name.empty() || call.callee_name.empty()) continue;
@@ -230,8 +229,7 @@ int resolve_call_edges(duckdb::Connection& conn, int64_t from_file_id,
         std::vector<portfolio::AffectedEntity> affected = {
             {"dependency", "call-edges-from-file:" + std::to_string(from_file_id), "upsert",
              std::nullopt}};
-        portfolio::append_index_event(transaction, conn, "IndexSymbolsUpdated", affected,
-                                      manifest);
+        portfolio::append_index_event(transaction, conn, "IndexSymbolsUpdated", affected, manifest);
     }
     transaction.commit();
     return inserted;

@@ -30,8 +30,14 @@ std::string base64url(const unsigned char* data, std::size_t size) {
     const auto written = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(encoded.data()), data,
                                          static_cast<int>(size));
     encoded.resize(written);
-    while (!encoded.empty() && encoded.back() == '=') encoded.pop_back();
-    for (char& ch : encoded) { if (ch == '+') ch = '-'; else if (ch == '/') ch = '_'; }
+    while (!encoded.empty() && encoded.back() == '=')
+        encoded.pop_back();
+    for (char& ch : encoded) {
+        if (ch == '+')
+            ch = '-';
+        else if (ch == '/')
+            ch = '_';
+    }
     return encoded;
 }
 
@@ -49,8 +55,11 @@ struct SigningFixture {
         const BIGNUM *n = nullptr, *e = nullptr;
         RSA_get0_key(rsa.get(), &n, &e, nullptr);
         std::vector<unsigned char> nb(BN_num_bytes(n)), eb(BN_num_bytes(e));
-        BN_bn2bin(n, nb.data()); BN_bn2bin(e, eb.data());
-        metadata["kty"] = "RSA"; metadata["kid"] = "test-kid"; metadata["use"] = "sig";
+        BN_bn2bin(n, nb.data());
+        BN_bn2bin(e, eb.data());
+        metadata["kty"] = "RSA";
+        metadata["kid"] = "test-kid";
+        metadata["use"] = "sig";
         if (!metadata.contains("n")) metadata["n"] = base64url(nb.data(), nb.size());
         if (!metadata.contains("e")) metadata["e"] = base64url(eb.data(), eb.size());
         return json{{"keys", json::array({metadata})}}.dump();
@@ -62,13 +71,16 @@ struct SigningFixture {
         extra_header["kid"] = "test-kid";
         const auto header = extra_header.dump();
         const auto payload = claims.dump();
-        const auto signing = base64url(reinterpret_cast<const unsigned char*>(header.data()), header.size()) + "." +
-                             base64url(reinterpret_cast<const unsigned char*>(payload.data()), payload.size());
+        const auto signing =
+            base64url(reinterpret_cast<const unsigned char*>(header.data()), header.size()) + "." +
+            base64url(reinterpret_cast<const unsigned char*>(payload.data()), payload.size());
         std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(EVP_PKEY_new(), EVP_PKEY_free);
         if (!key || EVP_PKEY_set1_RSA(key.get(), rsa.get()) != 1)
             throw std::runtime_error("failed to load signing key");
-        std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
-        if (!context || EVP_DigestSignInit(context.get(), nullptr, EVP_sha256(), nullptr, key.get()) != 1 ||
+        std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(),
+                                                                        EVP_MD_CTX_free);
+        if (!context ||
+            EVP_DigestSignInit(context.get(), nullptr, EVP_sha256(), nullptr, key.get()) != 1 ||
             EVP_DigestSignUpdate(context.get(), signing.data(), signing.size()) != 1)
             throw std::runtime_error("failed to initialize signature");
         std::size_t signature_size = 0;
@@ -83,22 +95,30 @@ struct SigningFixture {
 };
 
 RemotePublisherBinding binding() {
-    return {kBinding, {kRepository, kStream}, std::string(kIssuer) + "|publisher-1", kEpoch,
-            kFingerprint, ""};
+    return {kBinding, {kRepository, kStream}, std::string(kIssuer) + "|publisher-1",
+            kEpoch,   kFingerprint,           ""};
 }
 
 ProjectionEvent event(std::uint64_t sequence = 1) {
-    return {{kRepository, kStream}, sequence, "event-id-0123456789", kEpoch,
+    return {{kRepository, kStream},
+            sequence,
+            "event-id-0123456789",
+            kEpoch,
             std::string("fedcba9876543210fedcba9876543210"),
             {{"repository", kRepository, ProjectionOperation::Upsert, std::nullopt}}};
 }
 
-AuthenticatedPrincipal verified_principal(const SigningFixture& fixture, const std::string& subject) {
+AuthenticatedPrincipal verified_principal(const SigningFixture& fixture,
+                                          const std::string& subject) {
     KeycloakOidcAuthenticator auth({kIssuer, kAudience, fixture.jwks(), std::chrono::seconds{0}});
     const auto now = std::chrono::system_clock::now();
-    const auto expiration = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count() + 60;
-    return auth.authenticate_bearer("Bearer " + fixture.token(
-        {{"iss", kIssuer}, {"aud", kAudience}, {"sub", subject}, {"exp", expiration}}), now);
+    const auto expiration =
+        std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count() + 60;
+    return auth.authenticate_bearer(
+        "Bearer " +
+            fixture.token(
+                {{"iss", kIssuer}, {"aud", kAudience}, {"sub", subject}, {"exp", expiration}}),
+        now);
 }
 
 TEST(PortfolioRemoteIngest, RejectsUnregisteredOrMismatchedPublisherBeforeStoreWrite) {
@@ -143,10 +163,18 @@ TEST(PortfolioRemoteIngest, RequiresServerSideGrantForRemoteReidentification) {
     ingest.register_binding(old_binding);
     ingest.register_pending_reidentification_binding(old_binding.binding_id, new_binding);
     ASSERT_EQ(ingest.ingest(principal, {kMarker, old_binding, 0, {event()}}).state.cursor, 1u);
-    RepositoryReidentification reid{{kRepository, kStream}, new_binding.stream, 2,
-        "reidentify-id-0123456789", "22222222222222222222222222222222", std::nullopt,
-        old_binding.binding_id, new_binding.binding_id, "owner-approved:G7", "owner-approved"};
-    EXPECT_THROW(ingest.ingest(principal, {kMarker, old_binding, 1, {}, reid}), PortfolioStoreError);
+    RepositoryReidentification reid{{kRepository, kStream},
+                                    new_binding.stream,
+                                    2,
+                                    "reidentify-id-0123456789",
+                                    "22222222222222222222222222222222",
+                                    std::nullopt,
+                                    old_binding.binding_id,
+                                    new_binding.binding_id,
+                                    "owner-approved:G7",
+                                    "owner-approved"};
+    EXPECT_THROW(ingest.ingest(principal, {kMarker, old_binding, 1, {}, reid}),
+                 PortfolioStoreError);
     ingest.register_reidentification_grant(old_binding.binding_id, new_binding.binding_id,
                                            "owner-approved:G7");
     EXPECT_EQ(ingest.ingest(principal, {kMarker, old_binding, 1, {}, reid}).state.cursor, 2u);
@@ -157,46 +185,76 @@ TEST(PortfolioRemoteIngest, KeycloakRs256AuthenticationFailsClosed) {
     SigningFixture fixture;
     KeycloakOidcAuthenticator auth({kIssuer, kAudience, fixture.jwks(), std::chrono::seconds{0}});
     const auto now = std::chrono::system_clock::now();
-    const auto expiration = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count() + 60;
-    const json claims{{"iss", kIssuer}, {"aud", json::array({kAudience})}, {"sub", "publisher-1"}, {"exp", expiration}};
+    const auto expiration =
+        std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count() + 60;
+    const json claims{{"iss", kIssuer},
+                      {"aud", json::array({kAudience})},
+                      {"sub", "publisher-1"},
+                      {"exp", expiration}};
     const auto principal = auth.authenticate_bearer("Bearer " + fixture.token(claims), now);
     EXPECT_EQ(principal.principal_id(), std::string(kIssuer) + "|publisher-1");
     auto tampered = fixture.token(claims);
     const auto signature_start = tampered.rfind('.') + 1;
     tampered.at(signature_start + 1) = tampered.at(signature_start + 1) == 'A' ? 'B' : 'A';
     EXPECT_THROW(auth.authenticate_bearer("Bearer " + tampered, now), std::runtime_error);
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(claims, "none"), now), std::runtime_error);
-    auto wrong_audience = claims; wrong_audience["aud"] = "another-api";
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(wrong_audience), now), std::runtime_error);
-    auto malformed_audience = claims; malformed_audience["aud"] = json::array({kAudience, 42});
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(malformed_audience), now), std::runtime_error);
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(claims, "RS256",
-        {{"crit", json::array({"unrecognized"})}, {"unrecognized", true}}), now), std::runtime_error);
-    KeycloakOidcAuthenticator wrong_key_algorithm({kIssuer, kAudience, fixture.jwks({{"alg", "RS512"}}), std::chrono::seconds{0}});
-    EXPECT_THROW(wrong_key_algorithm.authenticate_bearer("Bearer " + fixture.token(claims), now), std::runtime_error);
-    KeycloakOidcAuthenticator signing_only_key({kIssuer, kAudience, fixture.jwks({{"key_ops", json::array({"sign"})}}), std::chrono::seconds{0}});
-    EXPECT_THROW(signing_only_key.authenticate_bearer("Bearer " + fixture.token(claims), now), std::runtime_error);
-    auto wrong_issuer = claims; wrong_issuer["iss"] = "https://untrusted.example/realm";
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(wrong_issuer), now), std::runtime_error);
-    auto expired = claims; expired["exp"] = expiration - 120;
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(expired), now), std::runtime_error);
-    auto future = claims; future["nbf"] = expiration + 3600;
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(future), now), std::runtime_error);
-    auto malformed_nbf = claims; malformed_nbf["nbf"] = "tomorrow";
-    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(malformed_nbf), now), std::runtime_error);
+    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(claims, "none"), now),
+                 std::runtime_error);
+    auto wrong_audience = claims;
+    wrong_audience["aud"] = "another-api";
+    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(wrong_audience), now),
+                 std::runtime_error);
+    auto malformed_audience = claims;
+    malformed_audience["aud"] = json::array({kAudience, 42});
+    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(malformed_audience), now),
+                 std::runtime_error);
+    EXPECT_THROW(
+        auth.authenticate_bearer("Bearer " + fixture.token(claims, "RS256",
+                                                           {{"crit", json::array({"unrecognized"})},
+                                                            {"unrecognized", true}}),
+                                 now),
+        std::runtime_error);
+    KeycloakOidcAuthenticator wrong_key_algorithm(
+        {kIssuer, kAudience, fixture.jwks({{"alg", "RS512"}}), std::chrono::seconds{0}});
+    EXPECT_THROW(wrong_key_algorithm.authenticate_bearer("Bearer " + fixture.token(claims), now),
+                 std::runtime_error);
+    KeycloakOidcAuthenticator signing_only_key({kIssuer, kAudience,
+                                                fixture.jwks({{"key_ops", json::array({"sign"})}}),
+                                                std::chrono::seconds{0}});
+    EXPECT_THROW(signing_only_key.authenticate_bearer("Bearer " + fixture.token(claims), now),
+                 std::runtime_error);
+    auto wrong_issuer = claims;
+    wrong_issuer["iss"] = "https://untrusted.example/realm";
+    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(wrong_issuer), now),
+                 std::runtime_error);
+    auto expired = claims;
+    expired["exp"] = expiration - 120;
+    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(expired), now),
+                 std::runtime_error);
+    auto future = claims;
+    future["nbf"] = expiration + 3600;
+    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(future), now),
+                 std::runtime_error);
+    auto malformed_nbf = claims;
+    malformed_nbf["nbf"] = "tomorrow";
+    EXPECT_THROW(auth.authenticate_bearer("Bearer " + fixture.token(malformed_nbf), now),
+                 std::runtime_error);
 }
 
 TEST(PortfolioRemoteIngest, RejectsWeakOrUnsafeJwkRsaParameters) {
     SigningFixture weak(512);
     const auto now = std::chrono::system_clock::now();
-    const auto expiration = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count() + 60;
-    const json claims{{"iss", kIssuer}, {"aud", kAudience}, {"sub", "publisher-1"}, {"exp", expiration}};
+    const auto expiration =
+        std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count() + 60;
+    const json claims{
+        {"iss", kIssuer}, {"aud", kAudience}, {"sub", "publisher-1"}, {"exp", expiration}};
     KeycloakOidcAuthenticator weak_auth({kIssuer, kAudience, weak.jwks(), std::chrono::seconds{0}});
-    EXPECT_THROW(weak_auth.authenticate_bearer("Bearer " + weak.token(claims), now), std::runtime_error);
+    EXPECT_THROW(weak_auth.authenticate_bearer("Bearer " + weak.token(claims), now),
+                 std::runtime_error);
     SigningFixture regular;
-    KeycloakOidcAuthenticator even_exponent({kIssuer, kAudience,
-        regular.jwks({{"e", "Ag"}}), std::chrono::seconds{0}});
-    EXPECT_THROW(even_exponent.authenticate_bearer("Bearer " + regular.token(claims), now), std::runtime_error);
+    KeycloakOidcAuthenticator even_exponent(
+        {kIssuer, kAudience, regular.jwks({{"e", "Ag"}}), std::chrono::seconds{0}});
+    EXPECT_THROW(even_exponent.authenticate_bearer("Bearer " + regular.token(claims), now),
+                 std::runtime_error);
 }
 
 } // namespace

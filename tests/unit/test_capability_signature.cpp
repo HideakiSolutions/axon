@@ -15,8 +15,7 @@ std::vector<std::string> split(const std::string& value) {
     std::stringstream input(value);
     std::string item;
     while (std::getline(input, item, ',')) {
-        if (!item.empty())
-            values.push_back(item);
+        if (!item.empty()) values.push_back(item);
     }
     return values;
 }
@@ -44,15 +43,19 @@ axon::portfolio::CapabilityInput fixture(const fs::path& path) {
     capability.events = split(fields.at("events"));
     capability.external_dependencies = split(fields.at("external_dependencies"));
     capability.tests = split(fields.at("tests"));
-    capability.evidence.push_back({"symbol", capability.entity_key, capability.path, capability.symbol,
-                                   capability.content_digest, 42, "v1", 1, 8});
+    capability.evidence.push_back({"symbol", capability.entity_key, capability.path,
+                                   capability.symbol, capability.content_digest, 42, "v1", 1, 8});
     return capability;
 }
 
 axon::portfolio::CapabilityExtractionRequest request() {
     return {{"7359f9cf-c2e0-4a61-ab7b-a5fd0918cbbb", "b16e9e79-4a7d-4711-a947-4d3c0d9a7fbb"},
-            42, "11111111111111111111111111111111", "22222222222222222222222222222222",
-            "2026-08-31T08:00:00Z", "commerce", "33333333333333333333333333333333"};
+            42,
+            "11111111111111111111111111111111",
+            "22222222222222222222222222222222",
+            "2026-08-31T08:00:00Z",
+            "commerce",
+            "33333333333333333333333333333333"};
 }
 
 fs::path fixture_root() {
@@ -78,7 +81,8 @@ TEST(CapabilitySignature, GoldenFixturesAreDeterministicAcrossCppTypeScriptAndPy
     for (const auto& signature : first) {
         EXPECT_FALSE(signature.evidence.empty());
         EXPECT_EQ(signature.evidence.back().kind, "symbol");
-        EXPECT_TRUE(signature.ast_fingerprints.empty() || signature.ast_fingerprints.front().size() >= 16u);
+        EXPECT_TRUE(signature.ast_fingerprints.empty() ||
+                    signature.ast_fingerprints.front().size() >= 16u);
     }
 }
 
@@ -101,11 +105,13 @@ TEST(CapabilitySignature, RejectsMissingProvenanceAndNeverAcceptsSourceBodies) {
     auto input = fixture(fixture_root() / "cpp-payment.fixture");
     input.evidence.clear();
     extraction.entities = {input};
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     extraction.entities = {fixture(fixture_root() / "cpp-payment.fixture")};
     extraction.configuration_digest.clear();
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 }
 
 TEST(CapabilitySignature, CanonicalizesEvidenceAndSkipsInvalidUnaffectedPartitions) {
@@ -179,8 +185,8 @@ TEST(CapabilitySignature, PreservesAndFingerprintsAllV1OptionalMetadataChannels)
     input.handlers = {"CatalogSearchHandler"};
     input.schemas = {"CatalogSearchResult"};
     input.dtos = {"CatalogSearchDto"};
-    input.call_graph_neighborhood = {{"outgoing", "calls", "search-client.query", 1,
-                                      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}};
+    input.call_graph_neighborhood = {
+        {"outgoing", "calls", "search-client.query", 1, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}};
     input.embedding = {"local-test-model", 384, "cosine", "l2", "qdrant:catalog-search"};
     extraction.entities = {input};
     const auto first = axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction);
@@ -200,11 +206,13 @@ TEST(CapabilitySignature, PreservesAndFingerprintsAllV1OptionalMetadataChannels)
     reversed.call_graph_neighborhood = {
         {"incoming", "consumes", "api.request", 2, std::nullopt},
         {"outgoing", "calls", "search-client.query", 1, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}};
-    input.call_graph_neighborhood = {reversed.call_graph_neighborhood[1], reversed.call_graph_neighborhood[0]};
+    input.call_graph_neighborhood = {reversed.call_graph_neighborhood[1],
+                                     reversed.call_graph_neighborhood[0]};
     extraction.entities = {input};
     const auto ordered = axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction);
     extraction.entities = {reversed};
-    const auto reverse_ordered = axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction);
+    const auto reverse_ordered =
+        axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction);
     EXPECT_EQ(ordered, reverse_ordered);
 }
 
@@ -213,12 +221,14 @@ TEST(CapabilitySignature, RejectsSchemaViolatingMetadataEvidenceAndEmptyIncremen
     auto input = fixture(fixture_root() / "cpp-payment.fixture");
     input.name.assign(513, 'x');
     extraction.entities = {input};
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     input = fixture(fixture_root() / "cpp-payment.fixture");
     input.evidence.front().kind = "source-body";
     extraction.entities = {input};
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     extraction.entities = {fixture(fixture_root() / "cpp-payment.fixture")};
     extraction.affected_entity_keys.clear();
@@ -231,36 +241,43 @@ TEST(CapabilitySignature, RejectsOversizedCollectionsAndProvenanceBeforeProjecti
     auto input = fixture(fixture_root() / "cpp-payment.fixture");
     input.public_symbols = {std::string(1025, 's')};
     extraction.entities = {input};
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     input = fixture(fixture_root() / "cpp-payment.fixture");
     input.routes.assign(1001, "GET /bounded");
     extraction.entities = {input};
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     input = fixture(fixture_root() / "cpp-payment.fixture");
     input.ast_digest = "x";
     extraction.entities = {input};
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     extraction.entities = {fixture(fixture_root() / "cpp-payment.fixture")};
     extraction.configuration_digest = "x";
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     extraction = request();
     extraction.entities = {fixture(fixture_root() / "cpp-payment.fixture")};
     extraction.extracted_at = "not-a-timestamp";
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     extraction = request();
     extraction.entities = {fixture(fixture_root() / "cpp-payment.fixture")};
     extraction.extracted_at = "2026-99-99T25:60:60Z";
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     extraction = request();
     extraction.entities = {fixture(fixture_root() / "cpp-payment.fixture")};
     extraction.extracted_at = "2026-08-31T08:00:00.Z";
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 
     extraction = request();
     input = fixture(fixture_root() / "cpp-payment.fixture");
@@ -268,5 +285,6 @@ TEST(CapabilitySignature, RejectsOversizedCollectionsAndProvenanceBeforeProjecti
     for (int count = 0; count < 256; ++count)
         input.name += "aA";
     extraction.entities = {input};
-    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction), std::invalid_argument);
+    EXPECT_THROW(axon::portfolio::CapabilitySignatureExtractor{}.extract(extraction),
+                 std::invalid_argument);
 }

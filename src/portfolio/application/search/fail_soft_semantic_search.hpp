@@ -18,12 +18,14 @@ struct SemanticSearchResult {
 class FailSoftSemanticSearch final {
 public:
     FailSoftSemanticSearch(SemanticCapabilityStore& primary, SemanticCapabilityStore& fallback);
-    SemanticSearchResult search(const std::vector<float>&, const SemanticIdentity&, std::size_t) const;
+    SemanticSearchResult search(const std::vector<float>&, const SemanticIdentity&,
+                                std::size_t) const;
     void upsert(const SemanticRecord&);
     void erase(const std::string& signature_id, const std::string& generation);
     // Call only after a successful replay/rebuild has made the primary current.
     void mark_primary_reconciled();
     bool primary_dirty() const;
+
 private:
     SemanticCapabilityStore& primary_;
     SemanticCapabilityStore& fallback_;

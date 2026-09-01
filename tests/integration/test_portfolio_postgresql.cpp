@@ -34,7 +34,11 @@ std::string schema(const char* suffix) {
 
 ProjectionEvent event(const RepositoryStreamKey& stream, std::uint64_t sequence,
                       const std::string& event_id, const std::string& key) {
-    return {stream, sequence, event_id, "postgres-epoch-0001", "postgres-manifest-0001",
+    return {stream,
+            sequence,
+            event_id,
+            "postgres-epoch-0001",
+            "postgres-manifest-0001",
             {{"file", key, ProjectionOperation::Upsert, "postgres-digest-0001"}}};
 }
 
@@ -55,9 +59,11 @@ TEST(PostgresqlPortfolioIntegration, PersistsProjectionAndDurableOutboxAcrossCon
         EXPECT_EQ(reopened.stream_state(kStream).cursor, 1u);
         EXPECT_TRUE(contains(reopened.inspect_repository_stream(kStream, 10), "persist.cpp"));
         EXPECT_EQ(reopened.pending_outbox_count(), 1u);
-        EXPECT_EQ(reopened.apply(
-            kStream, 0, {event(kStream, 1, "postgres-persist-event-0001", "persist.cpp")})
-            .disposition, ApplyDisposition::Duplicate);
+        EXPECT_EQ(reopened
+                      .apply(kStream, 0,
+                             {event(kStream, 1, "postgres-persist-event-0001", "persist.cpp")})
+                      .disposition,
+                  ApplyDisposition::Duplicate);
         EXPECT_EQ(reopened.pending_outbox_count(), 1u);
     }
 }
@@ -106,15 +112,25 @@ TEST(PostgresqlPortfolioIntegration, ReceiptConflictRollsBackBatchCursorEntities
 
 TEST(PostgresqlPortfolioIntegration, ReplaceOutboxTracksStateCyclesButNotImmediateReplay) {
     PostgresqlPortfolioStore store(dsn(), schema("replace_outbox"), true);
-    ASSERT_EQ(store.apply(kStream, 0,
-        {event(kStream, 1, "postgres-replace-seed-0001", "seed.cpp")}).disposition,
-        ApplyDisposition::Applied);
-    RepositorySnapshot first{kStream, 1, "postgres-epoch-0002", "postgres-manifest-0002",
-        false, false, {{"file", "first.cpp", ProjectionOperation::Upsert,
-                         "postgres-digest-first"}}};
-    RepositorySnapshot second{kStream, 1, "postgres-epoch-0003", "postgres-manifest-0003",
-        false, false, {{"file", "second.cpp", ProjectionOperation::Upsert,
-                         "postgres-digest-second"}}};
+    ASSERT_EQ(store.apply(kStream, 0, {event(kStream, 1, "postgres-replace-seed-0001", "seed.cpp")})
+                  .disposition,
+              ApplyDisposition::Applied);
+    RepositorySnapshot first{
+        kStream,
+        1,
+        "postgres-epoch-0002",
+        "postgres-manifest-0002",
+        false,
+        false,
+        {{"file", "first.cpp", ProjectionOperation::Upsert, "postgres-digest-first"}}};
+    RepositorySnapshot second{
+        kStream,
+        1,
+        "postgres-epoch-0003",
+        "postgres-manifest-0003",
+        false,
+        false,
+        {{"file", "second.cpp", ProjectionOperation::Upsert, "postgres-digest-second"}}};
     EXPECT_EQ(store.replace_repository_stream(first, 1).disposition, ApplyDisposition::Applied);
     EXPECT_EQ(store.replace_repository_stream(second, 1).disposition, ApplyDisposition::Applied);
     EXPECT_EQ(store.replace_repository_stream(first, 1).disposition, ApplyDisposition::Applied);
@@ -153,8 +169,9 @@ TEST(PostgresqlPortfolioIntegration, ChecksumMismatchFailsBeforeSchemaExpansion)
     run("INSERT INTO " + namespace_name +
         ".portfolio_schema_migrations VALUES(1,'wrong-checksum')");
     EXPECT_THROW(PostgresqlPortfolioStore(dsn(), namespace_name), PortfolioStoreError);
-    auto* result = PQexec(connection, ("SELECT to_regclass('" + namespace_name +
-        ".portfolio_streams') IS NULL").c_str());
+    auto* result =
+        PQexec(connection,
+               ("SELECT to_regclass('" + namespace_name + ".portfolio_streams') IS NULL").c_str());
     ASSERT_NE(result, nullptr);
     ASSERT_EQ(PQresultStatus(result), PGRES_TUPLES_OK);
     EXPECT_STREQ(PQgetvalue(result, 0, 0), "t");
@@ -185,24 +202,27 @@ TEST(PostgresqlPortfolioIntegration, UpgradesValidV1SchemaAdditivelyAndPreserves
         "NOT NULL,removed boolean NOT NULL,PRIMARY KEY(repository_id,index_stream_id))");
     run("CREATE TABLE " + namespace_name +
         ".portfolio_entities(repository_id text NOT NULL,index_stream_id text NOT NULL,entity_kind "
-        "text NOT NULL,entity_key text NOT NULL,digest text,PRIMARY KEY(repository_id,index_stream_id,"
+        "text NOT NULL,entity_key text NOT NULL,digest text,PRIMARY "
+        "KEY(repository_id,index_stream_id,"
         "entity_kind,entity_key))");
     run("CREATE TABLE " + namespace_name +
         ".portfolio_events(event_id text PRIMARY KEY,repository_id text NOT NULL,index_stream_id "
-        "text NOT NULL,sequence numeric(20,0) NOT NULL,fingerprint text NOT NULL,UNIQUE(index_stream_id,sequence))");
+        "text NOT NULL,sequence numeric(20,0) NOT NULL,fingerprint text NOT "
+        "NULL,UNIQUE(index_stream_id,sequence))");
     run("CREATE TABLE " + namespace_name + ".legacy_marker(value text NOT NULL)");
     run("INSERT INTO " + namespace_name + ".legacy_marker VALUES('preserved')");
     {
         PostgresqlPortfolioStore upgraded(dsn(), namespace_name, true);
         EXPECT_EQ(upgraded.pending_outbox_count(), 0u);
-        auto* result = PQexec(connection, ("SELECT count(*) FROM " + namespace_name +
-            ".portfolio_schema_migrations").c_str());
+        auto* result = PQexec(
+            connection,
+            ("SELECT count(*) FROM " + namespace_name + ".portfolio_schema_migrations").c_str());
         ASSERT_NE(result, nullptr);
         ASSERT_EQ(PQresultStatus(result), PGRES_TUPLES_OK);
         EXPECT_STREQ(PQgetvalue(result, 0, 0), "2");
         PQclear(result);
-        result = PQexec(connection, ("SELECT value FROM " + namespace_name +
-            ".legacy_marker").c_str());
+        result =
+            PQexec(connection, ("SELECT value FROM " + namespace_name + ".legacy_marker").c_str());
         ASSERT_NE(result, nullptr);
         ASSERT_EQ(PQresultStatus(result), PGRES_TUPLES_OK);
         EXPECT_STREQ(PQgetvalue(result, 0, 0), "preserved");
@@ -230,8 +250,8 @@ TEST(PostgresqlPortfolioIntegration, NeverDropsPreexistingDisposableNamedSchema)
         PostgresqlPortfolioStore non_owner(dsn(), namespace_name, true);
         EXPECT_EQ(non_owner.pending_outbox_count(), 0u);
     }
-    auto* result = PQexec(connection, ("SELECT value FROM " + namespace_name +
-        ".owner_marker").c_str());
+    auto* result =
+        PQexec(connection, ("SELECT value FROM " + namespace_name + ".owner_marker").c_str());
     ASSERT_NE(result, nullptr);
     ASSERT_EQ(PQresultStatus(result), PGRES_TUPLES_OK);
     EXPECT_STREQ(PQgetvalue(result, 0, 0), "external");

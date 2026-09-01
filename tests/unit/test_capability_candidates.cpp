@@ -9,7 +9,8 @@
 namespace {
 using namespace axon::portfolio;
 
-CapabilitySignature capability(const std::string& repository, const std::string& stream, const std::string& id,
+CapabilitySignature capability(const std::string& repository, const std::string& stream,
+                               const std::string& id,
                                const std::string& name = "payment authorize") {
     CapabilitySignature value;
     value.signature_id = id;
@@ -29,8 +30,10 @@ TEST(CapabilityCandidates, ExactDuplicateRequiresIndependentEvidence) {
     auto left = capability("repo_one", "stream_one", "left");
     auto right = capability("repo_two", "stream_two", "right");
     for (auto* value : {&left, &right}) {
-        value->contracts = {"AuthorizeRequest"}; value->routes = {"POST /authorize"};
-        value->events = {"payment.authorized"}; value->ast_fingerprints = {"ast_a"};
+        value->contracts = {"AuthorizeRequest"};
+        value->routes = {"POST /authorize"};
+        value->events = {"payment.authorized"};
+        value->ast_fingerprints = {"ast_a"};
         value->tests = {"authorize_contract"};
     }
     const auto candidate = only(CapabilityCandidateGenerator().generate({left, right}));
@@ -42,20 +45,25 @@ TEST(CapabilityCandidates, ExactDuplicateRequiresIndependentEvidence) {
 }
 
 TEST(CapabilityCandidates, ClassifiesConvergenceSharedPrimitiveAndSpecialization) {
-    auto convergent_left = capability("repo_one", "stream_one", "convergent_left", "invoice create");
-    auto convergent_right = capability("repo_two", "stream_two", "convergent_right", "invoice create");
+    auto convergent_left =
+        capability("repo_one", "stream_one", "convergent_left", "invoice create");
+    auto convergent_right =
+        capability("repo_two", "stream_two", "convergent_right", "invoice create");
     convergent_left.contracts = convergent_right.contracts = {"InvoiceRequest"};
     convergent_left.routes = convergent_right.routes = {"POST /invoice"};
     convergent_left.events = convergent_right.events = {"invoice.created"};
-    EXPECT_EQ(only(CapabilityCandidateGenerator().generate({convergent_left, convergent_right})).classification,
+    EXPECT_EQ(only(CapabilityCandidateGenerator().generate({convergent_left, convergent_right}))
+                  .classification,
               CapabilityClassification::convergent_capability);
 
     auto primitive_left = capability("repo_three", "stream_three", "primitive_left", "tenant key");
-    auto primitive_right = capability("repo_four", "stream_four", "primitive_right", "workspace secret");
+    auto primitive_right =
+        capability("repo_four", "stream_four", "primitive_right", "workspace secret");
     primitive_left.contracts = primitive_right.contracts = {"KeyMaterial"};
     primitive_left.routes = primitive_right.routes = {"POST /key"};
     primitive_left.events = primitive_right.events = {"key.rotated"};
-    const auto primitive = only(CapabilityCandidateGenerator().generate({primitive_left, primitive_right}));
+    const auto primitive =
+        only(CapabilityCandidateGenerator().generate({primitive_left, primitive_right}));
     EXPECT_EQ(primitive.classification, CapabilityClassification::shared_primitive_candidate);
     EXPECT_EQ(primitive.recommendation, CapabilityRecommendation::extract_shared_primitive);
 
@@ -63,7 +71,8 @@ TEST(CapabilityCandidates, ClassifiesConvergenceSharedPrimitiveAndSpecialization
     auto local_right = capability("repo_six", "stream_six", "local_right", "workflow policy");
     local_left.contracts = local_right.contracts = {"Policy"};
     local_left.ast_fingerprints = local_right.ast_fingerprints = {"ast_policy"};
-    local_left.routes = {"POST /order"}; local_right.routes = {"POST /workflow"};
+    local_left.routes = {"POST /order"};
+    local_right.routes = {"POST /workflow"};
     const auto local = only(CapabilityCandidateGenerator().generate({local_left, local_right}));
     EXPECT_EQ(local.classification, CapabilityClassification::local_specialization);
     EXPECT_EQ(local.recommendation, CapabilityRecommendation::keep_local);
@@ -78,7 +87,8 @@ TEST(CapabilityCandidates, SameNameAcrossDomainsCannotPromoteDuplicate) {
     EXPECT_EQ(candidate.recommendation, CapabilityRecommendation::keep_local);
     EXPECT_LE(candidate.confidence, 0.25);
     EXPECT_NE(std::find(candidate.invalidators.begin(), candidate.invalidators.end(),
-                        "bounded_context mismatch prevents duplicate promotion"), candidate.invalidators.end());
+                        "bounded_context mismatch prevents duplicate promotion"),
+              candidate.invalidators.end());
 }
 
 TEST(CapabilityCandidates, DifferentRoutesOrEventsCannotBeAnExactDuplicate) {
@@ -87,15 +97,19 @@ TEST(CapabilityCandidates, DifferentRoutesOrEventsCannotBeAnExactDuplicate) {
     left.contracts = right.contracts = {"AuthorizeRequest"};
     left.ast_fingerprints = right.ast_fingerprints = {"ast_authorize"};
     left.tests = right.tests = {"authorize_contract"};
-    left.routes = {"POST /authorize"}; right.routes = {"POST /authorize/manual-review"};
-    left.events = {"payment.authorized"}; right.events = {"payment.review-requested"};
+    left.routes = {"POST /authorize"};
+    right.routes = {"POST /authorize/manual-review"};
+    left.events = {"payment.authorized"};
+    right.events = {"payment.review-requested"};
     const auto candidate = only(CapabilityCandidateGenerator().generate({left, right}));
     EXPECT_EQ(candidate.classification, CapabilityClassification::local_specialization);
     EXPECT_EQ(candidate.recommendation, CapabilityRecommendation::keep_local);
-    EXPECT_NE(std::find(candidate.differences.begin(), candidate.differences.end(), "routes differ"),
-              candidate.differences.end());
-    EXPECT_NE(std::find(candidate.differences.begin(), candidate.differences.end(), "events differ"),
-              candidate.differences.end());
+    EXPECT_NE(
+        std::find(candidate.differences.begin(), candidate.differences.end(), "routes differ"),
+        candidate.differences.end());
+    EXPECT_NE(
+        std::find(candidate.differences.begin(), candidate.differences.end(), "events differ"),
+        candidate.differences.end());
 }
 
 TEST(CapabilityCandidates, HandlerDifferenceIsExplainedWhenItCausesSpecialization) {
@@ -104,11 +118,13 @@ TEST(CapabilityCandidates, HandlerDifferenceIsExplainedWhenItCausesSpecializatio
     left.contracts = right.contracts = {"AuthorizeRequest"};
     left.ast_fingerprints = right.ast_fingerprints = {"ast_authorize"};
     left.tests = right.tests = {"authorize_contract"};
-    left.handlers = {"authorize_card"}; right.handlers = {"authorize_manual_review"};
+    left.handlers = {"authorize_card"};
+    right.handlers = {"authorize_manual_review"};
     const auto candidate = only(CapabilityCandidateGenerator().generate({left, right}));
     EXPECT_EQ(candidate.classification, CapabilityClassification::local_specialization);
-    EXPECT_NE(std::find(candidate.differences.begin(), candidate.differences.end(), "handlers differ"),
-              candidate.differences.end());
+    EXPECT_NE(
+        std::find(candidate.differences.begin(), candidate.differences.end(), "handlers differ"),
+        candidate.differences.end());
 }
 
 TEST(CapabilityCandidates, SemanticOnlyRemainsInsufficientAndNoEmbeddingPathWorks) {
@@ -116,12 +132,14 @@ TEST(CapabilityCandidates, SemanticOnlyRemainsInsufficientAndNoEmbeddingPathWork
     auto right = capability("repo_two", "stream_two", "right", "beta");
     const auto left_id = capability_reference_id(left);
     const auto right_id = capability_reference_id(right);
-    const auto candidate = only(CapabilityCandidateGenerator().generate({left, right}, {{left_id, right_id, .95}}));
+    const auto candidate =
+        only(CapabilityCandidateGenerator().generate({left, right}, {{left_id, right_id, .95}}));
     EXPECT_EQ(candidate.classification, CapabilityClassification::insufficient_evidence);
     EXPECT_EQ(candidate.recommendation, CapabilityRecommendation::collect_more_evidence);
     EXPECT_LE(candidate.confidence, .40);
     EXPECT_NE(std::find(candidate.invalidators.begin(), candidate.invalidators.end(),
-                        "fewer than two independent positive signals"), candidate.invalidators.end());
+                        "fewer than two independent positive signals"),
+              candidate.invalidators.end());
 }
 
 TEST(CapabilityCandidates, RankingIsDeterministicBoundedAndSkipsSameRepositoryVariants) {
@@ -129,13 +147,19 @@ TEST(CapabilityCandidates, RankingIsDeterministicBoundedAndSkipsSameRepositoryVa
     auto first = capability("repo_two", "stream_two", "first", "token refresh");
     auto second = capability("repo_three", "stream_three", "second", "token refresh");
     auto sibling = capability("repo_one", "stream_sibling", "sibling", "token refresh");
-    CandidateGenerationConfig config; config.max_candidates_per_capability = 1; config.max_candidates = 1;
-    const auto first_run = CapabilityCandidateGenerator(config).generate({source, second, first, sibling});
-    const auto second_run = CapabilityCandidateGenerator(config).generate({source, second, first, sibling});
-    ASSERT_EQ(first_run.size(), 1u); ASSERT_EQ(second_run.size(), 1u);
+    CandidateGenerationConfig config;
+    config.max_candidates_per_capability = 1;
+    config.max_candidates = 1;
+    const auto first_run =
+        CapabilityCandidateGenerator(config).generate({source, second, first, sibling});
+    const auto second_run =
+        CapabilityCandidateGenerator(config).generate({source, second, first, sibling});
+    ASSERT_EQ(first_run.size(), 1u);
+    ASSERT_EQ(second_run.size(), 1u);
     EXPECT_EQ(first_run.front().candidate_id, second_run.front().candidate_id);
     EXPECT_EQ(first_run.front().candidate_id.find("stream_sibling"), std::string::npos);
-    EXPECT_GE(first_run.front().final_score, 0.0); EXPECT_LE(first_run.front().final_score, 1.0);
+    EXPECT_GE(first_run.front().final_score, 0.0);
+    EXPECT_LE(first_run.front().final_score, 1.0);
 }
 
 TEST(CapabilityCandidates, FinalFanoutCannotExceedConfiguredPerCapabilityLimit) {
@@ -143,11 +167,14 @@ TEST(CapabilityCandidates, FinalFanoutCannotExceedConfiguredPerCapabilityLimit) 
     auto two = capability("repo_two", "stream_two", "two", "token refresh");
     auto three = capability("repo_three", "stream_three", "three", "token refresh");
     auto four = capability("repo_four", "stream_four", "four", "token refresh");
-    CandidateGenerationConfig config; config.max_candidates_per_capability = 1; config.max_candidates = 100;
+    CandidateGenerationConfig config;
+    config.max_candidates_per_capability = 1;
+    config.max_candidates = 100;
     const auto candidates = CapabilityCandidateGenerator(config).generate({one, two, three, four});
     std::map<std::string, std::size_t> fanout;
     for (const auto& candidate : candidates) {
-        ++fanout[candidate.left_capability_id]; ++fanout[candidate.right_capability_id];
+        ++fanout[candidate.left_capability_id];
+        ++fanout[candidate.right_capability_id];
     }
     for (const auto& [capability_id, count] : fanout) {
         (void)capability_id;
@@ -157,29 +184,38 @@ TEST(CapabilityCandidates, FinalFanoutCannotExceedConfiguredPerCapabilityLimit) 
 }
 
 TEST(CapabilityCandidates, RejectsInvalidHintsAndBounds) {
-    CandidateGenerationConfig bad; bad.rrf_k = 0;
+    CandidateGenerationConfig bad;
+    bad.rrf_k = 0;
     EXPECT_THROW((void)CapabilityCandidateGenerator{bad}, std::invalid_argument);
     auto left = capability("repo_one", "stream_one", "left");
     auto right = capability("repo_two", "stream_two", "right");
-    EXPECT_THROW(CapabilityCandidateGenerator().generate({left, right}, {{"unknown", "also_unknown", .5}}),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        CapabilityCandidateGenerator().generate({left, right}, {{"unknown", "also_unknown", .5}}),
+        std::invalid_argument);
 }
 
 TEST(CapabilityCandidates, MultiSignalOutperformsSingleSignalBaselinesOnTruthFixture) {
     auto duplicate_left = capability("repo_one", "stream_one", "duplicate_left", "session revoke");
-    auto duplicate_right = capability("repo_two", "stream_two", "duplicate_right", "session revoke");
+    auto duplicate_right =
+        capability("repo_two", "stream_two", "duplicate_right", "session revoke");
     for (auto* value : {&duplicate_left, &duplicate_right}) {
-        value->contracts = {"RevokeRequest"}; value->routes = {"POST /revoke"};
-        value->events = {"session.revoked"}; value->ast_fingerprints = {"ast_revoke"};
+        value->contracts = {"RevokeRequest"};
+        value->routes = {"POST /revoke"};
+        value->events = {"session.revoked"};
+        value->ast_fingerprints = {"ast_revoke"};
     }
-    CandidateGenerationConfig name_only; name_only.weights = {{CandidateSignal::name, 1.0}};
-    const auto name_baseline = only(CapabilityCandidateGenerator(name_only).generate({duplicate_left, duplicate_right}));
+    CandidateGenerationConfig name_only;
+    name_only.weights = {{CandidateSignal::name, 1.0}};
+    const auto name_baseline =
+        only(CapabilityCandidateGenerator(name_only).generate({duplicate_left, duplicate_right}));
     EXPECT_EQ(name_baseline.classification, CapabilityClassification::insufficient_evidence);
     const auto left_id = capability_reference_id(duplicate_left);
     const auto right_id = capability_reference_id(duplicate_right);
-    CandidateGenerationConfig semantic_only; semantic_only.weights = {{CandidateSignal::semantic, 1.0}};
-    const auto semantic_baseline = only(CapabilityCandidateGenerator(semantic_only).generate(
-        {duplicate_left, duplicate_right}, {{left_id, right_id, .99}}));
+    CandidateGenerationConfig semantic_only;
+    semantic_only.weights = {{CandidateSignal::semantic, 1.0}};
+    const auto semantic_baseline =
+        only(CapabilityCandidateGenerator(semantic_only)
+                 .generate({duplicate_left, duplicate_right}, {{left_id, right_id, .99}}));
     EXPECT_EQ(semantic_baseline.classification, CapabilityClassification::insufficient_evidence);
     const auto multi_signal = only(CapabilityCandidateGenerator().generate(
         {duplicate_left, duplicate_right}, {{left_id, right_id, .99}}));
@@ -207,9 +243,11 @@ TEST(CapabilityCandidates, VersionedTruthSetHasEveryClassificationAndBaseline) {
     for (const auto& test_case : truth_set.at("cases")) {
         classifications.insert(test_case.at("expected").get<std::string>());
     }
-    EXPECT_EQ(classifications, (std::set<std::string>{"exact_duplicate", "convergent_capability",
-                                                       "shared_primitive_candidate", "local_specialization",
-                                                       "semantic_coincidence", "insufficient_evidence"}));
-    EXPECT_EQ(truth_set.at("baselines"), (std::vector<std::string>{"name-only", "semantic-only", "multi-signal"}));
+    EXPECT_EQ(classifications,
+              (std::set<std::string>{"exact_duplicate", "convergent_capability",
+                                     "shared_primitive_candidate", "local_specialization",
+                                     "semantic_coincidence", "insufficient_evidence"}));
+    EXPECT_EQ(truth_set.at("baselines"),
+              (std::vector<std::string>{"name-only", "semantic-only", "multi-signal"}));
 }
 } // namespace

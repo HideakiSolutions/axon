@@ -23,7 +23,7 @@ struct RepoEntry {
 
     // Registry v2 identity. Empty values preserve the v1 contract for legacy
     // registrations until identity is resolved by the portfolio bootstrap.
-    std::string repository_id;  // logical source-repository identity
+    std::string repository_id;   // logical source-repository identity
     std::string index_stream_id; // physical index/worktree identity
     std::string variant;
     std::vector<std::string> default_for_profiles;

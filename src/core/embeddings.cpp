@@ -154,8 +154,7 @@ int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
         if (r->HasError())
             throw std::runtime_error("UPDATE symbols failed (id=" + std::to_string(ids[i]) +
                                      "): " + r->GetError());
-        affected.push_back(
-            {"symbol", std::to_string(ids[i]), "upsert", std::nullopt});
+        affected.push_back({"symbol", std::to_string(ids[i]), "upsert", std::nullopt});
     }
     portfolio::trigger_journal_failpoint_for_testing("after_mutation");
     const std::string manifest = portfolio::compute_manifest_hash(db.conn());

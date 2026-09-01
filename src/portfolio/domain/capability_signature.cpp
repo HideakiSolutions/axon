@@ -30,11 +30,11 @@ void append_optional(std::ostringstream& out, const char* field,
                      const std::optional<std::string>& value) {
     append(out, field);
     append(out, value ? "present" : "absent");
-    if (value)
-        append(out, *value);
+    if (value) append(out, *value);
 }
 
-void append_all(std::ostringstream& out, const char* field, const std::vector<std::string>& values) {
+void append_all(std::ostringstream& out, const char* field,
+                const std::vector<std::string>& values) {
     append(out, field);
     append(out, std::to_string(values.size()));
     for (const auto& value : values)
@@ -50,7 +50,7 @@ std::string normalize_capability_name(const std::string& name) {
         const auto current = static_cast<unsigned char>(name[index]);
         const bool word = std::isalnum(current) != 0;
         const bool camel_boundary = index > 0 && std::isupper(current) &&
-            std::islower(static_cast<unsigned char>(name[index - 1]));
+                                    std::islower(static_cast<unsigned char>(name[index - 1]));
         if (!word) {
             if (!previous_space) {
                 output += ' ';
@@ -58,13 +58,11 @@ std::string normalize_capability_name(const std::string& name) {
             }
             continue;
         }
-        if (camel_boundary && !previous_space)
-            output += ' ';
+        if (camel_boundary && !previous_space) output += ' ';
         output += static_cast<char>(std::tolower(current));
         previous_space = false;
     }
-    if (!output.empty() && output.back() == ' ')
-        output.pop_back();
+    if (!output.empty() && output.back() == ' ') output.pop_back();
     return output;
 }
 
