@@ -72,21 +72,23 @@ def run_browser_journey(html):
     script = re.search(r"<script>(.*?)</script>", html, re.DOTALL).group(1)
     harness = r'''
 const source = require('fs').readFileSync(0, 'utf8');
-class Element { constructor(id=''){this.id=id;this.value='';this.textContent='';this.children=[];this.listeners={};}
+class Element { constructor(id=''){this.id=id;this.value='';this.textContent='';this.innerHTML='';this.children=[];this.listeners={};this.attributes={};}
   addEventListener(name, listener){this.listeners[name]=listener;} append(value){this.children.push(value);} appendChild(value){this.children.push(value);}
-  replaceChildren(){this.children=[];this.textContent='';} focus(){this.focused=true;} }
-const ids=['t','go','state','topology-note','top','edges','detail','graph-root','fragment','drift'];
+  replaceChildren(){this.children=[];this.textContent='';this.innerHTML='';} focus(){this.focused=true;}
+  setAttribute(name,value){this.attributes[name]=String(value);} getAttribute(name){return this.attributes[name];} }
+const ids=['t','go','state','search','repo','links','counts','topology-note','map','graph','world','empty','edges','selection-title','detail','graph-root','fragment','drift'];
 const elements=Object.fromEntries(ids.map(id=>[id,new Element(id)]));
-global.document={getElementById:id=>elements[id],createElement:()=>new Element(),createTextNode:value=>String(value)};
+elements.links.checked=true;
+global.document={getElementById:id=>elements[id],createElement:()=>new Element(),createElementNS:()=>new Element(),createTextNode:value=>String(value),querySelectorAll:()=>[]};
 global.fetch=async path=>{let body={}; if(path==='/api/v1/portfolio/status')body={degraded:false};
  else if(path.startsWith('/api/v1/portfolio/topology'))body={truncated:false,nodes:[{id:'repo:stream:a',name:'alpha',repository_id:'repo',path:'src/a.ts',epoch:'e1',contracts:['A'],routes:['GET /a']},{id:'other:stream:b',name:'beta',repository_id:'other',path:'src/b.ts',epoch:'e1',contracts:['B'],routes:[]}],edges:[{id:'candidate',source:'repo:stream:a',target:'other:stream:b',classification:'convergent_capability',score:.8}]};
  else if(path.startsWith('/api/v1/capabilities/consumers/'))body={repositories:['consumer-repo'],consumer_capabilities:['consumer-repo:stream:c'],unresolved_import_specifiers:['shared-lib'],evidence:['src/a.ts']};
  else if(path.startsWith('/api/v1/capabilities/compare/'))body={classification:'convergent_capability',score:.8,differences:['routes differ'],invalidators:[]};
  else if(path.startsWith('/api/v1/capabilities/drift?'))body={matches:2,drift:1}; else throw Error('unexpected path '+path); return {ok:true,status:200,json:async()=>body};};
-(async()=>{eval(source); await elements.go.listeners.click(); if(elements.top.children.length!==2||elements.edges.children.length!==1)throw Error('topology did not render');
- await elements.top.children[0].listeners.click(); if(!elements.detail.children.join('').includes('consumer-repo:stream:c')||!elements.detail.children.join('').includes('shared-lib'))throw Error('consumer/package detail did not render');
- await elements.edges.children[0].listeners.click(); if(!elements.detail.children.join('').includes('Comparison convergent_capability'))throw Error('comparison did not render');
- elements['graph-root'].value='/registered';elements.fragment.value='fragment.json';await elements.drift.listeners.click();if(!elements.detail.children.join('').includes('Declared matches: 2'))throw Error('drift did not render');if(elements.state.textContent!=='Fresh')throw Error('fresh status did not render');})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{eval(source); await elements.go.onclick(); if(elements.world.children.length!==3||elements.edges.innerHTML.indexOf('candidate')<0)throw Error('atlas topology did not render');
+ await elements.world.children.find(x=>x.attributes.class==='node').onclick(); if(!elements.detail.innerHTML.includes('consumer-repo:stream:c')||!elements.detail.innerHTML.includes('shared-lib'))throw Error('consumer/package detail did not render');
+ await elements.world.children.find(x=>x.attributes.class==='edge').onclick(); if(!elements.detail.innerHTML.includes('routes differ'))throw Error('comparison did not render');
+ elements['graph-root'].value='/registered';elements.fragment.value='fragment.json';await elements.drift.onclick();if(!elements.detail.textContent.includes('2 matches')||!elements.detail.textContent.includes('1 drift'))throw Error('drift did not render');if(elements.state.textContent!=='Fresh projection')throw Error('fresh status did not render');})().catch(error=>{console.error(error);process.exitCode=1;});
 '''
     subprocess.run(["node", "-e", harness], input=script, text=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
@@ -120,7 +122,7 @@ const fs=require('fs'); const [url,bearer,output]=process.argv.slice(1); const w
 ws.onmessage=e=>{const m=JSON.parse(e.data);const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result)}};
 function call(method,params={}){return new Promise((resolve,reject)=>{const id=next++;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}))})}
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-ws.onopen=async()=>{try{await call('Runtime.enable');await call('Page.enable');const encoded=JSON.stringify(bearer);await call('Runtime.evaluate',{expression:`document.getElementById('t').value=${encoded};document.getElementById('go').click()`});for(let i=0;i<40;i++){await wait(100);const r=await call('Runtime.evaluate',{expression:"document.getElementById('state').textContent+'|'+document.querySelectorAll('#top button').length",returnByValue:true});if(r.result.value.startsWith('Fresh|')&&!r.result.value.endsWith('|0'))break;if(i===39)throw Error('authenticated topology did not render')}await call('Runtime.evaluate',{expression:"document.querySelector('#top button').click()"});await wait(150);const png=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(output,Buffer.from(png.data,'base64'));ws.close()}catch(error){console.error(error);process.exitCode=1;ws.close()}};
+ws.onopen=async()=>{try{await call('Runtime.enable');await call('Page.enable');const encoded=JSON.stringify(bearer);await call('Runtime.evaluate',{expression:`document.getElementById('t').value=${encoded};document.getElementById('go').click()`});for(let i=0;i<40;i++){await wait(100);const r=await call('Runtime.evaluate',{expression:"document.getElementById('state').textContent+'|'+document.querySelectorAll('#world .node').length",returnByValue:true});if(r.result.value.startsWith('Fresh projection|')&&!r.result.value.endsWith('|0'))break;if(i===39)throw Error('authenticated atlas did not render')}await call('Runtime.evaluate',{expression:"document.querySelector('#world .node').dispatchEvent(new MouseEvent('click',{bubbles:true}))"});await wait(150);const selected=await call('Runtime.evaluate',{expression:"document.getElementById('selection-title').textContent",returnByValue:true});if(!selected.result.value||selected.result.value==='Evidence inspector')throw Error('node inspector did not render');const png=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(output,Buffer.from(png.data,'base64'));ws.close()}catch(error){console.error(error);process.exitCode=1;ws.close()}};
 '''
         result = subprocess.run(["node", "-e", control, target["webSocketDebuggerUrl"], bearer, str(destination)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if result.returncode:
@@ -186,15 +188,18 @@ def main(binary):
         dom.feed(html)
         assert content_type.startswith("text/html"), f"portfolio route must serve HTML: {content_type}"
         elements = {attrs.get("id"): (tag, attrs) for tag, attrs in dom.elements if attrs.get("id")}
-        required_ids = {"t", "go", "state", "top", "edges", "detail", "graph-root", "fragment", "drift"}
+        required_ids = {"t", "go", "state", "search", "repo", "links", "counts", "map", "graph", "world", "edges", "selection-title", "detail", "graph-root", "fragment", "drift"}
         missing = required_ids - elements.keys()
         assert not missing, f"missing DOM ids: {sorted(missing)}"
         assert elements["t"][1].get("type") == "password"
         assert elements["t"][1].get("autocomplete") == "off"
         assert elements["state"][1].get("aria-live") == "polite"
         assert elements["detail"][1].get("tabindex") == "-1"
-        assert "https://" not in html and "http://" not in html and "cdn." not in html.lower()
-        for marker in ("/api/v1/portfolio/topology?limit=", "/api/v1/capabilities/consumers/", "/api/v1/capabilities/compare/", "/api/v1/capabilities/drift?graph_root=", "encodeURIComponent", "prefers-reduced-motion", "Unresolved import specifiers"):
+        # SVG uses the standards-defined namespace URI while creating elements; it is data, not a
+        # network endpoint.  Every other absolute HTTP(S) reference remains forbidden.
+        offline_html = html.replace("http://www.w3.org/2000/svg", "")
+        assert "https://" not in offline_html and "http://" not in offline_html and "cdn." not in html.lower()
+        for marker in ("/api/v1/portfolio/topology?limit=", "/api/v1/capabilities/consumers/", "/api/v1/capabilities/compare/", "/api/v1/capabilities/drift?graph_root=", "encodeURIComponent", "prefers-reduced-motion", "Interactive capability topology", "Drag to pan; wheel to zoom", "Package hints"):
             assert marker in html, f"missing UI behavior marker: {marker}"
         run_browser_journey(html)
         status, _, _, _ = response(port, "/api/v1/portfolio/status")
