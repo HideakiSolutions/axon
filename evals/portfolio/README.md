@@ -19,5 +19,15 @@ The separate three-repository DuckDB integration corpus verifies read-only proje
 consumption metadata, observed implementations, and declaration drift. Its classification coverage
 is connected to this truth-set runner through the same `CapabilityCandidateGenerator` contract.
 
+Run the reproducible local performance baseline after building the E2E target:
+
+```sh
+scripts/benchmark_portfolio.sh /tmp/axon-g12-build
+```
+
+It measures wall-clock duration for the real three-repository catalog journey and the compiled
+candidate evaluator. Results are environment-specific and must not be interpreted as a cross-host
+performance guarantee.
+
 The fixture contains metadata labels only. It neither assigns ownership nor authorizes a package,
 component extraction or refactor.
