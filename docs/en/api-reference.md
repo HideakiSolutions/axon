@@ -1,6 +1,6 @@
 # API Reference — axon MCP Tools
 
-All 33 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
+All 41 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ---
 

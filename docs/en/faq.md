@@ -3,7 +3,7 @@
 ## Getting Started
 
 **Q: Do I need the embedding model to use axon?**
-No. Most of the 33 MCP tools work without it. The embedding model enables `search_memory`, `turn_search`, `dialogue_context` and the semantic-query path of `get_context_capsule`. Without it, `get_context_capsule` falls back to graph-based pivot selection.
+No. Most of the 41 MCP tools work without it. The embedding model enables `search_memory`, `turn_search`, `dialogue_context` and the semantic-query path of `get_context_capsule`. Without it, `get_context_capsule` falls back to graph-based pivot selection.
 
 **Q: Can I use axon with editors other than Claude Code?**
 Yes. Axon speaks stdio JSON-RPC 2.0 (the MCP protocol). Any MCP-compatible client works. HTTP mode also exposes a plain REST API.
