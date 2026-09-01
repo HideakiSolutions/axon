@@ -191,6 +191,8 @@ static int64_t upsert_file(duckdb::Connection& conn, const std::string& rel_path
         // and would be lost here since those files aren't being re-walked.
         require_success(conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(fid)),
                         "replace file edges");
+        require_success(conn.Query("DELETE FROM external_dependencies WHERE from_file = " + std::to_string(fid)),
+                        "replace external dependencies");
         require_success(conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(fid)),
                         "replace file symbols");
         require_success(conn.Query("UPDATE files SET hash = '" + sq(hash) + "', language = '" +
@@ -359,7 +361,17 @@ static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
     if (imports.empty()) return;
     for (const auto& edge : imports) {
         int64_t to_id = resolve_specifier_to_file(conn, edge.to_specifier, from_id);
-        if (to_id == 0) continue;
+        if (to_id == 0) {
+            if (edge.to_specifier.empty() || edge.to_specifier.size() > 1024)
+                throw std::invalid_argument("unresolved import specifier must be 1..1024 bytes");
+            // A missing local file, a standard-library module and a package are intentionally
+            // kept in one *unresolved* evidence class.  Projection/UI must not promote this to
+            // package consumption without a classifier that can prove it.
+            require_success(conn.Query("INSERT INTO external_dependencies(from_file,specifier,kind) SELECT "+
+                std::to_string(from_id)+", '"+sq(edge.to_specifier)+"', '"+sq(edge.kind)+"' WHERE NOT EXISTS (SELECT 1 FROM external_dependencies WHERE from_file="+std::to_string(from_id)+" AND specifier='"+sq(edge.to_specifier)+"')"),
+                "record external dependency");
+            continue;
+        }
 
         // Insert file-level edge
         auto ins = conn.Query(
@@ -467,6 +479,9 @@ static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root,
                                    std::to_string(v.id) + " OR to_file = " +
                                    std::to_string(v.id)),
                         "delete file edges");
+        require_success(conn.Query("DELETE FROM external_dependencies WHERE from_file = " +
+                                   std::to_string(v.id)),
+                        "delete external dependencies");
         require_success(conn.Query("DELETE FROM symbols WHERE file_id = " +
                                    std::to_string(v.id)),
                         "delete file symbols");

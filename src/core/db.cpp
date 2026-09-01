@@ -173,6 +173,14 @@ void Database::run_migrations() {
          "  to_symbol   BIGINT,"
          "  kind        VARCHAR NOT NULL DEFAULT 'imports'"
          ")");
+    // Unresolved imports are still useful capability evidence. They carry only a module
+    // specifier (never source text) and are removed with their owning file.
+    exec("CREATE TABLE IF NOT EXISTS external_dependencies ("
+         "  from_file BIGINT NOT NULL,"
+         "  specifier VARCHAR NOT NULL,"
+         "  kind VARCHAR NOT NULL,"
+         "  PRIMARY KEY(from_file, specifier, kind)"
+         ")");
 
     exec("CREATE TABLE IF NOT EXISTS observations ("
          "  id         BIGINT PRIMARY KEY,"

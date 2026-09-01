@@ -93,6 +93,43 @@ TEST_F(PortfolioJournalTest, UpgradesPreJournalDatabaseAdditivelyWithoutLosingRo
     EXPECT_EQ(scalar_i64(upgraded, "SELECT COUNT(*) FROM index_metadata"), 1);
     EXPECT_EQ(scalar_i64(upgraded, "SELECT COUNT(*) FROM index_events"), 0);
     EXPECT_EQ(axon::portfolio::index_identity(upgraded.conn()).repository_id, kRepositoryId);
+    EXPECT_EQ(scalar_i64(upgraded, "SELECT COUNT(*) FROM external_dependencies"), 0);
+}
+
+TEST_F(PortfolioJournalTest, UnresolvedImportsAreBoundedDeduplicatedAndTransactional) {
+    write_file(root / "src/main.ts",
+               "import '@axon/contracts';\nimport '@axon/contracts';\n"
+               "import './not-yet-created';\nexport const value = true;\n");
+    axon::Database db(cfg.db_path);
+    axon::index_project(cfg, db);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies"), 2);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies WHERE specifier='@axon/contracts'"), 1);
+
+    write_file(root / "src/main.ts", "export const value = false;\n");
+    axon::index_files(cfg, db, {root / "src/main.ts"}, false);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies"), 0);
+
+    write_file(root / "src/main.ts", "import '@axon/rollback-check';\nexport const value = true;\n");
+    axon::portfolio::set_journal_failpoint_for_testing("after_mutation");
+    EXPECT_THROW(axon::index_files(cfg, db, {root / "src/main.ts"}, false), std::runtime_error);
+    axon::portfolio::clear_journal_failpoint_for_testing();
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies"), 0);
+
+    axon::index_files(cfg, db, {root / "src/main.ts"}, false);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies WHERE specifier='@axon/rollback-check'"), 1);
+    fs::remove(root / "src/main.ts");
+    axon::index_files(cfg, db, {}, true);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies"), 0);
+}
+
+TEST_F(PortfolioJournalTest, RejectsOversizedUnresolvedImportSpecifierWithoutPartialWrite) {
+    const std::string oversized(1025, 'x');
+    write_file(root / "src/main.ts", "import '" + oversized + "';\nexport const value = true;\n");
+    axon::Database db(cfg.db_path);
+    EXPECT_THROW(axon::index_project(cfg, db), std::invalid_argument);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM files"), 0);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies"), 0);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM index_events"), 0);
 }
 
 TEST_F(PortfolioJournalTest, FreshCloneGetsDistinctStreamWithSameLogicalRepository) {
