@@ -157,7 +157,7 @@ def main(binary):
         # fixture rather than treating the delivery handler as a mock-only concern.
         declaration = fixture / "repo" / "capabilities.json"
         declaration.write_text(json.dumps({"schema_version": "axon/capability-graph/v1", "capabilities": [
-            {"id": "payments.observed", "name": "payment", "contracts": []},
+            {"id": "payments.observed", "name": "payment authorize", "contracts": []},
             {"id": "identity.orphan", "name": "identity provision", "contracts": []},
         ]}))
         for command in (("init", "--quiet"), ("config", "user.email", "axon-smoke@example.invalid"),
@@ -210,7 +210,7 @@ def main(binary):
             assert status == 200 and json.loads(payload)["id"] == topology["edges"][0]["id"], "topology edge IDs must remain usable compare identifiers"
         status, _, _, _ = response(port, "/api/v1/portfolio/topology?limit=101", authorization)
         assert status == 400, "topology must reject a request above its server-side bound"
-        payment = next(node for node in topology["nodes"] if node["path"] == "src/payment.cpp")
+        payment = next(node for node in topology["nodes"] if node["path"] == "src/billing/payment_authorize.cpp")
         status, _, _, payload = response(port, "/api/v1/capabilities/consumers/" + payment["id"], authorization)
         assert status == 200, f"authenticated consumers failed: {status}"
         consumers = json.loads(payload)

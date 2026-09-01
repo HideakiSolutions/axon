@@ -88,6 +88,19 @@ std::string canonical_manifest_rows(duckdb::Connection& connection) {
         }
         canonical += '\n';
     }
+    auto capability_evidence = connection.Query(
+        "SELECT f.path,COALESCE(context.bounded_context,''),COALESCE(fingerprint.value,'') "
+        "FROM files f LEFT JOIN capability_contexts context ON context.file_id=f.id "
+        "LEFT JOIN capability_ast_fingerprints fingerprint ON fingerprint.file_id=f.id ORDER BY f.path");
+    require_ok(capability_evidence, "compute capability evidence manifest");
+    for (duckdb::idx_t row = 0; row < capability_evidence->RowCount(); ++row) {
+        canonical += "capability_evidence\0";
+        for (duckdb::idx_t column = 0; column < 3; ++column) {
+            canonical += capability_evidence->GetValue(column, row).ToString();
+            canonical += '\0';
+        }
+        canonical += '\n';
+    }
     auto edges = connection.Query(
         "SELECT source.path, target.path, e.kind, COALESCE(origin.name, ''), "
         "COALESCE(destination.name, '') FROM edges e "

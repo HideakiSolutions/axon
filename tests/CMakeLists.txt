@@ -320,6 +320,14 @@ add_test(NAME test_capability_declarations COMMAND test_capability_declarations)
 
 add_executable(test_portfolio_capability_catalog integration/test_portfolio_capability_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/core/registry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/routes.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skip_dirs.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/config.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/application/candidates/capability_candidates.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/application/declarations/capability_declarations.cpp
@@ -327,7 +335,7 @@ add_executable(test_portfolio_capability_catalog integration/test_portfolio_capa
     ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/git/git_process.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/delivery/portfolio_capability_catalog.cpp)
 target_include_directories(test_portfolio_capability_catalog PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party/duckdb ${CMAKE_SOURCE_DIR}/third_party/blake3/c ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
-target_link_libraries(test_portfolio_capability_catalog PRIVATE duckdb_lib blake3_lib GTest::gtest_main)
+target_link_libraries(test_portfolio_capability_catalog PRIVATE axon_parser_objs duckdb_lib blake3_lib GTest::gtest_main)
 add_test(NAME test_portfolio_capability_catalog COMMAND test_portfolio_capability_catalog)
 
 # G5 real DuckDB adapter runs the exact G4 conformance source through the common PortfolioStore

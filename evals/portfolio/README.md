@@ -1,9 +1,23 @@
 # Portfolio candidate truth set v1
 
 This versioned, source-free fixture names the six deterministic classification boundaries used by
-`test_capability_candidates`. The executable baseline reports P@1/R@1 = `0/0` for name-only and
-semantic-only and `1/1` for the multi-signal engine on its labelled duplicate. G15 will extend this
-seed into the three-repository end-to-end precision/recall report.
+`test_capability_candidates`. The executable runner invokes the compiled
+`CapabilityCandidateGenerator` for **every case**, rather than validating the fixture alone:
+
+```sh
+python3 evals/portfolio/run_portfolio_eval.py --evaluator /path/to/portfolio_eval
+```
+
+Its JSON report contains, for each name-only, semantic-only and multi-signal baseline, the real
+`tp`, `fp`, `fn`, `precision_at_1`, `recall_at_1`, plus the complete classification false-positive
+and false-negative lists. Here a true positive means the engine's top classification exactly equals
+the labelled classification; a mismatch is recorded as both the incorrect predicted class (FP) and
+the missed expected class (FN). The runner is deterministic, source-free, and uses no network or
+embedding service.
+
+The separate three-repository DuckDB integration corpus verifies read-only projection, package
+consumption metadata, observed implementations, and declaration drift. Its classification coverage
+is connected to this truth-set runner through the same `CapabilityCandidateGenerator` contract.
 
 The fixture contains metadata labels only. It neither assigns ownership nor authorizes a package,
 component extraction or refactor.

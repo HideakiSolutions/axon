@@ -181,6 +181,15 @@ void Database::run_migrations() {
          "  kind VARCHAR NOT NULL,"
          "  PRIMARY KEY(from_file, specifier, kind)"
          ")");
+    // Additive, metadata-only capability evidence for read-only portfolio projection.
+    exec("CREATE TABLE IF NOT EXISTS capability_contexts ("
+         "  file_id BIGINT PRIMARY KEY,"
+         "  bounded_context VARCHAR NOT NULL"
+         ")");
+    exec("CREATE TABLE IF NOT EXISTS capability_ast_fingerprints ("
+         "  file_id BIGINT PRIMARY KEY,"
+         "  value VARCHAR NOT NULL"
+         ")");
 
     exec("CREATE TABLE IF NOT EXISTS observations ("
          "  id         BIGINT PRIMARY KEY,"

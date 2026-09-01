@@ -242,6 +242,43 @@ TEST_F(PortfolioJournalTest, FullIncrementalDeleteAndRoutesAreJournaledWithTombs
               0);
 }
 
+TEST_F(PortfolioJournalTest, CapabilityEvidenceIsNormalizedBackfilledAndPrunedTransactionally) {
+    write_file(root / "src/billing/payment.ts", "// initial comment\nexport function authorize() { return true; }\n");
+    axon::Database db(cfg.db_path);
+    axon::index_project(cfg, db);
+    const auto payment_id=scalar_i64(db, "SELECT id FROM files WHERE path='src/billing/payment.ts'");
+    EXPECT_EQ(scalar_string(db, "SELECT bounded_context FROM capability_contexts WHERE file_id=" + std::to_string(payment_id)), "billing");
+    const auto original=scalar_string(db, "SELECT value FROM capability_ast_fingerprints WHERE file_id=" + std::to_string(payment_id));
+    EXPECT_EQ(original.size(),64U);
+
+    write_file(root / "src/billing/payment.ts", "// rewritten comment\nexport function authorize() { return true; }\n");
+    axon::index_files(cfg, db, {root / "src/billing/payment.ts"}, false);
+    EXPECT_EQ(scalar_string(db, "SELECT value FROM capability_ast_fingerprints WHERE file_id=" + std::to_string(payment_id)), original);
+
+    db.exec("DELETE FROM capability_contexts");
+    db.exec("DELETE FROM capability_ast_fingerprints");
+    axon::index_project(cfg, db);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM capability_ast_fingerprints WHERE file_id=" + std::to_string(payment_id)), 1);
+    EXPECT_GE(scalar_i64(db, "SELECT COUNT(*) FROM index_events WHERE event_type='IndexFilesUpdated'"), 2);
+
+    fs::remove(root / "src/billing/payment.ts");
+    axon::index_files(cfg, db, {}, true);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM capability_contexts WHERE file_id=" + std::to_string(payment_id)), 0);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM capability_ast_fingerprints WHERE file_id=" + std::to_string(payment_id)), 0);
+}
+
+TEST_F(PortfolioJournalTest, BackfillUsesTheSameContextInferenceForNonWrapperPaths) {
+    write_file(root / "billing/payment.ts", "export function authorize() { return true; }\n");
+    axon::Database db(cfg.db_path);
+    axon::index_project(cfg, db);
+    const auto id=scalar_i64(db, "SELECT id FROM files WHERE path='billing/payment.ts'");
+    db.exec("DELETE FROM capability_contexts WHERE file_id=" + std::to_string(id));
+    const auto events=scalar_i64(db, "SELECT COUNT(*) FROM index_events");
+    EXPECT_EQ(axon::index_project(cfg, db).files_indexed,0);
+    EXPECT_EQ(scalar_string(db, "SELECT bounded_context FROM capability_contexts WHERE file_id=" + std::to_string(id)), "billing");
+    EXPECT_GT(scalar_i64(db, "SELECT COUNT(*) FROM index_events"), events);
+}
+
 TEST_F(PortfolioJournalTest, FailpointsProveRollbackBeforeCommitAndDurabilityAfterCommit) {
     axon::Database db(cfg.db_path);
     axon::index_project(cfg, db);
