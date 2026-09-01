@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G10 FalkorDB graph projection accepted; ready to commit and proceed to candidate generation
+Status: G11 multi-signal candidate generation accepted; ready to commit and proceed to declaration drift
 
 ## Current Mini-Goal
 
-G10 — FalkorDB graph projection; accepted.
+G11 — Multi-signal candidates and explanations; accepted.
 
 ## Progress
 
@@ -45,6 +45,10 @@ G10 — FalkorDB graph projection; accepted.
 - G10 implementation: optional FalkorDB projection is independently accepted. It stages then
   publishes repository/stream-qualified generations, retains all call-neighborhood relation
   evidence, and provides bounded directed traversal without arbitrary Cypher exposure.
+- G11 implementation: deterministic multi-signal candidate generation is independently accepted
+  after the owner-authorized third correction. Behavioral specialization, final fan-out bounds and
+  material-signal explainability are all covered by adversarial tests; no candidate can promote
+  solely from name or semantic evidence.
 
 ## Current Evidence
 
@@ -109,5 +113,5 @@ the shared-infrastructure owner.
 
 ## Next Action
 
-Commit G10, then begin multi-signal candidate generation. Keep deployment, release and external
-capability-graph writes behind their separate gates.
+Commit G11, then import Git declarations read-only and calculate typed drift. Keep deployment,
+release and external capability-graph writes behind their separate gates.

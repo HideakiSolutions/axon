@@ -286,6 +286,22 @@ target_compile_definitions(test_capability_signature PRIVATE AXON_SOURCE_DIR="${
 target_link_libraries(test_capability_signature PRIVATE blake3_lib GTest::gtest_main)
 add_test(NAME test_capability_signature COMMAND test_capability_signature)
 
+# G11 candidate generation is deterministic and provider-independent; semantic rankings are
+# supplied as bounded hints, so this target does not require Qdrant, pgvector or network access.
+add_executable(test_capability_candidates
+    unit/test_capability_candidates.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/application/candidates/capability_candidates.cpp
+)
+target_include_directories(test_capability_candidates PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/blake3/c
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include
+)
+target_compile_definitions(test_capability_candidates PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_capability_candidates PRIVATE blake3_lib GTest::gtest_main)
+add_test(NAME test_capability_candidates COMMAND test_capability_candidates)
+
 # G5 real DuckDB adapter runs the exact G4 conformance source through the common PortfolioStore
 # factory seam, plus persistence/migration/lifecycle integration cases.
 add_executable(test_portfolio_duckdb
