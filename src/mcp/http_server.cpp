@@ -8,6 +8,7 @@
 #include "../core/dialogue.hpp"
 #include "../core/telemetry.hpp"
 #include "../portfolio/delivery/portfolio_capability_catalog.hpp"
+#include "../portfolio/delivery/web/portfolio_web.hpp"
 #include "../portfolio/infrastructure/http/keycloak_oidc_auth.hpp"
 #include <nlohmann/json.hpp>
 #ifdef _WIN32
@@ -303,6 +304,9 @@ static std::string handle_request(const std::string& method, const std::string& 
     if (method == "GET" && (path == "/" || path == "/index.html")) {
         return web_index_html();
     }
+    if (method == "GET" && path == "/portfolio") {
+        return axon::portfolio::web::page();
+    }
 
     // GET /api/metrics
     if (method == "GET" && path == "/api/metrics") {
@@ -324,6 +328,24 @@ static std::string handle_request(const std::string& method, const std::string& 
         } catch (const std::exception& error) { http_status=401; return json{{"error",error.what()}}.dump(); }
         try {
             axon::portfolio::PortfolioCapabilityCatalog catalog;
+            if (method == "GET" && path == "/api/v1/portfolio/topology") {
+                // This is a graph overview, not an export endpoint.  Keep its envelope bounded
+                // independently of the catalog limits: a pathological signature cannot make a
+                // browser response unbounded merely by registering more metadata.
+                constexpr int kTopologyNodeLimit=100;
+                constexpr std::size_t kTopologyFieldLimit=256;
+                constexpr std::size_t kTopologyEvidenceLimit=8;
+                const auto limit_text=get_query_param(query,"limit"); const auto requested=limit_text.empty()?std::optional<int>{kTopologyNodeLimit}:strict_positive_int(limit_text);
+                if(!requested || *requested>kTopologyNodeLimit) { http_status=400; return json{{"error","limit must be 1..100"}}.dump(); } const int limit=*requested;
+                const auto clipped=[&](const std::string& value){ return value.substr(0,kTopologyFieldLimit); };
+                const auto clipped_list=[&](const std::vector<std::string>& values){ json out=json::array(); for(std::size_t i=0;i<values.size()&&i<kTopologyEvidenceLimit;++i) out.push_back(clipped(values[i])); return out; };
+                json nodes=json::array(), edges=json::array();
+                std::unordered_set<std::string> node_ids;
+                bool truncated=false;
+                for(const auto& s:catalog.list({},limit)) { const auto id=axon::portfolio::capability_reference_id(s); node_ids.insert(id); truncated=truncated||s.contracts.size()>kTopologyEvidenceLimit||s.routes.size()>kTopologyEvidenceLimit; nodes.push_back({{"id",id},{"repository_id",clipped(s.stream.repository_id)},{"name",clipped(s.normalized_name)},{"path",clipped(s.path.value_or(""))},{"contracts",clipped_list(s.contracts)},{"routes",clipped_list(s.routes)},{"epoch",clipped(s.index_epoch)}}); }
+                for(const auto& c:catalog.duplicates(0.35,400)) if(node_ids.contains(c.left_capability_id)&&node_ids.contains(c.right_capability_id)) edges.push_back({{"id",c.candidate_id},{"source",c.left_capability_id},{"target",c.right_capability_id},{"kind","convergent_capability"},{"score",c.final_score},{"classification",axon::portfolio::to_string(c.classification)}});
+                return json{{"nodes",nodes},{"edges",edges},{"truncated",truncated||nodes.size()==static_cast<std::size_t>(limit)}}.dump();
+            }
             if (method == "GET" && path == "/api/v1/portfolio/status") { const auto status=catalog.status(); json repos=json::array(); for(const auto& item:status.repositories) repos.push_back({{"repository_id",item.repository_id},{"index_stream_id",item.index_stream_id},{"status",item.status},{"detail",item.detail}}); http_status=status.degraded?503:200; return json{{"catalog_path",catalog.path().string()},{"capabilities",catalog.list({},10000).size()},{"degraded",status.degraded},{"repositories",repos}}.dump(); }
             if (method == "POST" && path == "/api/v1/portfolio/sync") {
                 json input = body.empty() ? json::object() : json::parse(body);
@@ -334,12 +356,12 @@ static std::string handle_request(const std::string& method, const std::string& 
                 const auto report=catalog.sync(group,input.value("rebuild",false)); json repositories=json::array(); for(const auto& item:report.repositories) repositories.push_back({{"repository_id",item.repository_id},{"index_stream_id",item.index_stream_id},{"status",item.status},{"detail",item.detail},{"signatures",item.signatures}}); http_status=report.degraded?503:200; return json{{"degraded",report.degraded},{"repositories",repositories}}.dump();
             }
             if (method == "GET" && path == "/api/v1/capabilities") {
-                const auto repo=url_decode(get_query_param(query,"repository_id")); const auto limit_text=get_query_param(query,"limit"); const auto limit=limit_text.empty()?std::optional<int>{200}:strict_positive_int(limit_text); if(!limit) { http_status=400; return json{{"error","limit must be 1..10000"}}.dump(); } json output=json::array(); for(const auto& s:catalog.list(repo.empty()?std::nullopt:std::optional<std::string>{repo},*limit)) output.push_back({{"id",s.signature_id},{"repository_id",s.stream.repository_id},{"name",s.normalized_name},{"path",s.path.value_or("")},{"epoch",s.index_epoch}}); return json{{"capabilities",output}}.dump();
+                const auto repo=url_decode(get_query_param(query,"repository_id")); const auto limit_text=get_query_param(query,"limit"); const auto limit=limit_text.empty()?std::optional<int>{200}:strict_positive_int(limit_text); if(!limit) { http_status=400; return json{{"error","limit must be 1..10000"}}.dump(); } json output=json::array(); for(const auto& s:catalog.list(repo.empty()?std::nullopt:std::optional<std::string>{repo},*limit)) output.push_back({{"id",s.signature_id},{"repository_id",s.stream.repository_id},{"name",s.normalized_name},{"path",s.path.value_or("")},{"contracts",s.contracts},{"routes",s.routes},{"epoch",s.index_epoch}}); return json{{"capabilities",output}}.dump();
             }
             if (method == "GET" && path == "/api/v1/capabilities/search") { const auto q=url_decode(get_query_param(query,"q")); if(q.empty()) { http_status=400; return json{{"error","q is required"}}.dump(); } json output=json::array(); for(const auto& s:catalog.search(q)) output.push_back({{"id",s.signature_id},{"repository_id",s.stream.repository_id},{"name",s.normalized_name},{"path",s.path.value_or("")}}); return json{{"capabilities",output}}.dump(); }
-            if (method == "GET" && path == "/api/v1/capabilities/duplicates") { const auto threshold=strict_threshold(get_query_param(query,"threshold")); if(!threshold) { http_status=400; return json{{"error","threshold must be finite and 0..1"}}.dump(); } json output=json::array(); for(const auto& c:catalog.duplicates(*threshold)) output.push_back({{"id",c.candidate_id},{"left",c.left_capability_id},{"right",c.right_capability_id},{"score",c.final_score},{"classification",axon::portfolio::to_string(c.classification)},{"differences",c.differences},{"invalidators",c.invalidators}}); return json{{"candidates",output}}.dump(); }
+            if (method == "GET" && path == "/api/v1/capabilities/duplicates") { const auto threshold=strict_threshold(get_query_param(query,"threshold")); const auto limit_text=get_query_param(query,"limit"); const auto limit=limit_text.empty()?std::optional<int>{100}:strict_positive_int(limit_text); if(!threshold || !limit) { http_status=400; return json{{"error","threshold must be 0..1 and limit must be 1..10000"}}.dump(); } json output=json::array(); for(const auto& c:catalog.duplicates(*threshold,*limit)) output.push_back({{"id",c.candidate_id},{"left",c.left_capability_id},{"right",c.right_capability_id},{"score",c.final_score},{"classification",axon::portfolio::to_string(c.classification)},{"differences",c.differences},{"invalidators",c.invalidators}}); return json{{"candidates",output}}.dump(); }
             if (method == "GET" && path.rfind("/api/v1/capabilities/compare/",0)==0) { const auto id=url_decode(path.substr(29)); for(const auto& c:catalog.duplicates(0,10000)) if(c.candidate_id==id) return json{{"id",c.candidate_id},{"score",c.final_score},{"classification",axon::portfolio::to_string(c.classification)},{"differences",c.differences},{"invalidators",c.invalidators}}.dump(); http_status=404; return json{{"error","candidate not found"}}.dump(); }
-            if (method == "GET" && path.rfind("/api/v1/capabilities/consumers/",0)==0) { const auto id=url_decode(path.substr(31)); for(const auto& s:catalog.list({},10000)) if(s.signature_id==id) return json{{"capability_id",id},{"repositories",json::array({s.stream.repository_id})},{"evidence",s.path?json::array({*s.path}):json::array()}}.dump(); http_status=404; return json{{"error","capability not found"}}.dump(); }
+            if (method == "GET" && path.rfind("/api/v1/capabilities/consumers/",0)==0) { constexpr std::size_t kConsumerLimit=100,kValueLimit=256; const auto id=url_decode(path.substr(31)); const auto requested=get_query_param(query,"limit"); const auto limit=requested.empty()?std::optional<int>{static_cast<int>(kConsumerLimit)}:strict_positive_int(requested); if(!limit||*limit>static_cast<int>(kConsumerLimit)||id.empty()||id.size()>1024U) { http_status=400; return json{{"error","capability_id and limit must be bounded"}}.dump(); } const auto clip=[](const std::string& value){return value.substr(0,kValueLimit);}; const auto all=catalog.list({},10000); for(const auto& s:all) if(axon::portfolio::capability_reference_id(s)==id) { json repositories=json::array(), consumer_capabilities=json::array(), unresolved_import_specifiers=json::array(); bool truncated=false; for(const auto& other:all) if(other.stream==s.stream && axon::portfolio::capability_reference_id(other)!=id && s.path && std::find(other.internal_dependencies.begin(),other.internal_dependencies.end(),*s.path)!=other.internal_dependencies.end()) { if(consumer_capabilities.size()>=static_cast<std::size_t>(*limit)){truncated=true;break;} consumer_capabilities.push_back(clip(axon::portfolio::capability_reference_id(other))); } if(!consumer_capabilities.empty()) repositories.push_back(clip(s.stream.repository_id)); for(const auto& dependency:s.external_dependencies) { if(unresolved_import_specifiers.size()>=static_cast<std::size_t>(*limit)){truncated=true;break;} unresolved_import_specifiers.push_back(clip(dependency)); } return json{{"capability_id",clip(id)},{"repositories",repositories},{"consumer_capabilities",consumer_capabilities},{"unresolved_import_specifiers",unresolved_import_specifiers},{"evidence",s.path?json::array({clip(*s.path)}):json::array()},{"truncated",truncated}}.dump(); } http_status=404; return json{{"error","capability not found"}}.dump(); }
             if (method == "GET" && path == "/api/v1/capabilities/drift") { const auto root=url_decode(get_query_param(query,"graph_root")); const auto fragment=url_decode(get_query_param(query,"fragment")); if(root.empty()||fragment.empty()) { http_status=400; return json{{"error","graph_root and fragment are required"}}.dump(); } const auto result=catalog.drift(root,fragment); return json{{"matches",result.matches.size()},{"drift",result.drift.size()}}.dump(); }
         } catch(const json::exception& error) { http_status=400; return json{{"error","invalid JSON body"}}.dump(); }
         catch(const std::invalid_argument& error) { http_status=400; return json{{"error",error.what()}}.dump(); }
@@ -1016,7 +1038,8 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
                 ctx.last_owner_heartbeat = ctx.last_tool_activity;
             }
             std::string content_type =
-                (path == "/" || path == "/index.html") ? "text/html" : "application/json";
+                (path == "/" || path == "/index.html" || path == "/portfolio")
+                    ? "text/html" : "application/json";
             build_response(client_fd, http_status, response_body, content_type);
         }
         close(client_fd);

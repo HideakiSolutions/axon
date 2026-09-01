@@ -526,6 +526,10 @@ add_test(
     NAME test_http_status_codes
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_http_status_codes.sh $<TARGET_FILE:axon>
 )
+add_test(
+    NAME test_portfolio_web
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/smoke/test_portfolio_web.py $<TARGET_FILE:axon>
+)
 
 add_test(
     NAME test_docs_freshness
@@ -599,6 +603,7 @@ set_tests_properties(
     test_mcp_memory_search
     test_cpp_header_impl
     test_http_status_codes
+    test_portfolio_web
     test_docs_freshness
     test_shell_guard_hook
     test_auto_index_project_key
