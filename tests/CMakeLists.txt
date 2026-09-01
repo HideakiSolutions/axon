@@ -336,6 +336,16 @@ if(AXON_ENABLE_POSTGRES_TESTS AND NOT DEFINED ENV{AXON_POSTGRES_TEST_DSN})
     message(FATAL_ERROR "AXON_ENABLE_POSTGRES_TESTS requires AXON_POSTGRES_TEST_DSN")
 endif()
 if(PostgreSQL_FOUND)
+    add_executable(test_portfolio_semantic
+        integration/test_portfolio_semantic.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/search/semantic_capability_store.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/search/fail_soft_semantic_search.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/postgresql/pgvector_semantic_store.cpp
+    )
+    target_include_directories(test_portfolio_semantic PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party/blake3/c)
+    target_link_libraries(test_portfolio_semantic PRIVATE PostgreSQL::PostgreSQL blake3_lib GTest::gtest_main)
+    add_test(NAME test_portfolio_semantic COMMAND test_portfolio_semantic)
     add_executable(test_portfolio_postgresql
         unit/test_portfolio_store_contract.cpp
         integration/test_portfolio_postgresql.cpp
@@ -357,6 +367,15 @@ if(PostgreSQL_FOUND)
         set_tests_properties(test_portfolio_postgresql PROPERTIES
             ENVIRONMENT "AXON_POSTGRES_TEST_DSN=$ENV{AXON_POSTGRES_TEST_DSN}")
     endif()
+endif()
+find_package(CURL QUIET)
+if(CURL_FOUND AND TARGET test_portfolio_semantic)
+    target_sources(test_portfolio_semantic PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/qdrant/qdrant_semantic_store.cpp)
+    target_link_libraries(test_portfolio_semantic PRIVATE CURL::libcurl)
+    target_compile_definitions(test_portfolio_semantic PRIVATE AXON_HAVE_QDRANT=1)
+    target_include_directories(test_portfolio_semantic PRIVATE
+        ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
 endif()
 
 # Capsule budget tests — drive assemble_capsule end-to-end; require the real

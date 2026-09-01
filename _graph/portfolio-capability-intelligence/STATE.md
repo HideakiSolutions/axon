@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G8 independently accepted and ready for its isolated commit; G9 next
+Status: G9 optional semantic read models accepted; ready to commit and proceed to graph/candidate stages
 
 ## Current Mini-Goal
 
-G7 — Notification, authenticated remote ingest and reconciliation using Keycloak Shared OIDC; accepted.
+G9 — Optional semantic providers, durable fallback and recovery gating; accepted.
 
 ## Progress
 
@@ -37,6 +37,11 @@ G7 — Notification, authenticated remote ingest and reconciliation using Keyclo
   accepted. The port now distinguishes 500 events/apply, 10,000 mutations/event and 10,000
   snapshot entities, and defines optional capability-advertised atomic identity transfer keyed by
   the persistent physical stream with typed provenance and idempotent chained replay.
+- G8 implementation: deterministic incremental capability signature extraction is independently
+  accepted and committed as `7e095a8`.
+- G9 implementation: optional pgvector/Qdrant semantic providers are independently accepted.
+  pgvector is the durable fallback; Qdrant failures set an explicit dirty state and reads remain
+  on pgvector until the projection's successful reconcile/rebuild clears it.
 
 ## Current Evidence
 
@@ -78,9 +83,10 @@ G7 — Notification, authenticated remote ingest and reconciliation using Keyclo
   platform migration view/intake v2 contract.
 - Repository reidentification/removal remain explicit later workflows; G3 does not infer identity
   changes or removal from temporary unavailability.
-- Provider namespaces and credentials are intentionally unprovisioned.
-- PostgreSQL/Qdrant/FalkorDB production adapter dependencies/build strategy require accepted ADR and
-  supply-chain review before code.
+- Semantic provider namespaces are provisioned as isolated Axon resources. Credentials remain in
+  `pass`, are never versioned, and are used only as ephemeral test environments.
+- The future projector must invoke the semantic router reconciliation marker only after its replay
+  has restored the optional accelerator.
 - G7 semantic discovery is degraded because the local second-brain Qdrant/Ollama search endpoint
   was unavailable after a successful status probe; direct canonical Keycloak/shared-infra sources
   were used and this is not treated as a successful semantic result.
@@ -94,11 +100,11 @@ G7 — Notification, authenticated remote ingest and reconciliation using Keyclo
 
 ## Rollback
 
-Remove the unmerged feature worktree/branch or revert the documentation-only G0/G1 commits. No
-runtime/schema/infrastructure mutation has occurred.
+Remove the unmerged feature worktree/branch or revert its isolated commits. Dedicated shared
+provider allocations may be retained for future G10+ integration or explicitly deprovisioned by
+the shared-infrastructure owner.
 
 ## Next Action
 
-Commit G7, then begin G8 capability signature extraction. Keep realm/client registration,
-credential access, shared namespace mutation, deployment and live compatibility smoke behind their
-separate explicit gates.
+Commit G9, then begin graph construction and multi-signal candidate generation. Keep deployment,
+release and external capability-graph writes behind their separate gates.
