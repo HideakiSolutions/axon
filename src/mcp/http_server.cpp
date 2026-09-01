@@ -326,7 +326,44 @@ static std::string handle_request(const std::string& method, const std::string& 
         return web_index_html();
     }
     if (method == "GET" && path == "/portfolio") {
-        return axon::portfolio::web::page();
+        auto page = axon::portfolio::web::page();
+        // Browser authentication is deliberately additive to the static atlas.  The client is a
+        // public PKCE client: no browser receives a secret and the existing bearer field remains
+        // an operational fallback for non-browser clients.
+        const char* issuer = std::getenv("AXON_KEYCLOAK_ISSUER");
+        const char* client_id = std::getenv("AXON_KEYCLOAK_BROWSER_CLIENT_ID");
+        if (issuer && client_id) {
+            const auto config = json{{"issuer", issuer}, {"client_id", client_id}}.dump();
+            const auto script = R"HTML(<script>
+(() => {
+  const oidc = )HTML" + config + R"HTML(;
+  const token = document.getElementById('t');
+  const label = token && token.closest('label');
+  if (!token || !label || !window.crypto || !window.crypto.subtle) return;
+  const login = document.createElement('button'); login.id = 'keycloak-login';
+  login.type = 'button'; login.textContent = 'Sign in with Keycloak';
+  label.before(login); label.firstChild.textContent = 'Access token (advanced)';
+  const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const endpoint = suffix => oidc.issuer.replace(/\/$/, '') + '/protocol/openid-connect/' + suffix;
+  const finish = async () => {
+    const query = new URLSearchParams(location.search), code = query.get('code'), state = query.get('state');
+    if (!code) return;
+    const saved = sessionStorage.getItem('axon-portfolio-pkce');
+    if (!saved) throw Error('Sign-in session expired; retry Keycloak login.');
+    const proof = JSON.parse(saved); sessionStorage.removeItem('axon-portfolio-pkce');
+    if (state !== proof.state) throw Error('Keycloak state validation failed.');
+    const form = new URLSearchParams({grant_type:'authorization_code', client_id:oidc.client_id, code, redirect_uri:location.origin + location.pathname, code_verifier:proof.verifier});
+    const response = await fetch(endpoint('token'), {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:form});
+    const payload = await response.json(); if (!response.ok || !payload.access_token) throw Error(payload.error_description || 'Keycloak token exchange failed.');
+    token.value = payload.access_token; history.replaceState({}, '', location.pathname); document.getElementById('go').click();
+  };
+  login.onclick = async () => { const bytes = crypto.getRandomValues(new Uint8Array(32)); const verifier = b64url(bytes); const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)); const state = b64url(crypto.getRandomValues(new Uint8Array(24))); sessionStorage.setItem('axon-portfolio-pkce', JSON.stringify({verifier,state})); const query = new URLSearchParams({client_id:oidc.client_id,response_type:'code',redirect_uri:location.origin + location.pathname,scope:'openid profile email',code_challenge:b64url(digest),code_challenge_method:'S256',state}); location.assign(endpoint('auth') + '?' + query); };
+  finish().catch(error => { document.getElementById('state').textContent = 'Sign-in failed: ' + error.message; });
+})();
+</script>)HTML";
+            page.replace(page.rfind("</body>"), 0, script);
+        }
+        return page;
     }
 
     // GET /api/metrics
