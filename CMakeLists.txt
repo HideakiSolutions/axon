@@ -256,6 +256,8 @@ file(GLOB_RECURSE AXON_SOURCES src/*.cpp)
 find_package(PostgreSQL QUIET)
 find_package(OpenSSL QUIET)
 find_package(CURL QUIET)
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
+find_library(HIREDIS_LIBRARY NAMES hiredis)
 if(NOT PostgreSQL_FOUND)
     list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/postgresql/.*\\.cpp$")
 endif()
@@ -264,6 +266,9 @@ if(NOT OpenSSL_FOUND)
 endif()
 if(NOT CURL_FOUND)
     list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/qdrant/.*\\.cpp$")
+endif()
+if(NOT HIREDIS_INCLUDE_DIR OR NOT HIREDIS_LIBRARY)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/falkordb/.*\\.cpp$")
 endif()
 
 add_executable(axon ${AXON_SOURCES})
@@ -276,6 +281,10 @@ target_include_directories(axon PRIVATE
     third_party/llama.cpp/include
     third_party/nlohmann-json/single_include
 )
+if(HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
+    target_include_directories(axon PRIVATE ${HIREDIS_INCLUDE_DIR})
+    target_link_libraries(axon PRIVATE ${HIREDIS_LIBRARY})
+endif()
 
 target_link_libraries(axon PRIVATE
     duckdb_lib

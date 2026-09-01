@@ -1,10 +1,10 @@
 # Portfolio Capability Intelligence State
 
-Status: G9 optional semantic read models accepted; ready to commit and proceed to graph/candidate stages
+Status: G10 FalkorDB graph projection accepted; ready to commit and proceed to candidate generation
 
 ## Current Mini-Goal
 
-G9 — Optional semantic providers, durable fallback and recovery gating; accepted.
+G10 — FalkorDB graph projection; accepted.
 
 ## Progress
 
@@ -42,6 +42,9 @@ G9 — Optional semantic providers, durable fallback and recovery gating; accept
 - G9 implementation: optional pgvector/Qdrant semantic providers are independently accepted.
   pgvector is the durable fallback; Qdrant failures set an explicit dirty state and reads remain
   on pgvector until the projection's successful reconcile/rebuild clears it.
+- G10 implementation: optional FalkorDB projection is independently accepted. It stages then
+  publishes repository/stream-qualified generations, retains all call-neighborhood relation
+  evidence, and provides bounded directed traversal without arbitrary Cypher exposure.
 
 ## Current Evidence
 
@@ -106,5 +109,5 @@ the shared-infrastructure owner.
 
 ## Next Action
 
-Commit G9, then begin graph construction and multi-signal candidate generation. Keep deployment,
-release and external capability-graph writes behind their separate gates.
+Commit G10, then begin multi-signal candidate generation. Keep deployment, release and external
+capability-graph writes behind their separate gates.

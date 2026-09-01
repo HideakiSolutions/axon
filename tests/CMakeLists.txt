@@ -377,6 +377,18 @@ if(CURL_FOUND AND TARGET test_portfolio_semantic)
     target_include_directories(test_portfolio_semantic PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
 endif()
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
+find_library(HIREDIS_LIBRARY NAMES hiredis)
+if(HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
+    add_executable(test_portfolio_graph
+        integration/test_portfolio_graph.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/domain/capability_signature.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/application/graph/capability_graph_projection.cpp
+        ${CMAKE_SOURCE_DIR}/src/portfolio/infrastructure/falkordb/falkordb_capability_graph.cpp)
+    target_include_directories(test_portfolio_graph PRIVATE ${CMAKE_SOURCE_DIR}/src ${HIREDIS_INCLUDE_DIR})
+    target_link_libraries(test_portfolio_graph PRIVATE ${HIREDIS_LIBRARY} blake3_lib GTest::gtest_main)
+    add_test(NAME test_portfolio_graph COMMAND test_portfolio_graph)
+endif()
 
 # Capsule budget tests — drive assemble_capsule end-to-end; require the real
 # GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
