@@ -23,7 +23,8 @@ std::string uuid_v4() {
     std::random_device random;
     std::uniform_int_distribution<unsigned int> byte(0, 255);
     unsigned char bytes[16];
-    for (auto& value : bytes) value = static_cast<unsigned char>(byte(random));
+    for (auto& value : bytes)
+        value = static_cast<unsigned char>(byte(random));
     bytes[6] = static_cast<unsigned char>((bytes[6] & 0x0f) | 0x40);
     bytes[8] = static_cast<unsigned char>((bytes[8] & 0x3f) | 0x80);
     std::ostringstream output;
@@ -35,8 +36,7 @@ std::string uuid_v4() {
     return output.str();
 }
 
-std::optional<std::string>
-repository_identity_from_contract(const std::filesystem::path& db_path) {
+std::optional<std::string> repository_identity_from_contract(const std::filesystem::path& db_path) {
     const auto project_root = db_path.parent_path().filename() == ".axon"
                                   ? db_path.parent_path().parent_path()
                                   : db_path.parent_path();
@@ -450,8 +450,8 @@ void Database::run_migrations() {
     } else {
         const auto contract_repository_id = repository_identity_from_contract(db_path_);
         if (contract_repository_id) {
-            auto persisted = conn_->Query(
-                "SELECT repository_id FROM index_metadata WHERE singleton=true");
+            auto persisted =
+                conn_->Query("SELECT repository_id FROM index_metadata WHERE singleton=true");
             require_ok(persisted, "read persisted index identity");
             const std::string persisted_repository_id = persisted->GetValue(0, 0).ToString();
             if (*contract_repository_id != persisted_repository_id) {

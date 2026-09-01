@@ -15,16 +15,14 @@ std::mutex failpoint_mutex;
 std::string active_failpoint;
 
 const std::unordered_set<std::string> event_types = {
-    "IndexSnapshotCompleted", "IndexFilesUpdated",      "IndexFilesDeleted",
-    "IndexSymbolsUpdated",    "IndexContractsUpdated",  "IndexRoutesUpdated",
-    "RepositoryReidentified", "RepositoryRemoved"};
+    "IndexSnapshotCompleted", "IndexFilesUpdated",  "IndexFilesDeleted",      "IndexSymbolsUpdated",
+    "IndexContractsUpdated",  "IndexRoutesUpdated", "RepositoryReidentified", "RepositoryRemoved"};
 const std::unordered_set<std::string> entity_kinds = {
-    "file",       "symbol",     "contract", "route",      "handler",
-    "event",      "schema",     "dto",      "test",       "dependency",
-    "tombstone",  "repository"};
+    "file",   "symbol", "contract", "route",      "handler",   "event",
+    "schema", "dto",    "test",     "dependency", "tombstone", "repository"};
 const std::unordered_set<std::string> operations = {"upsert", "delete", "snapshot"};
-const std::unordered_set<std::string> identity_reasons = {
-    "contract-adopted", "collision-repaired", "repository-moved", "owner-approved"};
+const std::unordered_set<std::string> identity_reasons = {"contract-adopted", "collision-repaired",
+                                                          "repository-moved", "owner-approved"};
 
 bool canonical_uuid(const std::string& value) {
     static const std::regex pattern(
@@ -75,10 +73,10 @@ std::string canonical_manifest_rows(duckdb::Connection& connection) {
     }
     // Embeddings are derived index state too. Include their deterministic serialized values so an
     // embedding/model change advances manifest+epoch even when source and symbol text are stable.
-    auto embeddings = connection.Query(
-        "SELECT f.path,s.kind,s.name,COALESCE(CAST(s.embedding AS VARCHAR),'') "
-        "FROM symbols s JOIN files f ON f.id=s.file_id "
-        "ORDER BY f.path,s.kind,s.name,s.id");
+    auto embeddings =
+        connection.Query("SELECT f.path,s.kind,s.name,COALESCE(CAST(s.embedding AS VARCHAR),'') "
+                         "FROM symbols s JOIN files f ON f.id=s.file_id "
+                         "ORDER BY f.path,s.kind,s.name,s.id");
     require_ok(embeddings, "compute embedding manifest");
     for (duckdb::idx_t row = 0; row < embeddings->RowCount(); ++row) {
         canonical += "embedding\0";
@@ -91,7 +89,8 @@ std::string canonical_manifest_rows(duckdb::Connection& connection) {
     auto capability_evidence = connection.Query(
         "SELECT f.path,COALESCE(context.bounded_context,''),COALESCE(fingerprint.value,'') "
         "FROM files f LEFT JOIN capability_contexts context ON context.file_id=f.id "
-        "LEFT JOIN capability_ast_fingerprints fingerprint ON fingerprint.file_id=f.id ORDER BY f.path");
+        "LEFT JOIN capability_ast_fingerprints fingerprint ON fingerprint.file_id=f.id ORDER BY "
+        "f.path");
     require_ok(capability_evidence, "compute capability evidence manifest");
     for (duckdb::idx_t row = 0; row < capability_evidence->RowCount(); ++row) {
         canonical += "capability_evidence\0";
@@ -117,9 +116,8 @@ std::string canonical_manifest_rows(duckdb::Connection& connection) {
         }
         canonical += '\n';
     }
-    auto routes = connection.Query(
-        "SELECT method, path, handler_file, framework FROM routes "
-        "ORDER BY method, path, handler_file, framework");
+    auto routes = connection.Query("SELECT method, path, handler_file, framework FROM routes "
+                                   "ORDER BY method, path, handler_file, framework");
     require_ok(routes, "compute route manifest");
     for (duckdb::idx_t row = 0; row < routes->RowCount(); ++row) {
         canonical += "route\0";
@@ -153,9 +151,13 @@ void Transaction::commit() {
     trigger_journal_failpoint_for_testing("after_commit");
 }
 
-void Transaction::mark_index_mutation() { mutation_observed_ = true; }
+void Transaction::mark_index_mutation() {
+    mutation_observed_ = true;
+}
 
-void Transaction::mark_event_appended() { event_observed_ = true; }
+void Transaction::mark_event_appended() {
+    event_observed_ = true;
+}
 
 IndexIdentity index_identity(duckdb::Connection& connection) {
     auto result = connection.Query(
@@ -206,8 +208,8 @@ static uint64_t append_index_event_impl(Transaction& transaction, duckdb::Connec
         if (entity.digest && (entity.digest->size() < 16 || entity.digest->size() > 128))
             throw std::invalid_argument("affected entity digest length is outside [16,128]");
         has_delete = has_delete || entity.operation == "delete";
-        has_repository_delete = has_repository_delete ||
-                                (entity.kind == "repository" && entity.operation == "delete");
+        has_repository_delete =
+            has_repository_delete || (entity.kind == "repository" && entity.operation == "delete");
     }
     if (event_type == "IndexFilesDeleted" && !has_delete)
         throw std::invalid_argument("IndexFilesDeleted requires a delete operation");
@@ -229,25 +231,23 @@ static uint64_t append_index_event_impl(Transaction& transaction, duckdb::Connec
 
     nlohmann::json affected_json = nlohmann::json::array();
     for (const auto& entity : affected) {
-        nlohmann::json item = {{"kind", entity.kind},
-                               {"key", entity.key},
-                               {"operation", entity.operation}};
+        nlohmann::json item = {
+            {"kind", entity.kind}, {"key", entity.key}, {"operation", entity.operation}};
         if (entity.digest) item["digest"] = *entity.digest;
         affected_json.push_back(std::move(item));
     }
     nlohmann::json payload = {{"affected", std::move(affected_json)}};
     if (identity_change) {
-        payload["identity_change"] = {
-            {"old_repository_id", identity_change->old_repository_id},
-            {"new_repository_id", identity_change->new_repository_id},
-            {"handoff_sequence", sequence},
-            {"old_binding_id", identity_change->old_binding_id},
-            {"new_binding_id", identity_change->new_binding_id},
-            {"approval_reference", identity_change->approval_reference},
-            {"reason", identity_change->reason}};
+        payload["identity_change"] = {{"old_repository_id", identity_change->old_repository_id},
+                                      {"new_repository_id", identity_change->new_repository_id},
+                                      {"handoff_sequence", sequence},
+                                      {"old_binding_id", identity_change->old_binding_id},
+                                      {"new_binding_id", identity_change->new_binding_id},
+                                      {"approval_reference", identity_change->approval_reference},
+                                      {"reason", identity_change->reason}};
     }
-    const std::string previous = identity.current_epoch.empty() ? "NULL" :
-        "'" + sql_quote(identity.current_epoch) + "'";
+    const std::string previous =
+        identity.current_epoch.empty() ? "NULL" : "'" + sql_quote(identity.current_epoch) + "'";
     const std::string source = source_ref ? "'" + sql_quote(*source_ref) + "'" : "NULL";
     const std::string snapshot_manifest =
         event_type == "IndexSnapshotCompleted" ? "'" + sql_quote(manifest_hash) + "'" : "NULL";
@@ -259,9 +259,9 @@ static uint64_t append_index_event_impl(Transaction& transaction, duckdb::Connec
         sql_quote(event_type) + "','" + epoch + "'," + previous + "," + source + "," +
         snapshot_manifest + ",'" + sql_quote(payload.dump()) + "')");
     require_ok(inserted, "append index event");
-    auto updated = connection.Query(
-        "UPDATE index_metadata SET current_epoch='" + epoch + "', current_manifest='" +
-        sql_quote(manifest_hash) + "' WHERE singleton=true");
+    auto updated = connection.Query("UPDATE index_metadata SET current_epoch='" + epoch +
+                                    "', current_manifest='" + sql_quote(manifest_hash) +
+                                    "' WHERE singleton=true");
     require_ok(updated, "advance index epoch");
     transaction.mark_event_appended();
     trigger_journal_failpoint_for_testing("after_event");
@@ -285,7 +285,8 @@ void upsert_tombstone(duckdb::Connection& connection, const AffectedEntity& enti
         "deleted_sequence,deleted_epoch,deleted_at) VALUES ('" +
         sql_quote(identity.repository_id) + "','" + sql_quote(identity.index_stream_id) + "','" +
         sql_quote(entity.kind) + "','" + sql_quote(entity.key) + "'," +
-        std::to_string(deleted_sequence) + ",'" + sql_quote(deleted_epoch) + "',now()) "
+        std::to_string(deleted_sequence) + ",'" + sql_quote(deleted_epoch) +
+        "',now()) "
         "ON CONFLICT(index_stream_id,entity_kind,entity_key) DO UPDATE SET "
         "deleted_sequence=excluded.deleted_sequence,deleted_epoch=excluded.deleted_epoch,"
         "deleted_at=excluded.deleted_at");
@@ -294,10 +295,10 @@ void upsert_tombstone(duckdb::Connection& connection, const AffectedEntity& enti
 
 void clear_tombstone(duckdb::Connection& connection, const AffectedEntity& entity) {
     const auto identity = index_identity(connection);
-    auto result = connection.Query(
-        "DELETE FROM index_tombstones WHERE index_stream_id='" +
-        sql_quote(identity.index_stream_id) + "' AND entity_kind='" + sql_quote(entity.kind) +
-        "' AND entity_key='" + sql_quote(entity.key) + "'");
+    auto result = connection.Query("DELETE FROM index_tombstones WHERE index_stream_id='" +
+                                   sql_quote(identity.index_stream_id) + "' AND entity_kind='" +
+                                   sql_quote(entity.kind) + "' AND entity_key='" +
+                                   sql_quote(entity.key) + "'");
     require_ok(result, "clear resurrected tombstone");
 }
 
@@ -307,7 +308,8 @@ uint64_t reidentify_repository(Transaction& transaction, duckdb::Connection& con
     if (identity.removed) throw std::logic_error("removed repository cannot be reidentified");
     if (!canonical_uuid(change.old_repository_id) || !canonical_uuid(change.new_repository_id) ||
         change.old_repository_id == change.new_repository_id)
-        throw std::invalid_argument("reidentification requires distinct canonical repository UUIDs");
+        throw std::invalid_argument(
+            "reidentification requires distinct canonical repository UUIDs");
     if (change.old_repository_id != identity.repository_id)
         throw std::invalid_argument("old_repository_id does not match persisted identity");
     if (change.old_binding_id.size() < 16 || change.old_binding_id.size() > 128 ||
@@ -340,8 +342,9 @@ uint64_t remove_repository(Transaction& transaction, duckdb::Connection& connect
     if (identity.removed) throw std::logic_error("repository stream is already removed");
     transaction.mark_index_mutation();
     const AffectedEntity removed = {"repository", identity.repository_id, "delete", std::nullopt};
-    const std::string manifest = identity.current_manifest.empty() ? compute_manifest_hash(connection)
-                                                                   : identity.current_manifest;
+    const std::string manifest = identity.current_manifest.empty()
+                                     ? compute_manifest_hash(connection)
+                                     : identity.current_manifest;
     const uint64_t sequence = append_index_event_impl(transaction, connection, "RepositoryRemoved",
                                                       {removed}, manifest, source_ref, nullptr);
     const std::string epoch = index_identity(connection).current_epoch;

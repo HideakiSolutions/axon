@@ -192,13 +192,16 @@ static int64_t upsert_file(duckdb::Connection& conn, const std::string& rel_path
         // and would be lost here since those files aren't being re-walked.
         require_success(conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(fid)),
                         "replace file edges");
-        require_success(conn.Query("DELETE FROM external_dependencies WHERE from_file = " + std::to_string(fid)),
+        require_success(conn.Query("DELETE FROM external_dependencies WHERE from_file = " +
+                                   std::to_string(fid)),
                         "replace external dependencies");
         require_success(conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(fid)),
                         "replace file symbols");
-        require_success(conn.Query("DELETE FROM capability_contexts WHERE file_id = " + std::to_string(fid)),
-                        "replace capability context");
-        require_success(conn.Query("DELETE FROM capability_ast_fingerprints WHERE file_id = " + std::to_string(fid)),
+        require_success(
+            conn.Query("DELETE FROM capability_contexts WHERE file_id = " + std::to_string(fid)),
+            "replace capability context");
+        require_success(conn.Query("DELETE FROM capability_ast_fingerprints WHERE file_id = " +
+                                   std::to_string(fid)),
                         "replace capability fingerprint");
         require_success(conn.Query("UPDATE files SET hash = '" + sq(hash) + "', language = '" +
                                    sq(lang) + "', byte_size = " + std::to_string(byte_size) +
@@ -253,20 +256,25 @@ static std::string structural_fingerprint(const std::string& skeleton) {
     static constexpr char hex[] = "0123456789abcdef";
     std::string result;
     result.reserve(sizeof(digest) * 2U);
-    for (const auto byte : digest) { result += hex[byte >> 4U]; result += hex[byte & 0x0fU]; }
+    for (const auto byte : digest) {
+        result += hex[byte >> 4U];
+        result += hex[byte & 0x0fU];
+    }
     return result;
 }
 
 static void replace_capability_evidence(duckdb::Connection& conn, int64_t file_id,
-                                        const std::string& relative_path, const std::string& skeleton) {
+                                        const std::string& relative_path,
+                                        const std::string& skeleton) {
     const auto id = std::to_string(file_id);
     require_success(conn.Query("DELETE FROM capability_contexts WHERE file_id = " + id),
                     "replace capability context");
     require_success(conn.Query("DELETE FROM capability_ast_fingerprints WHERE file_id = " + id),
                     "replace capability fingerprint");
     if (const auto context = inferred_bounded_context(relative_path)) {
-        require_success(conn.Query("INSERT INTO capability_contexts VALUES(" + id + ",'" +
-                                   sq(*context) + "')"), "insert capability context");
+        require_success(
+            conn.Query("INSERT INTO capability_contexts VALUES(" + id + ",'" + sq(*context) + "')"),
+            "insert capability context");
     }
     if (!skeleton.empty()) {
         require_success(conn.Query("INSERT INTO capability_ast_fingerprints VALUES(" + id + ",'" +
@@ -275,22 +283,25 @@ static void replace_capability_evidence(duckdb::Connection& conn, int64_t file_i
     }
 }
 
-static std::vector<portfolio::AffectedEntity> backfill_capability_evidence(duckdb::Connection& conn) {
+static std::vector<portfolio::AffectedEntity>
+backfill_capability_evidence(duckdb::Connection& conn) {
     std::vector<portfolio::AffectedEntity> affected;
-    auto rows=conn.Query("SELECT f.id,f.path,COALESCE(f.skeleton,''),"
-                         "EXISTS(SELECT 1 FROM capability_contexts c WHERE c.file_id=f.id),"
-                         "EXISTS(SELECT 1 FROM capability_ast_fingerprints a WHERE a.file_id=f.id) FROM files f");
-    require_ok(rows,"scan capability evidence backfill");
-    for(duckdb::idx_t row=0;row<rows->RowCount();++row) {
-        const auto path=rows->GetValue(1,row).ToString();
-        const auto skeleton=rows->GetValue(2,row).ToString();
-        const bool needs_context=inferred_bounded_context(path).has_value() && !rows->GetValue<bool>(3,row);
-        const bool needs_fingerprint=!skeleton.empty() && !rows->GetValue<bool>(4,row);
-        if(!needs_context && !needs_fingerprint) continue;
-        replace_capability_evidence(conn,rows->GetValue<int64_t>(0,row),path,skeleton);
+    auto rows = conn.Query(
+        "SELECT f.id,f.path,COALESCE(f.skeleton,''),"
+        "EXISTS(SELECT 1 FROM capability_contexts c WHERE c.file_id=f.id),"
+        "EXISTS(SELECT 1 FROM capability_ast_fingerprints a WHERE a.file_id=f.id) FROM files f");
+    require_ok(rows, "scan capability evidence backfill");
+    for (duckdb::idx_t row = 0; row < rows->RowCount(); ++row) {
+        const auto path = rows->GetValue(1, row).ToString();
+        const auto skeleton = rows->GetValue(2, row).ToString();
+        const bool needs_context =
+            inferred_bounded_context(path).has_value() && !rows->GetValue<bool>(3, row);
+        const bool needs_fingerprint = !skeleton.empty() && !rows->GetValue<bool>(4, row);
+        if (!needs_context && !needs_fingerprint) continue;
+        replace_capability_evidence(conn, rows->GetValue<int64_t>(0, row), path, skeleton);
         // The event contract already defines file upserts; evidence is additive metadata of that
         // same file and must not introduce a new journal operation enum.
-        affected.push_back({"file",path,"upsert",std::nullopt});
+        affected.push_back({"file", path, "upsert", std::nullopt});
     }
     return affected;
 }
@@ -434,8 +445,13 @@ static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
             // A missing local file, a standard-library module and a package are intentionally
             // kept in one *unresolved* evidence class.  Projection/UI must not promote this to
             // package consumption without a classifier that can prove it.
-            require_success(conn.Query("INSERT INTO external_dependencies(from_file,specifier,kind) SELECT "+
-                std::to_string(from_id)+", '"+sq(edge.to_specifier)+"', '"+sq(edge.kind)+"' WHERE NOT EXISTS (SELECT 1 FROM external_dependencies WHERE from_file="+std::to_string(from_id)+" AND specifier='"+sq(edge.to_specifier)+"')"),
+            require_success(
+                conn.Query(
+                    "INSERT INTO external_dependencies(from_file,specifier,kind) SELECT " +
+                    std::to_string(from_id) + ", '" + sq(edge.to_specifier) + "', '" +
+                    sq(edge.kind) +
+                    "' WHERE NOT EXISTS (SELECT 1 FROM external_dependencies WHERE from_file=" +
+                    std::to_string(from_id) + " AND specifier='" + sq(edge.to_specifier) + "')"),
                 "record external dependency");
             continue;
         }
@@ -465,8 +481,7 @@ static void resolve_edges(duckdb::Connection& conn, int64_t from_id,
             conn.Query("SELECT id FROM symbols WHERE file_id = " + std::to_string(from_id) +
                        " AND name = '" + sq(spec) + "' LIMIT 1");
         require_ok(from_sym, "resolve import source symbol");
-        int64_t from_sym_id =
-            from_sym->RowCount() > 0 ? from_sym->GetValue<int64_t>(0, 0) : 0;
+        int64_t from_sym_id = from_sym->RowCount() > 0 ? from_sym->GetValue<int64_t>(0, 0) : 0;
 
         // Try to find a symbol in to_file with matching name
         auto to_sym = conn.Query("SELECT id FROM symbols WHERE file_id = " + std::to_string(to_id) +
@@ -542,19 +557,17 @@ static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root,
     if (victims.empty()) return 0;
 
     for (const auto& v : victims) {
-        require_success(conn.Query("DELETE FROM edges WHERE from_file = " +
-                                   std::to_string(v.id) + " OR to_file = " +
-                                   std::to_string(v.id)),
+        require_success(conn.Query("DELETE FROM edges WHERE from_file = " + std::to_string(v.id) +
+                                   " OR to_file = " + std::to_string(v.id)),
                         "delete file edges");
         require_success(conn.Query("DELETE FROM external_dependencies WHERE from_file = " +
                                    std::to_string(v.id)),
                         "delete external dependencies");
-        require_success(conn.Query("DELETE FROM symbols WHERE file_id = " +
-                                   std::to_string(v.id)),
+        require_success(conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(v.id)),
                         "delete file symbols");
-        require_success(conn.Query("DELETE FROM capability_contexts WHERE file_id = " +
-                                   std::to_string(v.id)),
-                        "delete file capability context");
+        require_success(
+            conn.Query("DELETE FROM capability_contexts WHERE file_id = " + std::to_string(v.id)),
+            "delete file capability context");
         require_success(conn.Query("DELETE FROM capability_ast_fingerprints WHERE file_id = " +
                                    std::to_string(v.id)),
                         "delete file capability fingerprint");
@@ -573,7 +586,8 @@ static void append_journal(portfolio::Transaction& transaction, duckdb::Connecti
     portfolio::trigger_journal_failpoint_for_testing("after_mutation");
     const std::string manifest = portfolio::compute_manifest_hash(conn);
     if (!updated_files.empty()) {
-        for (const auto& updated : updated_files) portfolio::clear_tombstone(conn, updated);
+        for (const auto& updated : updated_files)
+            portfolio::clear_tombstone(conn, updated);
         portfolio::append_index_event(transaction, conn, "IndexFilesUpdated", updated_files,
                                       manifest);
     }
@@ -581,9 +595,8 @@ static void append_journal(portfolio::Transaction& transaction, duckdb::Connecti
         portfolio::append_index_event(transaction, conn, "IndexSymbolsUpdated", updated_symbols,
                                       manifest);
     if (!deleted_files.empty()) {
-        const uint64_t sequence =
-            portfolio::append_index_event(transaction, conn, "IndexFilesDeleted", deleted_files,
-                                          manifest);
+        const uint64_t sequence = portfolio::append_index_event(
+            transaction, conn, "IndexFilesDeleted", deleted_files, manifest);
         const std::string epoch = portfolio::index_identity(conn).current_epoch;
         for (const auto& deleted : deleted_files)
             portfolio::upsert_tombstone(conn, deleted, sequence, epoch);
@@ -634,8 +647,8 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     std::vector<portfolio::AffectedEntity> deleted_files;
 
     portfolio::Transaction transaction(conn);
-    const auto backfilled=backfill_capability_evidence(conn);
-    updated_files.insert(updated_files.end(),backfilled.begin(),backfilled.end());
+    const auto backfilled = backfill_capability_evidence(conn);
+    updated_files.insert(updated_files.end(), backfilled.begin(), backfilled.end());
     if (!backfilled.empty()) transaction.mark_index_mutation();
     for (int i = 0; i < total; i++) {
         const auto& abs_path = files[i];
@@ -744,8 +757,8 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
     std::vector<portfolio::AffectedEntity> deleted_files;
 
     portfolio::Transaction transaction(conn);
-    const auto backfilled=backfill_capability_evidence(conn);
-    updated_files.insert(updated_files.end(),backfilled.begin(),backfilled.end());
+    const auto backfilled = backfill_capability_evidence(conn);
+    updated_files.insert(updated_files.end(), backfilled.begin(), backfilled.end());
     if (!backfilled.empty()) transaction.mark_index_mutation();
     if (total > 0) {
         for (int i = 0; i < total; i++) {
