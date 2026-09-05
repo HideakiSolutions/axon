@@ -10,3 +10,7 @@ models/*.gguf
 # Python bytecode cache
 __pycache__/
 *.pyc
+
+# Estado de runtime e config local-only — nunca versionar
+.hseos/
+.claude/settings.json
