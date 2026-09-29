@@ -42,7 +42,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build patchelf jq ripgrep
+          sudo apt-get install -y cmake build-essential ninja-build patchelf jq ripgrep libpq-dev
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
@@ -77,6 +77,10 @@ jobs:
 
       - name: Build
         run: cmake --build build --target axon -j 2
+
+      - name: Verify PostgreSQL adapter is linked (Linux)
+        if: runner.os == 'Linux'
+        run: ldd build/axon | grep -E 'libpq\.so\.5 => /'
 
       - name: Build release verification tests
         if: runner.os == 'Linux'
@@ -135,10 +139,38 @@ jobs:
           find build/bin \( -name "lib*.so*" -o -name "lib*.dylib" \) 2>/dev/null | xargs -I{} cp {} "${stage}/lib/" || true
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp third_party/duckdb/lib/libduckdb.so "${stage}/lib/"
-            # llama.cpp bakes the CI build path into RUNPATH; rewrite to $ORIGIN
-            # so the libs resolve their siblings on any host that extracts the tarball.
+            # CMake may find optional system libraries on the hosted runner.
+            # Bundle their complete non-glibc dependency closure so the package
+            # also runs on machines without those development packages.
+            mapfile -t queue < <(find "${stage}/lib" -maxdepth 1 \( -type f -o -type l \) -name '*.so*' -print)
+            queue+=("${stage}/bin/axon")
+            declare -A scanned=()
+            for ((i=0; i<${#queue[@]}; i++)); do
+              binary="${queue[$i]}"
+              [ -z "${scanned[$binary]:-}" ] || continue
+              scanned[$binary]=1
+              dependencies="$(ldd "$binary")"
+              while read -r soname arrow source remainder; do
+                [ "$arrow" = '=>' ] || continue
+                if [ "$source" = 'not' ]; then
+                  echo "[release] unresolved $soname imported by $binary" >&2
+                  exit 1
+                fi
+                case "$soname" in
+                  libc.so.6|libm.so.6|libdl.so.2|libpthread.so.0|librt.so.1|libresolv.so.2|libnss_*.so.2) continue ;;
+                esac
+                [ ! -e "${stage}/lib/${soname}" ] || continue
+                [ -f "$source" ] || { echo "[release] missing $soname at $source" >&2; exit 1; }
+                cp -L "$source" "${stage}/lib/${soname}"
+                echo "[release] bundled $soname from $source"
+                queue+=("${stage}/lib/${soname}")
+              done <<< "$dependencies"
+            done
+            # Rewrite build paths so the executable and every bundled library
+            # resolve their siblings after extraction.
+            patchelf --set-rpath '$ORIGIN/../lib' "${stage}/bin/axon"
             for lib in "${stage}/lib/"lib*.so*; do
-              [ -f "$lib" ] && [ ! -L "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" || true
+              [ -f "$lib" ] && [ ! -L "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib"
             done
           else
             cp third_party/duckdb/lib/libduckdb.dylib "${stage}/lib/"
@@ -178,6 +210,11 @@ jobs:
           test -f "${stage}/hooks/axon-post-edit.sh"
           test -f "${stage}/hooks/axon-queue-drain.sh"
           test -f "${stage}/templates/CLAUDE.md"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            docker run --rm --network none \
+              --mount "type=bind,src=$(pwd)/${stage},dst=/app,readonly" \
+              ubuntu:22.04 /app/bin/axon --version
+          fi
 
       - name: Stage release tree (Windows)
         if: runner.os == 'Windows'

@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sanitizer jobs use hosted runners for the same reason.
 - Windows release packages include runtime DLLs discovered outside the build
   directory, with transitively imported dependencies checked before publishing.
+- Linux release packages include their runtime library dependencies, with the
+  PostgreSQL adapter required at build time and a clean Ubuntu container verifying
+  the extracted package before publishing.
 
 ## [1.3.1] — 2026-08-29
 
