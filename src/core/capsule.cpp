@@ -43,6 +43,7 @@ static std::optional<Language> lang_from_string(const std::string& s) {
     if (s == "ruby") return Language::Ruby;
     if (s == "swift") return Language::Swift;
     if (s == "scala") return Language::Scala;
+    if (s == "gdscript") return Language::GDScript;
     return std::nullopt;
 }
 

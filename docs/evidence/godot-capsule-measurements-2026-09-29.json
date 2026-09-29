@@ -1,0 +1,46 @@
+[
+  {
+    "query": "player movement camera rig world input",
+    "selected_paths": [
+      "dialogue/dialogue_bust.gd",
+      "src/main.gd",
+      "src/systems/world_input_controller.gd",
+      "ui/hud/npc_indicators.gd",
+      "world/zone.gd",
+      "dialogue/dialogue_state.gd"
+    ],
+    "selected_raw_tokens_est": 30503,
+    "reduction_vs_selected_pct": 98.23,
+    "capsule_token_estimate": 539
+  },
+  {
+    "query": "dialogue choice state consequence",
+    "selected_paths": [
+      "dialogue/dialogue_bust.gd",
+      "dialogue/dialogue_state.gd",
+      "src/systems/debug_bridge.gd",
+      "ui/hud/npc_indicators.gd",
+      "ui/notebook/notebook_screen.gd",
+      "dialogue/dialogue_session.gd",
+      "dialogue/dialogue_panel.gd"
+    ],
+    "selected_raw_tokens_est": 47232,
+    "reduction_vs_selected_pct": 94.68,
+    "capsule_token_estimate": 2511
+  },
+  {
+    "query": "mission state save load persistence",
+    "selected_paths": [
+      "dialogue/dialogue_session.gd",
+      "domain/mission_result.gd",
+      "ui/screens/people/people_screen.gd",
+      "persistence/save_local.gd",
+      "ui/screens/proposal/proposal_screen.gd",
+      "dialogue/dialogue_state.gd",
+      "dialogue/dialogue_content.gd"
+    ],
+    "selected_raw_tokens_est": 22486,
+    "reduction_vs_selected_pct": 95.52,
+    "capsule_token_estimate": 1007
+  }
+]

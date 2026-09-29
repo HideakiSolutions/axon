@@ -5,6 +5,16 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-09-29
+
+### Added
+- GDScript support for Godot `.gd` files across indexing, symbols, imports, call
+  extraction, skeletons, context capsules, MCP discovery, and shell guards.
+- A small Godot example project and real-project token-reduction evidence.
+
+### Fixed
+- Indexing an unnamed GDScript enum no longer crashes the parser.
+
 ## [1.3.1] — 2026-08-29
 
 ### Added

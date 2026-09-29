@@ -1,0 +1,22 @@
+[
+  {
+    "query": "PlayerCharacter compute_velocity movement",
+    "capsule_token_estimate": 267,
+    "player_path": "src/entities/player/player.gd",
+    "player_token_estimate": 28,
+    "player_content_chars": 112,
+    "player_content_sha256": "03b61d1e690999edb7a9653b1df32bb5d27301d37d472c51b6ce49cd9b60f329",
+    "player_content_header": "// === PlayerCharacter (class) lines 1-1 ===",
+    "contains_function_signature": false
+  },
+  {
+    "query": "compute_velocity",
+    "capsule_token_estimate": 581,
+    "player_path": "src/entities/player/player.gd",
+    "player_token_estimate": 406,
+    "player_content_chars": 1601,
+    "player_content_sha256": "3826db72c5fffa2ab945e8f82b76367f7487c68fb63d978b7df1d23540456fe4",
+    "player_content_header": "// === compute_velocity (function) lines 458-485 ===",
+    "contains_function_signature": true
+  }
+]

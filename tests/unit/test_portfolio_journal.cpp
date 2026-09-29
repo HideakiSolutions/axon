@@ -127,6 +127,32 @@ TEST_F(PortfolioJournalTest, UnresolvedImportsAreBoundedDeduplicatedAndTransacti
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies"), 0);
 }
 
+TEST_F(PortfolioJournalTest, GodotResourcePathsStayWithinTheirNestedProject) {
+    write_file(root / "game-a/project.godot", "config_version=5\n");
+    write_file(root / "game-a/scripts/source.gd",
+               "const Target = preload(\"res://scripts/target.gd\")\n");
+    write_file(root / "game-a/scripts/target.gd", "class_name Target\nextends Node\n");
+    write_file(root / "game-b/project.godot", "config_version=5\n");
+    write_file(root / "game-b/scripts/source.gd",
+               "const Missing = preload(\"res://scripts/target.gd\")\n");
+
+    axon::Database db(cfg.db_path);
+    axon::index_project(cfg, db);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM edges e JOIN files src ON src.id=e.from_file "
+                             "JOIN files dst ON dst.id=e.to_file "
+                             "WHERE src.path='game-a/scripts/source.gd' "
+                             "AND dst.path='game-a/scripts/target.gd'"),
+              1);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM edges e JOIN files src ON src.id=e.from_file "
+                             "WHERE src.path='game-b/scripts/source.gd'"),
+              0);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM external_dependencies d "
+                             "JOIN files src ON src.id=d.from_file "
+                             "WHERE src.path='game-b/scripts/source.gd' "
+                             "AND d.specifier='res://scripts/target.gd'"),
+              1);
+}
+
 TEST_F(PortfolioJournalTest, RejectsOversizedUnresolvedImportSpecifierWithoutPartialWrite) {
     const std::string oversized(1025, 'x');
     write_file(root / "src/main.ts", "import '" + oversized + "';\nexport const value = true;\n");

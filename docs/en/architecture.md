@@ -42,7 +42,7 @@ sequenceDiagram
     participant E as Embeddings (llama.cpp)
 
     CLI->>W: walk project root, skip SKIP_DIRS / .axonignore
-    W-->>CLI: source files (13 supported languages)
+    W-->>CLI: source files (19 supported languages)
     loop per file
         CLI->>P: parse() → AST
         P-->>CLI: symbols[] + imports[] + calls[]

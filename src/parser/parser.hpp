@@ -24,7 +24,8 @@ enum class Language {
     Nix,
     Ruby,
     Swift,
-    Scala
+    Scala,
+    GDScript
 };
 
 std::optional<Language> language_from_extension(const std::string& ext);

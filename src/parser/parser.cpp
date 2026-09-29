@@ -28,6 +28,7 @@ TSLanguage* tree_sitter_nix();
 TSLanguage* tree_sitter_ruby();
 TSLanguage* tree_sitter_swift();
 TSLanguage* tree_sitter_scala();
+TSLanguage* tree_sitter_gdscript();
 }
 
 namespace axon {
@@ -52,6 +53,7 @@ std::optional<Language> language_from_extension(const std::string& ext) {
     if (ext == "rb") return Language::Ruby;
     if (ext == "swift") return Language::Swift;
     if (ext == "scala" || ext == "sc") return Language::Scala;
+    if (ext == "gd") return Language::GDScript;
     return std::nullopt;
 }
 
@@ -93,6 +95,8 @@ std::string language_name(Language lang) {
         return "swift";
     case Language::Scala:
         return "scala";
+    case Language::GDScript:
+        return "gdscript";
     }
     return "unknown";
 }
@@ -147,12 +151,15 @@ static TSLanguage* get_ts_language(Language lang) {
         return tree_sitter_swift();
     case Language::Scala:
         return tree_sitter_scala();
+    case Language::GDScript:
+        return tree_sitter_gdscript();
     }
     return nullptr;
 }
 
 // Extract text of a node from source
 static std::string node_text(TSNode node, const std::string& src) {
+    if (ts_node_is_null(node)) return "";
     uint32_t start = ts_node_start_byte(node);
     uint32_t end = ts_node_end_byte(node);
     if (start >= src.size() || end > src.size() || end <= start) return "";
@@ -235,6 +242,7 @@ static bool is_call_kind(const std::string& kind) {
         "function_call",            // Lua
         "apply_expression",         // Nix
         "command",                  // Ruby
+        "attribute_call",           // GDScript method invocation
     };
     return kinds.count(kind) > 0;
 }
@@ -314,6 +322,12 @@ static std::string extract_callee_name(TSNode call_node, const std::string& src)
 }
 
 static std::string extract_callee_qualifier(TSNode call_node, const std::string& src) {
+    if (std::string(ts_node_type(call_node)) == "attribute_call") {
+        // GDScript's attribute_call contains only the method and arguments;
+        // its receiver is the preceding named child of the parent attribute.
+        TSNode receiver = ts_node_prev_named_sibling(call_node);
+        if (!ts_node_is_null(receiver)) return rightmost_identifier(receiver, src);
+    }
     TSNode fn = call_target_node(call_node);
     static constexpr std::pair<const char*, uint32_t> fields[] = {
         {"object", 6}, {"receiver", 8}, {"scope", 5},      {"argument", 8},
@@ -1643,6 +1657,78 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             is_symbol = !sym.name.empty();
         } else if (kind == "import_declaration") {
             push_import_edge(node, ctx.src, ctx.imports);
+        }
+    }
+
+    // Godot GDScript: file-level class_name and nested classes are distinct
+    // declarations. Preserve annotations such as @tool and @export with the
+    // symbol so a capsule shows the engine-facing contract.
+    if (ctx.lang == Language::GDScript) {
+        auto name_field = [&](TSNode n) {
+            return node_text(ts_node_child_by_field_name(n, "name", 4), ctx.src);
+        };
+        if (kind == "class_name_statement" || kind == "class_definition") {
+            sym.kind = "class";
+            sym.name = name_field(node);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "function_definition") {
+            sym.kind = "function";
+            sym.name = name_field(node);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "constructor_definition") {
+            sym.kind = "function";
+            sym.name = "_init";
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = true;
+        } else if (kind == "signal_statement") {
+            sym.kind = "signal";
+            sym.name = name_field(node);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "enum_definition") {
+            sym.kind = "enum";
+            sym.name = name_field(node);
+            sym.signature = first_line(node, ctx.src);
+            is_symbol = !sym.name.empty();
+        } else if (kind == "const_statement" || kind == "variable_statement" ||
+                   kind == "export_variable_statement" || kind == "onready_variable_statement") {
+            TSNode parent = ts_node_parent(node);
+            std::string parent_kind = ts_node_is_null(parent) ? "" : ts_node_type(parent);
+            if (parent_kind == "source" || parent_kind == "class_body") {
+                sym.kind = kind == "const_statement" ? "constant" : "variable";
+                sym.name = name_field(node);
+                sym.signature = first_line(node, ctx.src);
+                is_symbol = !sym.name.empty();
+            }
+        } else if (kind == "extends_statement") {
+            auto spec = first_string_literal(node, ctx.src);
+            if (spec.rfind("res://", 0) == 0) ctx.imports.push_back({"", spec, "extends"});
+        } else if (kind == "call") {
+            auto callee = extract_callee_name(node, ctx.src);
+            if (callee == "preload" || callee == "load") {
+                auto spec = first_string_literal(node, ctx.src);
+                if (spec.rfind("res://", 0) == 0) ctx.imports.push_back({"", spec, "imports"});
+            }
+        }
+        if (is_symbol) {
+            uint32_t n = ts_node_named_child_count(node);
+            for (uint32_t i = 0; i < n; ++i) {
+                TSNode child = ts_node_named_child(node, i);
+                if (std::string(ts_node_type(child)) == "annotations") {
+                    sym.docstring = node_text(child, ctx.src);
+                    break;
+                }
+            }
+            if (!sym.docstring) {
+                TSNode previous = ts_node_prev_named_sibling(node);
+                if (!ts_node_is_null(previous)) {
+                    std::string previous_kind = ts_node_type(previous);
+                    if (previous_kind == "annotation" || previous_kind == "annotations")
+                        sym.docstring = node_text(previous, ctx.src);
+                }
+            }
         }
     }
 

@@ -28,7 +28,7 @@ target_link_libraries(axon_parser_objs PUBLIC
     tree_sitter_lib
     ts_typescript ts_javascript ts_python ts_rust ts_go
     ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue ts_lua ts_nix
-    ts_ruby ts_swift ts_scala
+    ts_ruby ts_swift ts_scala ts_gdscript
     blake3_lib
 )
 
@@ -45,7 +45,8 @@ function(add_axon_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
-add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp)
+add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp)
 
 # Watcher tests — filesystem-only (no DuckDB/llama); language_from_extension
 # comes from the shared parser objects, the skip-list from skip_dirs.cpp.
@@ -198,7 +199,7 @@ target_link_libraries(test_objectives PRIVATE
     tree_sitter_lib
     ts_typescript ts_javascript ts_python ts_rust ts_go
     ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
-    ts_lua ts_nix ts_ruby ts_swift ts_scala
+    ts_lua ts_nix ts_ruby ts_swift ts_scala ts_gdscript
     blake3_lib
     duckdb_lib
     llama
@@ -467,7 +468,7 @@ target_link_libraries(test_capsule_budget PRIVATE
     tree_sitter_lib
     ts_typescript ts_javascript ts_python ts_rust ts_go
     ts_csharp ts_php ts_dart ts_java ts_bash ts_cpp ts_kotlin ts_vue
-    ts_lua ts_nix ts_ruby ts_swift ts_scala
+    ts_lua ts_nix ts_ruby ts_swift ts_scala ts_gdscript
     blake3_lib
     duckdb_lib
     llama

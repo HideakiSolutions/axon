@@ -138,7 +138,7 @@ if ($cmd -match '(^|[\s;&|()`])git\s+diff([\s;&|`)]|$)' -and $cmd -notmatch '(^|
 if ($cmd -match '(^|[\s;&|()`])(rg|grep|ack|ag)([\s;&|`)]|$)') {
     Deny "grep" "get_context_capsule(query=...) for code search, or <search command> | axon filter grep --budget=600 --metrics=json"
 }
-if ($cmd -match '(^|[\s;&|()`])(cat|sed|awk|nl)([\s;&|`)]|$)' -and $cmd -match '\.(c|cc|cpp|cxx|h|hh|hpp|ts|tsx|js|jsx|py|rs|go|java|cs|php|dart|kt|kts|vue|lua|nix|rb|swift|scala|sh|bash|json|md)([\s;&|`)]|$)') {
+if ($cmd -match '(^|[\s;&|()`])(cat|sed|awk|nl)([\s;&|`)]|$)' -and $cmd -match '\.(c|cc|cpp|cxx|h|hh|hpp|ts|tsx|js|jsx|py|rs|go|java|cs|php|dart|kt|kts|vue|lua|nix|rb|swift|scala|gd|sh|bash|json|md)([\s;&|`)]|$)') {
     Deny "raw-file-read" "get_skeleton(files=[...]) or get_context_capsule(query=..., pivot_files=[...]) before raw reads"
 }
 if ($cmd -match '(^|[\s;&|()`])(pytest|vitest|ctest|gtest|cargo\s+test|go\s+test|npm\s+test|pnpm\s+test|yarn\s+test|bun\s+test|mvn\s+test|gradle\s+test)([\s;&|`)]|$)') {

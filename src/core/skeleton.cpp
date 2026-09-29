@@ -23,6 +23,7 @@ TSLanguage* tree_sitter_nix();
 TSLanguage* tree_sitter_ruby();
 TSLanguage* tree_sitter_swift();
 TSLanguage* tree_sitter_scala();
+TSLanguage* tree_sitter_gdscript();
 }
 
 namespace axon {
@@ -65,6 +66,8 @@ static TSLanguage* get_ts_language(Language lang) {
         return tree_sitter_swift();
     case Language::Scala:
         return tree_sitter_scala();
+    case Language::GDScript:
+        return tree_sitter_gdscript();
     }
     return nullptr;
 }
@@ -102,6 +105,29 @@ static void build_skeleton(TSNode node, const std::string& src, Language lang, i
                            std::ostringstream& out, bool strip_comments) {
     if (ts_node_is_null(node)) return;
     std::string kind = ts_node_type(node);
+
+    if (lang == Language::GDScript) {
+        if (kind == "annotation" || kind == "annotations") {
+            out << node_text(node, src) << "\n";
+            return;
+        }
+        if (kind == "function_definition" || kind == "constructor_definition" ||
+            kind == "signal_statement" || kind == "enum_definition" ||
+            kind == "class_name_statement" || kind == "extends_statement" ||
+            kind == "const_statement" || kind == "variable_statement" ||
+            kind == "export_variable_statement" || kind == "onready_variable_statement") {
+            out << first_line(node, src) << "\n";
+            return;
+        }
+        if (kind == "class_definition") {
+            out << first_line(node, src) << "\n";
+            uint32_t count = ts_node_child_count(node);
+            for (uint32_t i = 0; i < count; ++i)
+                build_skeleton(ts_node_child(node, i), src, lang, depth + 1, out, strip_comments);
+            return;
+        }
+        if (kind == "body") return;
+    }
 
     // For function/method nodes: emit only first line (signature)
     bool is_func = (kind == "function_declaration" || kind == "function_definition" ||

@@ -1040,6 +1040,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                     lang = Language::Swift;
                 else if (ls == "scala")
                     lang = Language::Scala;
+                else if (ls == "gdscript")
+                    lang = Language::GDScript;
 
                 result.push_back({{"path", path}, {"skeleton", skeletonize(content, lang)}});
             }
