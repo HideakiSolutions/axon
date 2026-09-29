@@ -13,7 +13,8 @@ flowchart TD
     A3[axon index --force] -->|reprocessa arquivos inalterados| A
     B --> C{Como servir?}
     C -->|stdio MCP| D[axon serve<br/>Claude Code MCP]
-    C -->|HTTP REST| E[axon serve --http<br/>frontend axon-web]
+    C -->|Web UI + HTTP REST| E[axon web<br/>explorador no navegador]
+    C -->|Language Server| L[axon lsp<br/>LSP stdio para editor]
     E -->|flag --all| F[Agrega todos os<br/>repos registrados]
     E -->|--group=nome| G[Agrega grupo<br/>nomeado]
     E -->|?mode=symbol| H[Grafo symbol-level<br/>nós são function/class/method]
@@ -34,7 +35,7 @@ flowchart TD
 | **Write-through** | Hooks do axon que reindexam arquivos automaticamente após cada `Edit`/`Write` no Claude Code |
 | **MCP** | Model Context Protocol — protocolo stdio JSON-RPC que o Claude Code usa para falar com o axon |
 | **Granularidade** | `"file"` (padrão) emite arestas arquivo-a-arquivo; `"symbol"` adiciona extração do call graph via tree-sitter — arestas `kind='calls'` com `from_symbol`/`to_symbol` populados |
-| **Call site** | Nó AST `call_expression` — registrado como `CallSite{caller, callee, line}`; o caller é o menor símbolo cuja faixa de linhas contém a chamada |
+| **Call site** | Nó AST de chamada — registrado como `CallSite{caller, callee, qualifier, argument_count, line}`; o caller é o menor símbolo cuja faixa de linhas contém a chamada e o callee é ranqueado por tipo proprietário, aridade e localidade |
 | **Symbol BFS** | Travessia em largura sobre `symbol_incoming` (chamadores). Expande um pivô para os símbolos que o chamam (depth=1) na cápsula |
 
 ---
@@ -68,14 +69,11 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j2
 ```
 
-> **Por que `-j2`?** A compilação do llama.cpp + 13 gramáticas do tree-sitter é intensiva em memória. Primeira build: ~10–12 min. Com ccache: ~3 min.
+> **Por que `-j2`?** A compilação do llama.cpp + 18 gramáticas do tree-sitter é intensiva em memória. Primeira build: ~10–12 min. Com ccache: ~3 min.
 
-### Passo 3 — Configurar library path
+### Passo 3 — Library path
 
-```bash
-export LD_LIBRARY_PATH=/caminho/para/axon/third_party/duckdb/lib
-echo 'export LD_LIBRARY_PATH=/caminho/para/axon/third_party/duckdb/lib' >> ~/.bashrc
-```
+Os pacotes de release são relocáveis e encontram as bibliotecas empacotadas automaticamente. Para binários rodando direto da árvore de código, use `LD_LIBRARY_PATH=/caminho/para/axon/third_party/duckdb/lib` apenas se o shell não conseguir iniciar `build/axon`.
 
 ### Passo 4 — (Opcional) Baixar modelo de embeddings
 
@@ -95,10 +93,7 @@ Adicionar ao `~/.claude.json`:
   "mcpServers": {
     "axon": {
       "command": "/caminho/para/axon/build/axon",
-      "args": ["serve"],
-      "env": {
-        "LD_LIBRARY_PATH": "/caminho/para/axon/third_party/duckdb/lib"
-      }
+      "args": ["serve"]
     }
   }
 }
@@ -117,6 +112,13 @@ axon status
 
 # 3. Iniciar o servidor MCP
 axon serve
+```
+
+### (Opcional) Abrir o Axon Web
+
+```bash
+axon web --port=7070
+# Abrir http://localhost:7070
 ```
 
 ### (Opcional) Habilitar granularidade symbol-level
@@ -147,7 +149,21 @@ Isso ativa o BFS granular em `get_context_capsule` — pivôs expandem para seus
 | Verificando rotas HTTP afetadas | `route_map` → `api_impact` |
 | Após mudanças recentes no git | `detect_changes` |
 | Buscando algo recordado em sessão anterior | `search_memory` |
+| Transferindo trabalho entre agentes | `handoff_create` → `handoff_claim` → `handoff_complete` |
 | Verificando impacto em múltiplos repos | `group_list` → `group_impact` |
+
+---
+
+## Sessões desconectadas e lock do DuckDB
+
+Um `axon serve` via stdio libera somente o handle do DuckDB após 300 segundos sem chamada de
+ferramenta, mesmo que o processo pai sobreviva a uma queda de conexão. A próxima chamada reabre o
+banco automaticamente. Inspecione os owners registrados com `axon doctor locks` ou
+`axon doctor locks --json`; tokens de autenticação nunca são exibidos.
+
+Os ajustes opcionais são `AXON_DB_IDLE_SECONDS` (use `0` para desabilitar a liberação),
+`AXON_PEER_TIMEOUT_MS` (padrão 15000) e `AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS` (padrão 30). Um PID vivo
+e não responsivo é diagnosticado, mas nunca encerrado automaticamente.
 
 ---
 
@@ -155,5 +171,7 @@ Isso ativa o BFS granular em `get_context_capsule` — pivôs expandem para seus
 
 - [Arquitetura](architecture.md)
 - [Referência de API](api-reference.md)
+- [Operação da memória nativa](native-memory.md)
+- [Axon como camada primaria e RTK opcional](axon-primary-rtk-optional.md)
 - [FAQ](faq.md)
 - [Solução de Problemas](troubleshooting.md)

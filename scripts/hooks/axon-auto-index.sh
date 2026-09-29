@@ -16,8 +16,11 @@
 [ -f "$(dirname "${BASH_SOURCE[0]}")/_log.sh" ] && . "$(dirname "${BASH_SOURCE[0]}")/_log.sh"
 log() { command -v axon_log &>/dev/null && axon_log "axon-auto-index" "$@"; }
 
-# Guard: executar no máximo uma vez por hora por projeto
-SESSION_FLAG="/tmp/axon-indexed-$(date +%Y%m%d%H)-${PWD##*/}"
+# Guard: executar no máximo uma vez por hora por projeto. O basename não é
+# identidade de projeto: portfolios podem ter várias raízes com o mesmo nome.
+# `cksum` é POSIX e evita depender de sha256sum/shasum em hooks portáveis.
+PROJECT_KEY="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
+SESSION_FLAG="/tmp/axon-indexed-$(date +%Y%m%d%H)-${PROJECT_KEY}"
 [ -f "$SESSION_FLAG" ] && exit 0
 touch "$SESSION_FLAG"
 

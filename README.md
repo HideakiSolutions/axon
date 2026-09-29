@@ -5,7 +5,7 @@
 [![Lint](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml/badge.svg)](https://github.com/HideakiSolutions/axon/actions/workflows/lint.yml)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C)](CMakeLists.txt)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-blue)](https://docs.anthropic.com/claude-code)
-[![MCP](https://img.shields.io/badge/MCP-26%20tools-8b5cf6)](src/mcp/server.cpp)
+[![MCP](https://img.shields.io/badge/MCP-33%20tools-8b5cf6)](src/mcp/server.cpp)
 
 <p align="center">
   <picture>
@@ -24,11 +24,11 @@
 - [What this does, in plain English](#what-this-does-in-plain-english)
 - [How it works](#how-it-works)
 - [Token reduction](#token-reduction)
-- [MCP Tools (26)](#mcp-tools-26)
+- [MCP Tools (33)](#mcp-tools-33)
 - [Dialogue Layer](#dialogue-layer)
 - [HTTP Mode & Axon Web](#http-mode--axon-web)
 - [Multi-repo Registry](#multi-repo-registry)
-- [Supported languages](#supported-languages-13)
+- [Supported languages](#supported-languages-15)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -48,11 +48,13 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 24 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 39 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
-Axon also ships an **HTTP mode** (`axon serve --http`) that exposes a REST API consumed by [axon-web](../axon-web), an interactive dependency graph visualizer built on Sigma.js + Graphology.
+Axon also ships a native **Web mode** (`axon web`) with a browser graph explorer at `/` plus the same REST API previously exposed by `axon serve --http`.
+
+For agent setups that previously used RTK for shell-output reduction, see [Axon-first context and shell filtering](docs/en/axon-primary-rtk-optional.md). Axon is the primary path for context capsules, skeletons, shell filters, metrics, and CCR recovery; RTK can remain installed as an optional compatibility fallback.
 
 ## What this does, in plain English
 
@@ -115,6 +117,8 @@ Measured on real projects:
 | mcp-factory | Python | 22,480 | 1,389 | **93%** |
 | event-platform | Python | 42,546 | 2,353 | **94%** |
 
+Compression safety: `get_context_capsule` can enable `compression="body"` for oversized symbol bodies. Before lossy compression, Axon classifies the payload as source code, JSON, diff, log, Markdown, plain text, or binary-like data. Binary-like streams and impossible budgets pass through unchanged, compressed output is accepted only when the final token estimate is lower than the original, and lossy capsule body slices get CCR artifact IDs for exact recovery through `artifact_retrieve`. Structured capsule file entries include `source_ref` and `expand_command` so agents can trace and expand context through Axon tools before falling back to raw file reads.
+
 At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M input tokens):
 
 | | Without axon | With axon | Savings |
@@ -125,18 +129,18 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 
 ---
 
-## MCP Tools (26)
+## MCP Tools (33)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?`, `no_cache?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns |
+| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?`, `no_cache?`, `compression?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns; `compression="body"` enables type-aware lossy body compression |
 | `get_overview` | `limit?` | Top files by coupling + top symbols — ideal for onboarding |
 | `get_impact_graph` | `files[]` | Which files depend on the given files (bidirectional BFS) |
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
 | `get_skeleton` | `files[]` | Signatures-only view (no function bodies) |
 | `get_tests_for` | `files[]` | Test files that import the given files (by path convention) |
-| `search_memory` | `query`, `limit?` | Semantic search over saved observations |
-| `save_observation` | `content`, `tags?`, `file_path?` | Persist an insight for future retrieval |
+| `search_memory` | `query`, `limit?`, `tags?` | Hybrid semantic + lexical RRF search with bounded authority and ranking evidence |
+| `save_observation` | `content`, `tags?`, `file_path?`, `authority?` | Persist an insight; authority is a bounded ranking hint, never authorization |
 | `run_pipeline` | `root?` | Full project index (parse + graph + embeddings) |
 | `index_paths` | `paths[]`, `prune?` | Incremental reindex of specific paths |
 | `rename` | `symbol_name`, `new_name`, `dry_run?` | Graph-assisted rename across the codebase |
@@ -147,7 +151,7 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `group_impact` | `file`, `group?` | Cross-repo blast radius for a file path, optionally scoped to a group |
 | `thread_create` | `name`, `kind?` | Create a named conversation scope (project \| person \| topic) |
 | `thread_list` | — | List all threads |
-| `session_start` | `thread_id`, `label?` | Open a new working session within a thread |
+| `session_start` | `thread_id`, `label?`, `idempotency_key?` | Open or replay an idempotent working session within a thread |
 | `session_end` | `session_id`, `compute_digest?` | Close session; optionally generate and embed a digest |
 | `turn_add` | `session_id`, `role`, `content` | Append a turn (user \| assistant); auto-anchors to code artifacts |
 | `turn_search` | `query`, `limit?`, `thread_id?` | Semantic search over all turns, optionally scoped to a thread |
@@ -155,6 +159,13 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `thread_get` | `thread_id` | List sessions within a thread with digest summaries |
 | `anchor_link` | `turn_id`, `file_id?`, `symbol_id?`, `kind?` | Manually link a turn to a file or symbol |
 | `dialogue_context` | `query`, `file_paths?[]`, `limit?`, `thread_id?` | Past turns related to files or semantic query |
+| `handoff_create` | `target_agent`, `objective`, `source_session_id?`, `working_directory?`, `context?`, `idempotency_key?` | Create an idempotent, project-scoped typed handoff |
+| `handoff_get` | `handoff_id` | Retrieve a typed handoff |
+| `handoff_list` | `status?`, `target_agent?`, `limit?` | List and filter handoffs |
+| `handoff_claim` | `handoff_id`, `claimed_by` | Atomically claim a pending handoff |
+| `handoff_complete` | `handoff_id`, `claimed_by`, `result?` | Complete a handoff as its claimant |
+| `handoff_cancel` | `handoff_id` | Cancel a pending or claimed handoff |
+| `artifact_retrieve` | `artifact_id` | Retrieve original content for a CCR artifact emitted by lossy compression |
 
 ### Agentic workflow coverage
 
@@ -261,14 +272,17 @@ When `dialogue_budget=0` (the default), behavior is bit-for-bit identical to the
 Axon can expose a REST API instead of (or alongside) the MCP stdio protocol:
 
 ```bash
-# Single project
+# Browser UI + REST API for one project
+axon web --port=7070
+
+# REST API only, compatible with older axon-web frontends
 axon serve --http --port=7070
 
 # Aggregate all registered repos into one graph
-axon serve --http --port=7070 --all
+axon web --port=7070 --all
 
 # Specific group from registry
-axon serve --http --port=7070 --group=backend
+axon web --port=7070 --group=backend
 ```
 
 **REST endpoints:**
@@ -281,12 +295,35 @@ axon serve --http --port=7070 --group=backend
 | `GET` | `/api/search?q=` | Full-text + semantic search |
 | `GET` | `/api/observations?q=&limit=` | List or semantic-search saved observations |
 | `GET` | `/api/capsule?q=&budget=&pivots=` | Assemble token-budget context capsule |
+| `GET` | `/api/artifact/:id` | Retrieve original content for a CCR artifact |
+| `GET` | `/api/metrics` | Telemetry aggregates when enabled; graph/cache metrics otherwise |
 | `GET` | `/api/threads` | List all conversation threads |
 | `GET` | `/api/threads/:id/sessions` | Sessions belonging to a thread |
 | `GET` | `/api/sessions/:id/turns` | Turns within a session |
 | `GET` | `/api/dialogue/search?q=&limit=&thread_id=` | Semantic search over turns |
 
-The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend consumes this API to render an interactive force-directed graph with per-repo filtering, file tree navigation, impact analysis, memory index, and context capsule views (Axon Surgical Dark design system).
+The built-in page renders the indexed graph directly from `/api/graph`. The companion **[axon-web](https://github.com/HideakiSolutions/axon-web)** frontend can still consume the same API for the richer Sigma.js + Graphology experience.
+
+Telemetry is local and off by default. Enable it with `AXON_TELEMETRY=1` or `telemetry = true` in `.axon/config.toml`; events are stored in DuckDB and exposed through `/api/metrics`. Totals remain backward-compatible, and `layers` separates savings for `retrieval`, `shell_filtering`, `compression`, `cache`, `ccr`, and `unknown`. Remote POST is attempted only when `AXON_TELEMETRY_ENDPOINT` is set, and failures are ignored.
+
+The operational policy keeps telemetry disabled until the registered project
+owner explicitly approves an aggregate-only local collection. Prompts, paths,
+content, secrets, and remote export remain out of scope; see
+[`docs/telemetry-policy.md`](docs/telemetry-policy.md).
+
+Shell output filtering starts with `axon filter <auto|diff|lint|log|grep|json|package|test|tsc|text> [--budget=N] [--metrics=json]`, which reads stdin, classifies output before compression, and passes through unchanged when filtering is unsafe or does not save tokens. `grep`/`rg`-style output is grouped by file with per-file omissions and long-line truncation, `log` output counts levels, deduplicates repeated messages, and keeps important/error edge lines, JSON output is parsed into a schema/shape summary that strips raw values, `lint` output groups diagnostics by file and rule, `package` output collapses repeated npm/pnpm/yarn install operations while keeping errors and summaries, `test` output keeps failure blocks and final summaries, and `tsc`/TypeScript compiler diagnostics are grouped by file and diagnostic code. Lossy shell summaries are emitted with an `axon:ccr` marker and `ccr_artifact_id` stderr field; use `axon artifact-retrieve <id>` to recover the exact original stdin. Default metrics are human-readable on stderr; pass `--metrics=json` for machine-readable command metrics. When `AXON_TELEMETRY=1` and a project DB exists, savings are recorded in the `shell_filtering` layer.
+
+### Watch mode
+
+```bash
+axon watch [path] --interval-ms=1000 --debounce-ms=500 --backend=auto|native|poll
+```
+
+`watch` uses a native backend by default — inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows — and falls back to portable polling automatically when native init fails. It calls the same incremental indexer as `axon index-paths`; kernel event-queue overflow triggers a full rescan. Claude hooks remain the fastest path for Claude Code edits; watch mode covers external editors, git checkouts, generators, and manual deletes.
+
+### VS Code
+
+The release includes `axon-vscode-<version>.vsix`. Install it with VS Code's "Install from VSIX" command, then configure `axon.path` if the binary is not on `PATH`. The extension starts `axon lsp`, exposes `Axon: Index Workspace`, and opens the local explorer with `Axon: Open Web Explorer`.
 
 ---
 
@@ -317,7 +354,7 @@ Registry format (`~/.axon/registry.json`):
 
 ---
 
-## Supported languages (13)
+## Supported languages (19)
 
 | Language | Extensions |
 |----------|-----------|
@@ -334,6 +371,12 @@ Registry format (`~/.axon/registry.json`):
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.h` |
 | Kotlin | `.kt`, `.kts` |
 | Vue | `.vue` (SFC with TS/JS sub-parse) |
+| Lua | `.lua` |
+| Nix | `.nix` (bindings, inherit, `import` edges) |
+| Ruby | `.rb` |
+| Swift | `.swift` |
+| Scala | `.scala`, `.sc` |
+| GDScript (Godot) | `.gd` |
 
 ---
 
@@ -358,15 +401,26 @@ brew tap HideakiSolutions/axon
 brew install axon
 ```
 
-After installation, wire axon into a Claude Code project (installs hooks + injects the workflow guide):
+After installation, wire axon into a Claude Code project (installs Grep/Glob, raw shell-output, build, auto-index, write-through, and bounded queue-drain hooks + injects the workflow guide):
 
 ```bash
 axon-setup /path/to/your-project
 ```
 
+The queue fallback is project-local: it only attempts a drain after the queue
+reaches its configured age or size threshold, serializes with a per-project
+lock, and never sweeps every repository in the local Axon registry.
+
+When a legacy mixed queue is routed with
+`scripts/maintenance/route_pending_writes.py --apply`, entries without a
+registered owner are retained as dated quarantine evidence. Later routing runs
+automatically recover only quarantined paths that both still exist and belong
+to a registered project; temporary, deleted, and unknown paths stay
+quarantined rather than being reintroduced into an index queue.
+
 ### Direct download (no Homebrew)
 
-Download the pre-built binary for your platform from the [releases page](https://github.com/HideakiSolutions/axon/releases/latest):
+Download the pre-built binary for your platform from the [releases page](https://github.com/HideakiSolutions/axon-releases/releases/latest):
 
 | Platform | File |
 |----------|------|
@@ -375,9 +429,9 @@ Download the pre-built binary for your platform from the [releases page](https:/
 
 ```bash
 # Example for Linux x86-64 (replace X.Y.Z with the latest version)
-VERSION=0.5.5
+VERSION=1.2.0
 curl -L -o axon.tar.gz \
-  "https://github.com/HideakiSolutions/axon/releases/download/v${VERSION}/axon-${VERSION}-linux-x64.tar.gz"
+  "https://github.com/HideakiSolutions/axon-releases/releases/download/v${VERSION}/axon-${VERSION}-linux-x64.tar.gz"
 tar xzf axon.tar.gz
 cd "axon-${VERSION}-linux-x64"
 ./install.sh /path/to/your-project
@@ -404,14 +458,11 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j2
 ```
 
-> Use `-j2` maximum. Higher parallelism during the llama.cpp + 13 grammar compilation can lock up shared hosts. First build ~10–12 min; subsequent builds with `ccache` ~70% faster.
+> Use `-j2` maximum. Higher parallelism during the llama.cpp + 18 grammar compilation can lock up shared hosts. First build ~10–12 min; subsequent builds with `ccache` ~70% faster.
 
-#### 3. Set library path
+#### 3. Library path
 
-```bash
-export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
-# Add to ~/.bashrc or ~/.zshrc for persistence
-```
+Release tarballs are relocatable: Linux uses `$ORIGIN/../lib`, macOS uses `@executable_path/../lib`, and Windows ships `duckdb.dll` next to `axon.exe`. `LD_LIBRARY_PATH` is only needed for ad hoc source-tree runs when your local build cannot find `third_party/duckdb/lib`.
 
 #### 4. Embedding model (optional — enables semantic search)
 
@@ -453,11 +504,29 @@ args = ["serve"]
 LD_LIBRARY_PATH = "/path/to/axon/third_party/duckdb/lib"
 ```
 
-If you switch from Claude to Codex while Claude is still open in the same
-project, both clients may try to start `axon serve` against the same
-`.axon/index.duckdb`. Axon now completes the MCP handshake even when that
-database is locked; DB-backed tools will return a clear lock error until the
-older server exits. To inspect active servers:
+If two clients (a second Claude session, Codex, `axon web`) run `axon serve`
+against the same `.axon/index.duckdb`, DuckDB only grants the write lock to
+one of them. Axon normally handles this transparently: the process holding the lock
+registers itself as the repo's owner (pid, localhost port, and an auth token
+in `~/.axon/registry.json`), and any latecomer serve forwards its tool calls
+to the owner over `127.0.0.1`. A stdio owner releases only its DuckDB handle
+after five minutes without a tool call, even if a disconnected parent keeps
+the process alive. Its next tool call reopens the DB and promotes it again.
+
+Peer waits are bounded to 15 seconds, so a live but frozen owner fails fast
+instead of blocking a new session for five minutes. Inspect registered lock
+owners without exposing their tokens:
+
+```bash
+axon doctor locks
+axon doctor locks --json
+```
+
+Lifecycle tuning is optional: `AXON_DB_IDLE_SECONDS=0` disables idle release,
+`AXON_PEER_TIMEOUT_MS` changes the peer deadline, and
+`AXON_QUEUE_ATTEMPT_TIMEOUT_SECONDS` changes each queue-drain child deadline.
+The defaults are 300 seconds, 15000 milliseconds, and 30 seconds respectively.
+Axon never kills a live registered owner automatically. For OS-level inspection:
 
 ```bash
 pgrep -af 'axon.*serve'
@@ -485,9 +554,9 @@ axon status
 # 3. Start MCP server (Claude Code connects automatically)
 axon serve
 
-# 4. (Optional) Start HTTP server + open axon-web
-axon serve --http --port=7070
-# Then open http://localhost:5173 with axon-web running
+# 4. (Optional) Start browser graph explorer + REST API
+axon web --port=7070
+# Then open http://localhost:7070
 ```
 
 ### Project config — symbol-level granularity
@@ -527,18 +596,20 @@ src/
 │   ├── rename.hpp/cpp    # Graph-assisted symbol rename
 │   ├── git.hpp/cpp       # Git diff parsing for detect_changes
 │   ├── routes.hpp/cpp    # HTTP route detection for route_map / api_impact
-│   └── dialogue.hpp/cpp  # Dialogue Layer: threads/sessions/turns/anchors/digests
+│   ├── dialogue.hpp/cpp  # Dialogue Layer: threads/sessions/turns/anchors/digests/handoffs
+│   ├── memory_search.*   # Hybrid RRF ranking + bounded authority
+│   └── pending_writes.*  # Durable claim/retry spool for write-through capture
 ├── parser/
-│   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (13 langs)
+│   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (18 langs)
 └── mcp/
-    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 26 MCP tool handlers
+    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 41 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
 ├── duckdb/               # Pre-built shared library v1.2.2
 ├── llama.cpp/            # Submodule — inference engine for embeddings
 ├── tree-sitter/          # Core C API
-├── tree-sitter-{lang}/   # 13 language grammar submodules
+├── tree-sitter-{lang}/   # 19 language grammar submodules
 ├── blake3/               # Fast file hashing (incremental reindex)
 └── nlohmann-json/        # Header-only JSON
 ```
@@ -555,7 +626,7 @@ graph TD
     CLI[main.cpp CLI] --> IDX[Indexer]
     CLI --> MCP[MCP Server\nstdio JSON-RPC]
     CLI --> HTTP[HTTP Server\nREST API]
-    IDX --> PARSER[Parser\n13 languages via tree-sitter]
+    IDX --> PARSER[Parser\n19 languages via tree-sitter]
     IDX --> DB[(DuckDB\nfiles/symbols/edges/observations\nthreads/sessions/turns/anchors)]
     IDX --> EMB[Embeddings\nllama.cpp + nomic-embed]
     MCP --> CAPS[Capsule\nBFS + skeletonize]
@@ -577,20 +648,22 @@ graph TD
 files        (id, path, language, hash, byte_size, indexed_at, skeleton)
 symbols      (id, file_id, name, kind, start_line, end_line, signature, docstring, embedding FLOAT[768])
 edges        (id, from_file, to_file, from_symbol, to_symbol, kind)  -- kind: imports | calls | extends
-observations (id, content, file_path, embedding FLOAT[768], created_at)
+observations (id, content, file_path, embedding FLOAT[768], authority, created_at)
 routes       (id, method, path, handler_file, framework, file_id)
 capsule_cache (query_hash, epoch, payload, created_at)
+ccr_artifacts (artifact_id, kind, source_ref, content, token_estimate, created_at)
 
 -- Dialogue Layer
 threads      (id, name, kind, created_at)                              -- kind: project | person | topic
-sessions     (id, thread_id, label, started_at, ended_at, digest, digest_embedding FLOAT[768])
+sessions     (id, thread_id, label, idempotency_key, started_at, ended_at, digest, digest_embedding FLOAT[768])
 turns        (id, session_id, role, content, ts, embedding FLOAT[768]) -- role: user | assistant
 turn_anchors (id, turn_id, file_id, symbol_id, kind)                   -- kind: mentions | decides | questions
+handoffs     (id, source_session_id, target_agent, objective, context, working_directory, status, claimed_by, result, idempotency_key, created_at, claimed_at, completed_at)
 ```
 
 `from_symbol`/`to_symbol` are populated by:
 - **Import resolution** (`kind='imports'`) — tries to match the import leaf name against a symbol with the same name on either side
-- **Call graph extraction** (`kind='calls'`) — tree-sitter walks every function body and emits one edge per call site, with `from_symbol = enclosing function`, `to_symbol = matched callee anywhere in the project`
+- **Call graph extraction** (`kind='calls'`) — tree-sitter walks every function body and emits one edge per call site, with `from_symbol = enclosing function`; overload resolution ranks `to_symbol` candidates by receiver/owner type, argument arity, locality, and a deterministic fallback
 
 Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots expand to their callers (depth=1), giving the LLM a focused map of relationships instead of full files.
 
@@ -608,8 +681,8 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | Code-linked turn anchors | ✅ | ❌ | ❌ | ❌ |
 | MCP protocol | ✅ | ❌ | ❌ | ❌ |
 | Multi-repo registry | ✅ | ❌ | ❌ | ❌ |
-| Graph visualization | ✅ (axon-web) | ❌ | ❌ | ❌ |
-| 13 languages | ✅ | ✅ | ✅ | ✅ |
+| Graph visualization | ✅ (`axon web`) | ❌ | ❌ | ❌ |
+| 19 languages | ✅ | ✅ | ✅ | ✅ |
 | Zero cloud dependency | ✅ | ❌ | ❌ | ❌ |
 
 ---
@@ -618,21 +691,21 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| 26 MCP tools | ✅ Done | Code context + dialogue layer tools |
+| 41 MCP tools | ✅ Done | Code context, dialogue/handoff, CCR artifact retrieval, and portfolio capability tools |
 | HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
 | Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |
 | Symbol-granular capsule rendering | ✅ Done | `assemble_capsule` extracts only matched symbol bodies (signature + lines), not full files |
 | Worktree exclusion + sweep purge | ✅ Done | `.worktrees/` ignored; `axon index` purges newly-ignored entries from DB |
 | `axon index --force` | ✅ Done | Rebuild edges/symbols even when file hash unchanged |
-| Dialogue Layer | ✅ Done | Threads/sessions/turns/anchors/digests — native DuckDB + 768-dim embeddings |
+| Dialogue Layer | ✅ Done | Threads/sessions/turns/anchors/digests/typed handoffs — native DuckDB + 768-dim embeddings |
 | Auto-anchor | ✅ Done | File path (regex) + symbol name (top-500 cache) detection on every `turn_add` |
 | Dialogue context in capsule | ✅ Done | `get_context_capsule` accepts `dialogue_budget`; returns `related_turns` |
-| File watcher (inotify/FSEvents) | 🔄 Planned | Reindex on edits outside Claude Code |
-| HNSW vector index (DuckDB VSS) | 🔄 Planned | Projects > 100k symbols |
-| Filtered tags in `search_memory` | 🔄 Planned | |
-| Capsule cache by query hash | 🔄 Planned | |
-| Caller resolution beyond name match | 🔄 Planned | Type-aware resolution for overloaded callees |
+| Watch mode (native + poll fallback) | ✅ Done | `axon watch` uses inotify/FSEvents with automatic polling fallback; reindexes edits outside Claude Code |
+| HNSW vector index (DuckDB VSS) | ⏸ Deferred | NO-GO while VSS persistence is experimental; re-evaluate at >100k symbols or scan >20% of miss latency |
+| Filtered tags in `search_memory` | ✅ Done | Exact all-tags filtering with tags returned in each result |
+| Capsule cache by query hash | ✅ Done | CLI, MCP, and HTTP reuse epoch-scoped payloads; `--no-cache` / `no_cache` bypasses it |
+| Caller resolution beyond name match | ✅ Done | Receiver/owner type and argument arity disambiguate overloads with deterministic fallback |
 
 ---
 
@@ -684,7 +757,7 @@ axon index /caminho/para/seu-projeto
 axon serve
 ```
 
-### Ferramentas MCP (26)
+### Ferramentas MCP (33)
 
 | Ferramenta | Descrição |
 |-----------|-----------|
@@ -694,8 +767,8 @@ axon serve
 | `get_callers` | Arquivos que importam o arquivo que define um símbolo |
 | `get_skeleton` | Apenas assinaturas (sem corpos de função) |
 | `get_tests_for` | Testes que referenciam os arquivos fornecidos |
-| `search_memory` | Busca semântica em observações salvas |
-| `save_observation` | Persistir um insight para sessões futuras |
+| `search_memory` | Busca híbrida semântica + lexical com RRF e evidências de ranking |
+| `save_observation` | Persistir insight com autoridade de ranking limitada (não autorização) |
 | `run_pipeline` | Indexação completa do projeto |
 | `index_paths` | Reindexação incremental de caminhos específicos |
 | `rename` | Renomear símbolo com assistência do grafo |
@@ -707,20 +780,22 @@ axon serve
 | `thread_create` | Criar escopo nomeado de conversação (project \| person \| topic) |
 | `thread_list` | Listar todos os threads |
 | `thread_get` | Listar sessões de um thread com resumos de digest |
-| `session_start` | Abrir sessão de trabalho dentro de um thread |
+| `session_start` | Abrir/repetir sessão idempotente dentro de um thread |
 | `session_end` | Encerrar sessão; gera e embeda um digest (ADF) |
 | `turn_add` | Adicionar turn (user \| assistant) com auto-âncora em arquivos e símbolos |
 | `turn_search` | Busca semântica sobre todos os turns |
 | `session_get` | Recuperar turns de uma sessão |
 | `anchor_link` | Vincular manualmente um turn a um arquivo ou símbolo |
 | `dialogue_context` | Turns relacionados a arquivos ou query semântica |
+| `handoff_create` / `handoff_get` / `handoff_list` | Criar e consultar handoffs tipados por projeto |
+| `handoff_claim` / `handoff_complete` / `handoff_cancel` | Controlar o ciclo de vida atômico de handoffs |
 
-### Modo HTTP + axon-web
+### Modo Web
 
 ```bash
 # Agregar todos os repos registrados em um grafo
-axon serve --http --port=7070 --all
-# Abrir http://localhost:5173 (axon-web)
+axon web --port=7070 --all
+# Abrir http://localhost:7070
 ```
 
 ### Redução de tokens (exemplos reais)

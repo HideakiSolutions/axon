@@ -1,6 +1,6 @@
 # API Reference — axon MCP Tools
 
-All 26 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
+All 41 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ---
 
@@ -17,6 +17,26 @@ Token-efficient context: pivot files in full + support files skeletonized. Optio
 | `token_budget` | number | No | Max tokens for the capsule (default: 8000) |
 | `dialogue_budget` | number | No | Token budget for `related_turns[]` from dialogue history (default: 0 = disabled) |
 | `no_cache` | boolean | No | Bypass the query-hash cache and force a fresh assembly (default: false) |
+| `compression` | string | No | `off` or `body`; `body` classifies oversized payloads before lossy compression and only returns compressed output when it saves tokens |
+
+`compression="body"` classifies content as source code, JSON, diff, log, Markdown, plain text, or binary-like before applying any lossy reduction. Binary-like content and impossible budgets pass through unchanged. Responses include a `compression` object with `input_tokens`, `output_tokens`, and `tokens_saved`; nonzero body-compression savings are also recorded in the `compression` telemetry layer. Recoverable lossy slices include CCR markers in content and their IDs in `ccr_artifact_ids`; call `artifact_retrieve` with one of those IDs to recover the original slice.
+
+---
+
+### `artifact_retrieve`
+
+Retrieve the original content for an Axon CCR artifact emitted by lossy compression.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `artifact_id` | string | **Yes** | CCR artifact ID from a capsule response or `axon:ccr` marker |
+
+Returns `artifact_id`, `kind`, `source_ref`, `content`, and `token_estimate`.
+
+Artifacts are looked up in the DuckDB index first, then in the file sidecar
+(`.axon/ccr/<artifact_id>.json`) — the sidecar is where `axon filter` stores
+artifacts while another process holds the index write lock, so compressed
+shell output stays recoverable in that scenario too.
 
 ---
 
@@ -42,7 +62,7 @@ Which files depend on (or are depended on by) the given files — bidirectional 
 
 ### `get_callers`
 
-Locate a symbol by name, then return the list of files that import the file defining it.
+Locate a symbol by name, then return the list of files that import the file defining it — or a same-stem peer connected by an import edge (so a symbol defined in `foo.cpp` also counts importers of `foo.hpp`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -64,7 +84,7 @@ Signatures-only view (no function bodies) of one or more files.
 
 ### `get_tests_for`
 
-Test files (by path convention) that import/reference the given files.
+Test files (by path convention) that import/reference the given files or a same-stem peer (so tests including `foo.hpp` count as covering `foo.cpp`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -74,12 +94,13 @@ Test files (by path convention) that import/reference the given files.
 
 ### `search_memory`
 
-Semantic search over saved observations (vector similarity via nomic-embed).
+Hybrid search over saved observations. Semantic and lexical ranks are fused with RRF; bounded authority is applied after fusion. Results expose `semantic_rank`, `lexical_rank`, `rrf_score`, `authority`, and final `score` for auditability.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | **Yes** | Natural language query |
 | `limit` | number | No | Max results (default: 5) |
+| `tags` | string[] | No | Require every supplied tag; matching is exact and case-sensitive |
 
 ---
 
@@ -92,6 +113,7 @@ Persist a text observation for future retrieval across sessions.
 | `content` | string | **Yes** | The observation text |
 | `tags` | string[] | No | Optional tags for categorization |
 | `file_path` | string | No | Associate the observation with a file |
+| `authority` | number | No | Ranking multiplier clamped to 0.5–2.0 (default: 1.0); never authorization |
 
 ---
 
@@ -219,6 +241,7 @@ Open a new working session within a thread.
 | `thread_id` | number | **Yes** | Thread to attach this session to |
 | `label` | string | No | Human-readable session label |
 | `model` | string | No | Model identifier for this session |
+| `idempotency_key` | string | No | Retry key scoped to the thread; replay returns the original session |
 
 ---
 
@@ -294,9 +317,24 @@ Retrieve past turns related to files or a semantic query. Used to inject convers
 
 ---
 
+### Typed handoffs
+
+`handoff_create` persists a project-scoped work transfer with `target_agent`, `objective`, and optional `source_session_id`, `working_directory`, `context`, and `idempotency_key`. A supplied working directory must resolve inside the indexed project. The lifecycle is `pending` → `claimed` → `completed`; pending or claimed items may be `cancelled`.
+
+| Tool | Required parameters | Purpose |
+|------|---------------------|---------|
+| `handoff_create` | `target_agent`, `objective` | Create or replay an idempotent handoff |
+| `handoff_get` | `handoff_id` | Retrieve one handoff |
+| `handoff_list` | — | Filter by optional `status`, `target_agent`, and `limit` |
+| `handoff_claim` | `handoff_id`, `claimed_by` | Atomically claim; same-claimant replay is idempotent |
+| `handoff_complete` | `handoff_id`, `claimed_by` | Complete as current claimant, with optional `result` |
+| `handoff_cancel` | `handoff_id` | Cancel a pending or claimed handoff |
+
+---
+
 ## HTTP REST API
 
-When running `axon serve --http`:
+When running `axon web` or `axon serve --http`:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -306,12 +344,16 @@ When running `axon serve --http`:
 | `GET` | `/api/symbol/<name>` | Symbol detail: `{name, kind, file, line, signature, caller_files}` |
 | `GET` | `/api/search?q=<query>` | Search: `{files[], symbols[]}` |
 | `GET` | `/api/observations?q=<text>&limit=N` | List observations (semantic search if embeddings enabled) |
-| `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule |
+| `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule — `400` when `q` is missing, `503` when the DB or the embedding model is not ready |
+| `GET` | `/api/artifact/<artifact_id>` | Retrieve original content for a CCR artifact — `404` when unknown, `503` when the DB is not ready |
+| `GET` | `/api/metrics` | Request/token/cache/cost aggregates when telemetry is enabled, including per-layer savings; graph/cache summary otherwise |
 | `POST` | `/api/detect-changes` | Detect changed symbols/files (body: `{ref?}`) |
 | `GET` | `/api/threads` | List all threads |
 | `GET` | `/api/threads/:id/sessions` | List sessions for a thread |
 | `GET` | `/api/sessions/:id/turns` | List turns for a session |
 | `GET` | `/api/dialogue/search?q=<query>&limit=N` | Semantic search over turns |
+
+When telemetry is enabled, `/api/metrics` returns backward-compatible totals plus `layers`, keyed by `retrieval`, `shell_filtering`, `compression`, `cache`, `ccr`, and `unknown`. Each layer contains `requests`, `tokens_sent`, `tokens_saved`, `reduction_percent`, and `average_latency_ms`.
 
 ### `/api/graph` — file-mode node shape
 
@@ -350,13 +392,43 @@ When running `axon serve --http`:
   "capsule": {
     "query": "user authentication flow",
     "pivot_files": [
-      { "path": "src/auth/token.ts", "content": "...", "is_skeleton": false, "token_estimate": 720 }
+      {
+        "path": "src/auth/token.ts",
+        "source_ref": "src/auth/token.ts:12-80",
+        "expand_command": "get_skeleton {\"files\":[\"src/auth/token.ts\"]}",
+        "content": "...",
+        "is_skeleton": false,
+        "token_estimate": 720
+      }
     ],
     "support_files": [
-      { "path": "src/auth/middleware.ts", "content": "// === verifyToken (function) lines 12-34 ===\n...", "is_skeleton": false, "token_estimate": 180 }
+      {
+        "path": "src/auth/middleware.ts",
+        "source_ref": "src/auth/middleware.ts",
+        "expand_command": "get_context_capsule {\"pivot_files\":[\"src/auth/middleware.ts\"],\"no_cache\":true}",
+        "content": "// === verifyToken (function) lines 12-34 ===\n...",
+        "is_skeleton": true,
+        "token_estimate": 180
+      }
     ],
     "token_estimate": 1840,
+    "compression": { "input_tokens": 900, "output_tokens": 180, "tokens_saved": 720 },
+    "ccr_artifact_ids": ["ccr_..."],
     "total_files": 93
+  }
+}
+```
+
+### `/api/artifact/<artifact_id>` — response shape
+
+```json
+{
+  "artifact": {
+    "artifact_id": "ccr_...",
+    "kind": "capsule_body",
+    "source_ref": "src/auth/token.ts:12-80",
+    "content": "original uncompressed slice...",
+    "token_estimate": 900
   }
 }
 ```
@@ -365,9 +437,13 @@ When running `axon serve --http`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LD_LIBRARY_PATH` | — | Must include path to `third_party/duckdb/lib` |
+| `LD_LIBRARY_PATH` | — | Only needed for source-tree runs if the binary cannot find DuckDB; release packages set RPATH/RUNPATH |
 | `AXON_EMBEDDING_MODEL` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
+| `AXON_REGISTRY_DIR` | `~/.axon` | Directory holding the multi-repo `registry.json`; tests and sandboxes point it at a scratch dir so runs never touch the real registry |
+| `AXON_TELEMETRY` | off | Opt into local telemetry with `1`, `true`, `yes`, or `on` |
+| `AXON_TELEMETRY_ENDPOINT` | — | Optional HTTP endpoint for best-effort remote telemetry POSTs |
+| `AXON_COST_PER_M_INPUT_USD` | `3.0` | Cost basis for `/api/metrics` estimated input cost |
 
 ---
 
@@ -382,7 +458,16 @@ When running `axon serve --http`:
 | `axon serve --http [--port=N] [--host=H]` | HTTP REST API server |
 | `axon serve --http --all` | Aggregate all registered repos into one HTTP graph |
 | `axon serve --http --group=<name>` | Aggregate a named group from `~/.axon/registry.json` |
+| `axon web [--port=N] [--host=H]` | Browser graph explorer plus HTTP REST API |
+| `axon web --all` | Browser graph explorer over all registered repos |
+| `axon web --group=<name>` | Browser graph explorer over a named registry group |
+| `axon lsp` | Language Server Protocol stdio server for workspace symbols, document symbols, definitions, and references |
+| `axon watch [path] [--interval-ms=N] [--debounce-ms=N] [--backend=auto\|native\|poll]` | Watch for external edits and incrementally reindex. `auto` (default) uses the native backend — inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows — and falls back to portable polling with a warning when native init fails; `native` fails hard instead of falling back (diagnostics); `poll` forces the portable watcher. Kernel event-queue overflow triggers a full rescan; `AXON_WATCH_FORCE_POLL=1` forces polling from the environment |
+| `axon artifact-retrieve <artifact_id>` | Print original content for a CCR artifact (looks up the DuckDB index, then the `.axon/ccr/` file sidecar, then the lock-holding peer process) |
+| `axon filter <auto\|diff\|lint\|log\|grep\|json\|package\|test\|tsc\|text> [--budget=N] [--metrics=json]` | Filter stdin shell output with type-aware compression, CCR recovery markers, grep/rg grouping, log level/dedup summaries, JSON schema summaries, lint rule summaries, package-manager summaries, test failure summaries, TypeScript diagnostic grouping, safe passthrough, and optional JSON stderr metrics; when another process holds the index lock, artifacts are stored in the `.axon/ccr/` file sidecar so output stays recoverable |
 | `axon status` | Show index summary for the current project |
+| `axon metrics [--json]` | Print the per-layer telemetry aggregate (retrieval/cache/ccr/compression/shell_filtering — requests, tokens sent/saved, average latency) that `serve --http` exposes at `/api/metrics`, from the CLI without standing up the HTTP server. Human table by default, raw JSON with `--json`; reports telemetry-disabled when opt-in is off |
+| `axon registry prune` | Drop registry entries whose repo root no longer exists (entries with a live owner process are kept); group memberships of pruned repos are cleaned up, and stale owner bookkeeping on live repos (owner process died without deregistering) is zeroed. `axon serve`/`web` print a startup advisory when prunable entries exist — pruning itself stays explicit |
 
 ### Project config (`.axon/config.toml`)
 
@@ -390,6 +475,9 @@ When running `axon serve --http`:
 granularity   = "symbol"   # "file" (default) | "symbol" — enables call graph extraction
 index_routes  = false      # enable HTTP route detection for route_map / api_impact
 fts_enabled   = true       # full-text search index over symbols
+token_budget  = 8000       # default capsule budget
+telemetry     = false      # opt-in local telemetry; env AXON_TELEMETRY overrides
+capsule_compression = "off" # "off" (default) | "body"
 ```
 
 ### Ignore patterns (`.axonignore`)
@@ -402,3 +490,8 @@ One pattern per line — matched against `path.filename()`:
 third_party
 models
 ```
+# Portfolio Capability Intelligence
+
+`axon web` exposes additive routes under `/api/v1`. Sync reads registered project indexes in
+read-only mode and stores only signature metadata, digests and provenance in a rebuildable catalog
+under `AXON_REGISTRY_DIR`. See [`portfolio-openapi.yaml`](../api/portfolio-openapi.yaml).

@@ -25,9 +25,9 @@ public:
     int dims() const { return dims_; }
 
 private:
-    llama_model*   model_   = nullptr;
-    llama_context* ctx_     = nullptr;
-    int            dims_    = 768;
+    llama_model* model_ = nullptr;
+    llama_context* ctx_ = nullptr;
+    int dims_ = 768;
 };
 
 // Cosine similarity between two equal-length vectors
@@ -35,7 +35,7 @@ float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b
 
 // Serialize/deserialize float vector to/from raw bytes (little-endian)
 std::vector<uint8_t> serialize_embedding(const std::vector<float>& v);
-std::vector<float>   deserialize_embedding(const uint8_t* data, size_t byte_len);
+std::vector<float> deserialize_embedding(const uint8_t* data, size_t byte_len);
 
 // Batch-embed all symbols that currently have embedding IS NULL.
 // Returns the number of symbols embedded. Throws on DB errors.

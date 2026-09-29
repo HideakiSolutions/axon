@@ -1,9 +1,11 @@
 #include "embeddings.hpp"
+#include "portfolio/domain/index_journal.hpp"
 #include "db.hpp"
 #include <llama.h>
 #include <stdexcept>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 
@@ -12,28 +14,35 @@ namespace axon {
 EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
     llama_backend_init();
 
+    // Silence llama.cpp/ggml INFO/WARN chatter on stderr (e.g. the repeated
+    // "cannot decode batches with this context" note during embedding). Keep
+    // real errors visible.
+    llama_log_set(
+        [](ggml_log_level level, const char* text, void* /*ud*/) {
+            if (level >= GGML_LOG_LEVEL_ERROR && text) fputs(text, stderr);
+        },
+        nullptr);
+
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = 0;
 
     model_ = llama_model_load_from_file(model_path.string().c_str(), mparams);
-    if (!model_)
-        throw std::runtime_error("Failed to load embedding model: " + model_path.string());
+    if (!model_) throw std::runtime_error("Failed to load embedding model: " + model_path.string());
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx       = 512;
-    cparams.n_batch     = cparams.n_ctx;
-    cparams.embeddings  = true;
+    cparams.n_ctx = 512;
+    cparams.n_batch = cparams.n_ctx;
+    cparams.embeddings = true;
 
     ctx_ = llama_init_from_model(model_, cparams);
-    if (!ctx_)
-        throw std::runtime_error("Failed to create llama context");
+    if (!ctx_) throw std::runtime_error("Failed to create llama context");
 
     dims_ = llama_model_n_embd(model_);
     std::cerr << "[axon] embedding model loaded, dims=" << dims_ << "\n";
 }
 
 EmbeddingModel::~EmbeddingModel() {
-    if (ctx_)   llama_free(ctx_);
+    if (ctx_) llama_free(ctx_);
     if (model_) llama_model_free(model_);
     llama_backend_free();
 }
@@ -50,9 +59,8 @@ std::vector<std::vector<float>> EmbeddingModel::embed_batch(const std::vector<st
 
     for (const auto& text : texts) {
         std::vector<llama_token> tokens(512);
-        int n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(),
-                               tokens.data(), (int32_t)tokens.size(),
-                               true, false);
+        int n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(), tokens.data(),
+                               (int32_t)tokens.size(), true, false);
         if (n < 0) {
             results.push_back(std::vector<float>(dims_, 0.0f));
             continue;
@@ -74,10 +82,12 @@ std::vector<std::vector<float>> EmbeddingModel::embed_batch(const std::vector<st
 
         // L2 normalize
         float norm = 0.0f;
-        for (float v : vec) norm += v * v;
+        for (float v : vec)
+            norm += v * v;
         norm = std::sqrt(norm);
         if (norm > 1e-6f)
-            for (float& v : vec) v /= norm;
+            for (float& v : vec)
+                v /= norm;
 
         results.push_back(std::move(vec));
     }
@@ -89,8 +99,8 @@ float cosine_similarity(const std::vector<float>& a, const std::vector<float>& b
     float dot = 0.0f, na = 0.0f, nb = 0.0f;
     for (size_t i = 0; i < a.size(); i++) {
         dot += a[i] * b[i];
-        na  += a[i] * a[i];
-        nb  += b[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
     }
     float denom = std::sqrt(na) * std::sqrt(nb);
     return denom < 1e-6f ? 0.0f : dot / denom;
@@ -109,42 +119,48 @@ std::vector<float> deserialize_embedding(const uint8_t* data, size_t byte_len) {
 }
 
 int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
-    auto sq2 = [](const std::string& s) {
-        std::string r; r.reserve(s.size());
-        for (char c : s) { if (c == '\'') r += "''"; else r += c; }
-        return r;
-    };
-
-    auto syms = db.conn().Query(
-        "SELECT id, name, kind, signature "
-        "FROM symbols WHERE embedding IS NULL LIMIT " + std::to_string(limit));
+    auto syms = db.conn().Query("SELECT id, name, kind, signature "
+                                "FROM symbols WHERE embedding IS NULL LIMIT " +
+                                std::to_string(limit));
     if (syms->HasError())
         throw std::runtime_error("Failed to fetch pending symbols: " + syms->GetError());
 
-    std::vector<int64_t>     ids;
+    std::vector<int64_t> ids;
     std::vector<std::string> texts;
     for (duckdb::idx_t i = 0; i < syms->RowCount(); i++) {
         ids.push_back(syms->GetValue<int64_t>(0, i));
-        texts.push_back(syms->GetValue(1, i).ToString() + " " +
-                        syms->GetValue(2, i).ToString() + " " +
-                        syms->GetValue(3, i).ToString());
+        texts.push_back(syms->GetValue(1, i).ToString() + " " + syms->GetValue(2, i).ToString() +
+                        " " + syms->GetValue(3, i).ToString());
     }
 
     if (texts.empty()) return 0;
 
     auto embeddings = model.embed_batch(texts);
-    int  dims       = model.dims();
+    int dims = model.dims();
+    portfolio::Transaction transaction(db.conn());
+    transaction.mark_index_mutation();
+    std::vector<portfolio::AffectedEntity> affected;
 
     for (size_t i = 0; i < ids.size(); i++) {
         std::ostringstream sql;
         sql << "UPDATE symbols SET embedding = [";
         const auto& emb = embeddings[i];
-        for (size_t j = 0; j < emb.size(); j++) { if (j) sql << ","; sql << emb[j]; }
+        for (size_t j = 0; j < emb.size(); j++) {
+            if (j) sql << ",";
+            sql << emb[j];
+        }
         sql << "]::FLOAT[" << dims << "] WHERE id = " << ids[i];
         auto r = db.conn().Query(sql.str());
         if (r->HasError())
-            throw std::runtime_error("UPDATE symbols failed (id=" + std::to_string(ids[i]) + "): " + r->GetError());
+            throw std::runtime_error("UPDATE symbols failed (id=" + std::to_string(ids[i]) +
+                                     "): " + r->GetError());
+        affected.push_back({"symbol", std::to_string(ids[i]), "upsert", std::nullopt});
     }
+    portfolio::trigger_journal_failpoint_for_testing("after_mutation");
+    const std::string manifest = portfolio::compute_manifest_hash(db.conn());
+    portfolio::append_index_event(transaction, db.conn(), "IndexSymbolsUpdated", affected,
+                                  manifest);
+    transaction.commit();
     return (int)ids.size();
 }
 

@@ -6,27 +6,35 @@
 
 namespace axon {
 
+bool is_database_lock_error(const std::string& message);
+std::string database_open_error_message(const std::filesystem::path& db_path,
+                                        const std::exception& error);
+
 // Run query and return MaterializedQueryResult or throw
-inline duckdb::MaterializedQueryResult& require_ok(
-    std::unique_ptr<duckdb::MaterializedQueryResult>& res,
-    const std::string& ctx = "")
-{
+inline duckdb::MaterializedQueryResult&
+require_ok(std::unique_ptr<duckdb::MaterializedQueryResult>& res, const std::string& ctx = "") {
     if (res->HasError())
-        throw std::runtime_error("DuckDB error" + (ctx.empty() ? "" : " [" + ctx + "]") +
-                                 ": " + res->GetError());
+        throw std::runtime_error("DuckDB error" + (ctx.empty() ? "" : " [" + ctx + "]") + ": " +
+                                 res->GetError());
     return *res;
 }
 
+inline void require_success(std::unique_ptr<duckdb::MaterializedQueryResult> res,
+                            const std::string& ctx = "") {
+    if (res->HasError())
+        throw std::runtime_error("DuckDB error" + (ctx.empty() ? "" : " [" + ctx + "]") + ": " +
+                                 res->GetError());
+}
+
 // Helper: run a query and return materialized result
-inline std::unique_ptr<duckdb::MaterializedQueryResult> dq(duckdb::Connection& c, const std::string& sql) {
+inline std::unique_ptr<duckdb::MaterializedQueryResult> dq(duckdb::Connection& c,
+                                                           const std::string& sql) {
     return c.Query(sql);
 }
 
 // Execute prepared statement without streaming
-inline std::unique_ptr<duckdb::QueryResult> exec_stmt(
-    duckdb::PreparedStatement& stmt,
-    duckdb::vector<duckdb::Value> vals)
-{
+inline std::unique_ptr<duckdb::QueryResult> exec_stmt(duckdb::PreparedStatement& stmt,
+                                                      duckdb::vector<duckdb::Value> vals) {
     return stmt.Execute(vals, false);
 }
 
@@ -45,9 +53,10 @@ public:
     void run_migrations();
 
 private:
+    std::filesystem::path db_path_;
     duckdb::DuckDB db_;
     std::unique_ptr<duckdb::Connection> conn_;
-    std::unique_ptr<duckdb::MaterializedQueryResult> last_result_;  // keeps result alive
+    std::unique_ptr<duckdb::MaterializedQueryResult> last_result_; // keeps result alive
 };
 
 } // namespace axon

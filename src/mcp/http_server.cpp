@@ -1,23 +1,34 @@
 #include "http_server.hpp"
+#include "peer.hpp"
+#include "version.hpp"
 #include "../core/git.hpp"
 #include "../core/registry.hpp"
 #include "../core/capsule.hpp"
+#include "../core/ccr.hpp"
 #include "../core/dialogue.hpp"
+#include "../core/telemetry.hpp"
+#include "../portfolio/delivery/portfolio_capability_catalog.hpp"
+#include "../portfolio/delivery/web/portfolio_web.hpp"
+#include "../portfolio/infrastructure/http/keycloak_oidc_auth.hpp"
 #include <nlohmann/json.hpp>
 #ifdef _WIN32
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#  define close(s) closesocket(s)
-#  ifdef _MSC_VER
-     typedef int ssize_t;   // MinGW defines ssize_t; MSVC does not
-#  endif
-#else
-#  include <sys/socket.h>
-#  include <netinet/in.h>
-#  include <arpa/inet.h>
-#  include <unistd.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define close(s) closesocket(s)
+#ifdef _MSC_VER
+typedef int ssize_t; // MinGW defines ssize_t; MSVC does not
 #endif
-#include <csignal>    // SIGINT, signal() — available on all platforms
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
+#include <csignal> // SIGINT, signal() — available on all platforms
+#include <chrono>
+#include <cctype>
+#include <cmath>
+#include <unordered_set>
 #include <sstream>
 #include <iostream>
 
@@ -30,14 +41,22 @@ static volatile bool g_running = true;
 
 static void build_response(int fd, int status, const std::string& body,
                            const std::string& content_type = "application/json") {
-    std::string status_text = (status == 200) ? "OK" : (status == 404 ? "Not Found" : "Bad Request");
+    std::string status_text =
+        (status == 200)
+            ? "OK"
+            : (status == 400
+                   ? "Bad Request"
+                   : (status == 401 ? "Unauthorized"
+                                    : (status == 404 ? "Not Found"
+                                                     : (status == 503 ? "Service Unavailable"
+                                                                      : "Internal Server Error"))));
     std::ostringstream oss;
     oss << "HTTP/1.1 " << status << " " << status_text << "\r\n"
         << "Content-Type: " << content_type << "; charset=utf-8\r\n"
         << "Content-Length: " << body.size() << "\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
         << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-        << "Access-Control-Allow-Headers: Content-Type\r\n"
+        << "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
         << "Connection: close\r\n\r\n"
         << body;
     std::string response = oss.str();
@@ -45,8 +64,7 @@ static void build_response(int fd, int status, const std::string& body,
 }
 
 // Extrai path e query string de "GET /api/search?q=foo HTTP/1.1"
-static void parse_request_line(const std::string& request,
-                               std::string& method, std::string& path,
+static void parse_request_line(const std::string& request, std::string& method, std::string& path,
                                std::string& query, std::string& body) {
     std::istringstream ss(request);
     std::string line;
@@ -57,17 +75,16 @@ static void parse_request_line(const std::string& request,
 
     auto q = full_path.find('?');
     if (q != std::string::npos) {
-        path  = full_path.substr(0, q);
+        path = full_path.substr(0, q);
         query = full_path.substr(q + 1);
     } else {
-        path  = full_path;
+        path = full_path;
         query = "";
     }
 
     // Read headers to find Content-Length, then read body
     auto body_start = request.find("\r\n\r\n");
-    if (body_start != std::string::npos)
-        body = request.substr(body_start + 4);
+    if (body_start != std::string::npos) body = request.substr(body_start + 4);
 }
 
 static std::string get_query_param(const std::string& query, const std::string& key) {
@@ -79,11 +96,60 @@ static std::string get_query_param(const std::string& query, const std::string& 
                         end == std::string::npos ? std::string::npos : end - pos - prefix.size());
 }
 
+static std::string request_header(const std::string& request, const std::string& name) {
+    const std::string needle = name + ":";
+    std::size_t begin = request.find("\r\n") + 2;
+    while (begin > 1 && begin < request.size()) {
+        const auto end = request.find("\r\n", begin);
+        if (end == std::string::npos || end == begin) break;
+        const auto line = request.substr(begin, end - begin);
+        if (line.size() >= needle.size() && std::equal(needle.begin(), needle.end(), line.begin(),
+                                                       [](unsigned char a, unsigned char b) {
+                                                           return std::tolower(a) ==
+                                                                  std::tolower(b);
+                                                       })) {
+            auto value = line.substr(needle.size());
+            while (!value.empty() && value.front() == ' ')
+                value.erase(value.begin());
+            return value;
+        }
+        begin = end + 2;
+    }
+    return {};
+}
+
+static std::optional<int> strict_positive_int(const std::string& value) {
+    if (value.empty() || value.size() > 8) return std::nullopt;
+    std::size_t consumed = 0;
+    try {
+        const int parsed = std::stoi(value, &consumed);
+        if (consumed != value.size() || parsed < 1 || parsed > 10000) return std::nullopt;
+        return parsed;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+static std::optional<double> strict_threshold(const std::string& value) {
+    if (value.empty()) return 0.0;
+    std::size_t consumed = 0;
+    try {
+        const double parsed = std::stod(value, &consumed);
+        if (consumed != value.size() || !std::isfinite(parsed) || parsed < 0 || parsed > 1)
+            return std::nullopt;
+        return parsed;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 // URL decode simples
 static std::string url_decode(const std::string& s) {
     std::string out;
     for (size_t i = 0; i < s.size(); i++) {
-        if (s[i] == '+') { out += ' '; continue; }
+        if (s[i] == '+') {
+            out += ' ';
+            continue;
+        }
         if (s[i] == '%' && i + 2 < s.size()) {
             int c = 0;
             sscanf(s.c_str() + i + 1, "%2x", &c);
@@ -96,15 +162,493 @@ static std::string url_decode(const std::string& s) {
     return out;
 }
 
+static std::string web_index_html() {
+    return R"HTML(<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Axon Web</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #0f172a; color: #e5e7eb; }
+    header { display: flex; align-items: center; gap: 16px; padding: 14px 18px; border-bottom: 1px solid #243044; background: #111827; }
+    h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    main { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; min-height: calc(100vh - 58px); }
+    aside { border-right: 1px solid #243044; padding: 14px; overflow: auto; }
+    input, select, button { border: 1px solid #334155; background: #172033; color: #e5e7eb; border-radius: 6px; padding: 8px 10px; }
+    button { cursor: pointer; }
+    .toolbar { display: flex; gap: 8px; margin-left: auto; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .stat { border: 1px solid #263449; border-radius: 6px; padding: 9px; background: #111827; }
+    .stat b { display: block; font-size: 18px; }
+    .search { width: calc(100% - 22px); margin-bottom: 10px; }
+    .list { display: grid; gap: 6px; }
+    .item { border: 1px solid #263449; border-radius: 6px; padding: 8px; background: #101827; }
+    .item strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+    .item span { color: #9ca3af; font-size: 12px; overflow-wrap: anywhere; }
+    .canvas { position: relative; overflow: hidden; background: #0b1020; }
+    svg { width: 100%; height: 100%; min-height: calc(100vh - 58px); display: block; }
+    line { stroke: #334155; stroke-width: 1; }
+    circle { fill: #38bdf8; stroke: #e5e7eb; stroke-width: 1; cursor: pointer; }
+    text { fill: #e5e7eb; font-size: 11px; paint-order: stroke; stroke: #0b1020; stroke-width: 3px; }
+    .empty { color: #9ca3af; padding: 14px; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid #243044; max-height: 42vh; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Axon Web</h1>
+    <div class="toolbar">
+      <select id="mode"><option value="file">Files</option><option value="symbol">Symbols</option></select>
+      <button id="refresh">Refresh</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="stats">
+        <div class="stat"><b id="nodes">0</b><span>nodes</span></div>
+        <div class="stat"><b id="edges">0</b><span>edges</span></div>
+        <div class="stat"><b id="files">0</b><span>files</span></div>
+      </div>
+      <div class="metrics" id="metrics"></div>
+      <input id="filter" class="search" placeholder="Filter nodes">
+      <div id="list" class="list"></div>
+    </aside>
+    <section class="canvas"><svg id="graph" role="img" aria-label="Axon dependency graph"></svg></section>
+  </main>
+  <script>
+    const graph = document.getElementById('graph');
+    const list = document.getElementById('list');
+    const mode = document.getElementById('mode');
+    const filter = document.getElementById('filter');
+    let current = { nodes: [], edges: [], meta: {} };
+
+    function point(i, n) {
+      const w = graph.clientWidth || 900, h = graph.clientHeight || 600;
+      const r = Math.max(80, Math.min(w, h) * 0.38);
+      const a = (Math.PI * 2 * i) / Math.max(n, 1);
+      return { x: w / 2 + Math.cos(a) * r, y: h / 2 + Math.sin(a) * r };
+    }
+
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+
+    function render() {
+      const q = filter.value.toLowerCase();
+      const nodes = current.nodes.filter(n => (n.label || n.id || '').toLowerCase().includes(q));
+      const ids = new Set(nodes.map(n => String(n.id)));
+      const pos = new Map(nodes.map((n, i) => [String(n.id), point(i, nodes.length)]));
+      graph.replaceChildren();
+      graph.setAttribute('viewBox', `0 0 ${graph.clientWidth || 900} ${graph.clientHeight || 600}`);
+      current.edges.filter(e => ids.has(String(e.source)) && ids.has(String(e.target))).forEach(e => {
+        const a = pos.get(String(e.source)), b = pos.get(String(e.target));
+        if (!a || !b) return;
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+        line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+        graph.appendChild(line);
+      });
+      nodes.forEach(n => {
+        const p = pos.get(String(n.id));
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); c.setAttribute('r', Math.max(4, Math.min(14, Number(n.size || 4) + 3)));
+        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('x', p.x + 10); t.setAttribute('y', p.y + 4); t.textContent = n.label || n.id;
+        g.append(c, t); graph.appendChild(g);
+      });
+      list.innerHTML = nodes.slice(0, 120).map(n => `<div class="item"><strong>${escapeHtml(n.label || n.id)}</strong><span>${escapeHtml(n.path || n.kind || '')}</span></div>`).join('') || '<div class="empty">No nodes</div>';
+    }
+
+    function metricCard(label, value) {
+      return `<div class="stat"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`;
+    }
+
+    async function loadMetrics() {
+      const data = await fetch('/api/metrics').then(r => r.json());
+      const el = document.getElementById('metrics');
+      if (data.telemetry_enabled) {
+        el.innerHTML = [
+          metricCard('requests', data.requests || 0),
+          metricCard('tokens sent', data.tokens_sent || 0),
+          metricCard('tokens saved', data.tokens_saved || 0),
+          metricCard('cache hit', Math.round((data.cache_hit_rate || 0) * 100) + '%')
+        ].join('');
+      } else {
+        const g = data.graph || {};
+        el.innerHTML = [
+          metricCard('symbols', g.symbols || 0),
+          metricCard('graph edges', g.edges || 0),
+          metricCard('bytes', g.bytes_indexed || 0),
+          metricCard('capsule tok', data.last_capsule_token_estimate || 0)
+        ].join('');
+      }
+    }
+
+    async function load() {
+      const suffix = mode.value === 'symbol' ? '?mode=symbol' : '';
+      const data = await fetch('/api/graph' + suffix).then(r => r.json());
+      current = data;
+      document.getElementById('nodes').textContent = data.nodes?.length || 0;
+      document.getElementById('edges').textContent = data.edges?.length || 0;
+      document.getElementById('files').textContent = data.meta?.files || data.nodes?.length || 0;
+      loadMetrics().catch(() => {});
+      render();
+    }
+    document.getElementById('refresh').onclick = load;
+    mode.onchange = load;
+    filter.oninput = render;
+    addEventListener('resize', render);
+    load().catch(err => { list.innerHTML = `<div class="empty">${err.message}</div>`; });
+  </script>
+</body>
+</html>)HTML";
+}
+
 static std::string handle_request(const std::string& method, const std::string& path,
                                   const std::string& query, const std::string& body,
-                                  ServerContext& ctx, const HttpConfig& cfg) {
+                                  const std::string& authorization, ServerContext& ctx,
+                                  const HttpConfig& cfg, int& http_status) {
     // Escape SQL strings
     auto sq = [](const std::string& s) {
         std::string out;
-        for (char c : s) { if (c == '\'') out += '\''; out += c; }
+        for (char c : s) {
+            if (c == '\'') out += '\'';
+            out += c;
+        }
         return out;
     };
+
+    if (method == "GET" && (path == "/" || path == "/index.html")) {
+        return web_index_html();
+    }
+    if (method == "GET" && path == "/portfolio") {
+        auto page = axon::portfolio::web::page();
+        // Browser authentication is deliberately additive to the static atlas.  The client is a
+        // public PKCE client: no browser receives a secret and the existing bearer field remains
+        // an operational fallback for non-browser clients.
+        const char* issuer = std::getenv("AXON_KEYCLOAK_ISSUER");
+        const char* client_id = std::getenv("AXON_KEYCLOAK_BROWSER_CLIENT_ID");
+        if (issuer && client_id) {
+            const auto config = json{{"issuer", issuer}, {"client_id", client_id}}.dump();
+            const auto script = R"HTML(<script>
+(() => {
+  const oidc = )HTML" + config + R"HTML(;
+  const token = document.getElementById('t');
+  const label = token && token.closest('label');
+  if (!token || !label || !window.crypto || !window.crypto.subtle) return;
+  const login = document.createElement('button'); login.id = 'keycloak-login';
+  login.type = 'button'; login.textContent = 'Sign in with Keycloak';
+  label.before(login); label.firstChild.textContent = 'Access token (advanced)';
+  const b64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const endpoint = suffix => oidc.issuer.replace(/\/$/, '') + '/protocol/openid-connect/' + suffix;
+  const finish = async () => {
+    const query = new URLSearchParams(location.search), code = query.get('code'), state = query.get('state');
+    if (!code) return;
+    const saved = sessionStorage.getItem('axon-portfolio-pkce');
+    if (!saved) throw Error('Sign-in session expired; retry Keycloak login.');
+    const proof = JSON.parse(saved); sessionStorage.removeItem('axon-portfolio-pkce');
+    if (state !== proof.state) throw Error('Keycloak state validation failed.');
+    const form = new URLSearchParams({grant_type:'authorization_code', client_id:oidc.client_id, code, redirect_uri:location.origin + location.pathname, code_verifier:proof.verifier});
+    const response = await fetch(endpoint('token'), {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:form});
+    const payload = await response.json(); if (!response.ok || !payload.access_token) throw Error(payload.error_description || 'Keycloak token exchange failed.');
+    token.value = payload.access_token; history.replaceState({}, '', location.pathname); document.getElementById('go').click();
+  };
+  login.onclick = async () => { const bytes = crypto.getRandomValues(new Uint8Array(32)); const verifier = b64url(bytes); const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)); const state = b64url(crypto.getRandomValues(new Uint8Array(24))); sessionStorage.setItem('axon-portfolio-pkce', JSON.stringify({verifier,state})); const query = new URLSearchParams({client_id:oidc.client_id,response_type:'code',redirect_uri:location.origin + location.pathname,scope:'openid profile email',code_challenge:b64url(digest),code_challenge_method:'S256',state}); location.assign(endpoint('auth') + '?' + query); };
+  finish().catch(error => { document.getElementById('state').textContent = 'Sign-in failed: ' + error.message; });
+})();
+</script>)HTML";
+            page.replace(page.rfind("</body>"), 0, script);
+        }
+        return page;
+    }
+
+    // GET /api/metrics
+    if (method == "GET" && path == "/api/metrics") {
+        return axon::metrics_json(ctx.cfg, ctx.db.get()).dump();
+    }
+
+    // Versioned portfolio endpoints deliberately share the catalog used by CLI and MCP.  They
+    // expose metadata only and never use the HTTP server's project database as a write target.
+    if (path.rfind("/api/v1/portfolio/", 0) == 0 || path.rfind("/api/v1/capabilities", 0) == 0) {
+        // Authentication failures are deliberately distinct from validation and service errors.
+        // The Keycloak shared-infra contract is fail-closed: an unset verifier is never bypassed.
+        const char* issuer = std::getenv("AXON_KEYCLOAK_ISSUER");
+        const char* audience = std::getenv("AXON_KEYCLOAK_AUDIENCE");
+        const char* jwks = std::getenv("AXON_KEYCLOAK_JWKS_JSON");
+        if (!issuer || !audience || !jwks) {
+            http_status = 401;
+            return json{{"error", "portfolio API authentication is not configured"}}.dump();
+        }
+        try {
+            axon::portfolio::KeycloakOidcAuthenticator authenticator({issuer, audience, jwks});
+            (void)authenticator.authenticate_bearer(authorization);
+        } catch (const std::exception& error) {
+            http_status = 401;
+            return json{{"error", error.what()}}.dump();
+        }
+        try {
+            axon::portfolio::PortfolioCapabilityCatalog catalog;
+            if (method == "GET" && path == "/api/v1/portfolio/topology") {
+                // This is a graph overview, not an export endpoint.  Keep its envelope bounded
+                // independently of the catalog limits: a pathological signature cannot make a
+                // browser response unbounded merely by registering more metadata.
+                constexpr int kTopologyNodeLimit = 100;
+                constexpr std::size_t kTopologyFieldLimit = 256;
+                constexpr std::size_t kTopologyEvidenceLimit = 8;
+                const auto limit_text = get_query_param(query, "limit");
+                const auto requested = limit_text.empty() ? std::optional<int>{kTopologyNodeLimit}
+                                                          : strict_positive_int(limit_text);
+                if (!requested || *requested > kTopologyNodeLimit) {
+                    http_status = 400;
+                    return json{{"error", "limit must be 1..100"}}.dump();
+                }
+                const int limit = *requested;
+                const auto clipped = [&](const std::string& value) {
+                    return value.substr(0, kTopologyFieldLimit);
+                };
+                const auto clipped_list = [&](const std::vector<std::string>& values) {
+                    json out = json::array();
+                    for (std::size_t i = 0; i < values.size() && i < kTopologyEvidenceLimit; ++i)
+                        out.push_back(clipped(values[i]));
+                    return out;
+                };
+                json nodes = json::array(), edges = json::array();
+                std::unordered_set<std::string> node_ids;
+                bool truncated = false;
+                for (const auto& s : catalog.list({}, limit)) {
+                    const auto id = axon::portfolio::capability_reference_id(s);
+                    node_ids.insert(id);
+                    truncated = truncated || s.contracts.size() > kTopologyEvidenceLimit ||
+                                s.routes.size() > kTopologyEvidenceLimit;
+                    nodes.push_back({{"id", id},
+                                     {"repository_id", clipped(s.stream.repository_id)},
+                                     {"name", clipped(s.normalized_name)},
+                                     {"path", clipped(s.path.value_or(""))},
+                                     {"contracts", clipped_list(s.contracts)},
+                                     {"routes", clipped_list(s.routes)},
+                                     {"epoch", clipped(s.index_epoch)}});
+                }
+                for (const auto& c : catalog.duplicates(0.35, 400))
+                    if (node_ids.contains(c.left_capability_id) &&
+                        node_ids.contains(c.right_capability_id))
+                        edges.push_back(
+                            {{"id", c.candidate_id},
+                             {"source", c.left_capability_id},
+                             {"target", c.right_capability_id},
+                             {"kind", "convergent_capability"},
+                             {"score", c.final_score},
+                             {"classification", axon::portfolio::to_string(c.classification)}});
+                return json{
+                    {"nodes", nodes},
+                    {"edges", edges},
+                    {"truncated", truncated || nodes.size() == static_cast<std::size_t>(limit)}}
+                    .dump();
+            }
+            if (method == "GET" && path == "/api/v1/portfolio/status") {
+                const auto status = catalog.status();
+                json repos = json::array();
+                for (const auto& item : status.repositories)
+                    repos.push_back({{"repository_id", item.repository_id},
+                                     {"index_stream_id", item.index_stream_id},
+                                     {"status", item.status},
+                                     {"detail", item.detail}});
+                http_status = status.degraded ? 503 : 200;
+                return json{{"catalog_path", catalog.path().string()},
+                            {"capabilities", catalog.list({}, 10000).size()},
+                            {"degraded", status.degraded},
+                            {"repositories", repos}}
+                    .dump();
+            }
+            if (method == "POST" && path == "/api/v1/portfolio/sync") {
+                json input = body.empty() ? json::object() : json::parse(body);
+                if (!input.is_object()) {
+                    http_status = 400;
+                    return json{{"error", "object body required"}}.dump();
+                }
+                for (const auto& entry : input.items())
+                    if (entry.key() != "group" && entry.key() != "rebuild") {
+                        http_status = 400;
+                        return json{{"error", "unknown sync field"}}.dump();
+                    }
+                std::optional<std::string> group;
+                if (input.contains("group")) {
+                    if (!input["group"].is_string()) {
+                        http_status = 400;
+                        return json{{"error", "group must be string"}}.dump();
+                    }
+                    group = input["group"];
+                }
+                if (input.contains("rebuild") && !input["rebuild"].is_boolean()) {
+                    http_status = 400;
+                    return json{{"error", "rebuild must be boolean"}}.dump();
+                }
+                const auto report = catalog.sync(group, input.value("rebuild", false));
+                json repositories = json::array();
+                for (const auto& item : report.repositories)
+                    repositories.push_back({{"repository_id", item.repository_id},
+                                            {"index_stream_id", item.index_stream_id},
+                                            {"status", item.status},
+                                            {"detail", item.detail},
+                                            {"signatures", item.signatures}});
+                http_status = report.degraded ? 503 : 200;
+                return json{{"degraded", report.degraded}, {"repositories", repositories}}.dump();
+            }
+            if (method == "GET" && path == "/api/v1/capabilities") {
+                const auto repo = url_decode(get_query_param(query, "repository_id"));
+                const auto limit_text = get_query_param(query, "limit");
+                const auto limit =
+                    limit_text.empty() ? std::optional<int>{200} : strict_positive_int(limit_text);
+                if (!limit) {
+                    http_status = 400;
+                    return json{{"error", "limit must be 1..10000"}}.dump();
+                }
+                json output = json::array();
+                for (const auto& s : catalog.list(
+                         repo.empty() ? std::nullopt : std::optional<std::string>{repo}, *limit))
+                    output.push_back({{"id", s.signature_id},
+                                      {"repository_id", s.stream.repository_id},
+                                      {"name", s.normalized_name},
+                                      {"path", s.path.value_or("")},
+                                      {"contracts", s.contracts},
+                                      {"routes", s.routes},
+                                      {"epoch", s.index_epoch}});
+                return json{{"capabilities", output}}.dump();
+            }
+            if (method == "GET" && path == "/api/v1/capabilities/search") {
+                const auto q = url_decode(get_query_param(query, "q"));
+                if (q.empty()) {
+                    http_status = 400;
+                    return json{{"error", "q is required"}}.dump();
+                }
+                json output = json::array();
+                for (const auto& s : catalog.search(q))
+                    output.push_back({{"id", s.signature_id},
+                                      {"repository_id", s.stream.repository_id},
+                                      {"name", s.normalized_name},
+                                      {"path", s.path.value_or("")}});
+                return json{{"capabilities", output}}.dump();
+            }
+            if (method == "GET" && path == "/api/v1/capabilities/duplicates") {
+                const auto threshold = strict_threshold(get_query_param(query, "threshold"));
+                const auto limit_text = get_query_param(query, "limit");
+                const auto limit =
+                    limit_text.empty() ? std::optional<int>{100} : strict_positive_int(limit_text);
+                if (!threshold || !limit) {
+                    http_status = 400;
+                    return json{{"error", "threshold must be 0..1 and limit must be 1..10000"}}
+                        .dump();
+                }
+                json output = json::array();
+                for (const auto& c : catalog.duplicates(*threshold, *limit))
+                    output.push_back(
+                        {{"id", c.candidate_id},
+                         {"left", c.left_capability_id},
+                         {"right", c.right_capability_id},
+                         {"score", c.final_score},
+                         {"classification", axon::portfolio::to_string(c.classification)},
+                         {"differences", c.differences},
+                         {"invalidators", c.invalidators}});
+                return json{{"candidates", output}}.dump();
+            }
+            if (method == "GET" && path.rfind("/api/v1/capabilities/compare/", 0) == 0) {
+                const auto id = url_decode(path.substr(29));
+                for (const auto& c : catalog.duplicates(0, 10000))
+                    if (c.candidate_id == id)
+                        return json{
+                            {"id", c.candidate_id},
+                            {"score", c.final_score},
+                            {"classification", axon::portfolio::to_string(c.classification)},
+                            {"differences", c.differences},
+                            {"invalidators", c.invalidators}}
+                            .dump();
+                http_status = 404;
+                return json{{"error", "candidate not found"}}.dump();
+            }
+            if (method == "GET" && path.rfind("/api/v1/capabilities/consumers/", 0) == 0) {
+                constexpr std::size_t kConsumerLimit = 100, kValueLimit = 256;
+                const auto id = url_decode(path.substr(31));
+                const auto requested = get_query_param(query, "limit");
+                const auto limit = requested.empty()
+                                       ? std::optional<int>{static_cast<int>(kConsumerLimit)}
+                                       : strict_positive_int(requested);
+                if (!limit || *limit > static_cast<int>(kConsumerLimit) || id.empty() ||
+                    id.size() > 1024U) {
+                    http_status = 400;
+                    return json{{"error", "capability_id and limit must be bounded"}}.dump();
+                }
+                const auto clip = [](const std::string& value) {
+                    return value.substr(0, kValueLimit);
+                };
+                const auto all = catalog.list({}, 10000);
+                for (const auto& s : all)
+                    if (axon::portfolio::capability_reference_id(s) == id) {
+                        json repositories = json::array(), consumer_capabilities = json::array(),
+                             unresolved_import_specifiers = json::array();
+                        bool truncated = false;
+                        for (const auto& other : all)
+                            if (other.stream == s.stream &&
+                                axon::portfolio::capability_reference_id(other) != id && s.path &&
+                                std::find(other.internal_dependencies.begin(),
+                                          other.internal_dependencies.end(),
+                                          *s.path) != other.internal_dependencies.end()) {
+                                if (consumer_capabilities.size() >=
+                                    static_cast<std::size_t>(*limit)) {
+                                    truncated = true;
+                                    break;
+                                }
+                                consumer_capabilities.push_back(
+                                    clip(axon::portfolio::capability_reference_id(other)));
+                            }
+                        if (!consumer_capabilities.empty())
+                            repositories.push_back(clip(s.stream.repository_id));
+                        for (const auto& dependency : s.external_dependencies) {
+                            if (unresolved_import_specifiers.size() >=
+                                static_cast<std::size_t>(*limit)) {
+                                truncated = true;
+                                break;
+                            }
+                            unresolved_import_specifiers.push_back(clip(dependency));
+                        }
+                        return json{
+                            {"capability_id", clip(id)},
+                            {"repositories", repositories},
+                            {"consumer_capabilities", consumer_capabilities},
+                            {"unresolved_import_specifiers", unresolved_import_specifiers},
+                            {"evidence", s.path ? json::array({clip(*s.path)}) : json::array()},
+                            {"truncated", truncated}}
+                            .dump();
+                    }
+                http_status = 404;
+                return json{{"error", "capability not found"}}.dump();
+            }
+            if (method == "GET" && path == "/api/v1/capabilities/drift") {
+                const auto root = url_decode(get_query_param(query, "graph_root"));
+                const auto fragment = url_decode(get_query_param(query, "fragment"));
+                if (root.empty() || fragment.empty()) {
+                    http_status = 400;
+                    return json{{"error", "graph_root and fragment are required"}}.dump();
+                }
+                const auto result = catalog.drift(root, fragment);
+                return json{{"matches", result.matches.size()}, {"drift", result.drift.size()}}
+                    .dump();
+            }
+        } catch (const json::exception& error) {
+            http_status = 400;
+            return json{{"error", "invalid JSON body"}}.dump();
+        } catch (const std::invalid_argument& error) {
+            http_status = 400;
+            return json{{"error", error.what()}}.dump();
+        } catch (const std::exception& error) {
+            http_status = 500;
+            return json{{"error", "portfolio service failure"}}.dump();
+        }
+        http_status = 404;
+        return json{{"error", "unknown portfolio endpoint"}}.dump();
+    }
 
     // GET /api/graph
     if (method == "GET" && path == "/api/graph") {
@@ -121,18 +665,20 @@ static std::string handle_request(const std::string& method, const std::string& 
             json edges = json::array();
 
             // Nodes = symbols
-            auto sr = ctx.db->conn().Query(
-                "SELECT s.id, s.name, s.kind, f.path "
-                "FROM symbols s JOIN files f ON s.file_id = f.id");
+            auto sr = ctx.db->conn().Query("SELECT s.id, s.name, s.kind, f.path "
+                                           "FROM symbols s JOIN files f ON s.file_id = f.id");
             if (!sr->HasError()) {
                 for (duckdb::idx_t i = 0; i < sr->RowCount(); i++) {
-                    std::string sid  = std::to_string(sr->GetValue<int64_t>(0, i));
+                    std::string sid = std::to_string(sr->GetValue<int64_t>(0, i));
                     std::string name = sr->GetValue(1, i).ToString();
                     std::string kind = sr->GetValue(2, i).ToString();
                     std::string fpath = sr->GetValue(3, i).ToString();
                     // Compute rough degree in edges below — use 1 for now, updated after edge scan
-                    nodes.push_back({{"id", sid}, {"label", name}, {"kind", kind},
-                                     {"path", fpath}, {"size", 1}});
+                    nodes.push_back({{"id", sid},
+                                     {"label", name},
+                                     {"kind", kind},
+                                     {"path", fpath},
+                                     {"size", 1}});
                 }
             }
 
@@ -161,20 +707,23 @@ static std::string handle_request(const std::string& method, const std::string& 
                 if (!er->HasError()) {
                     for (duckdb::idx_t i = 0; i < er->RowCount(); i++) {
                         std::string from = er->GetValue(0, i).ToString();
-                        std::string to   = er->GetValue(1, i).ToString();
+                        std::string to = er->GetValue(1, i).ToString();
                         std::string kind = er->GetValue(2, i).ToString();
                         edges.push_back({{"id", from + "->" + to},
-                                         {"source", from}, {"target", to}, {"kind", kind}});
+                                         {"source", from},
+                                         {"target", to},
+                                         {"kind", kind}});
                     }
                 }
             }
 
-            json meta = {
-                {"files",   (int)nodes.size()},
-                {"symbols", (int)nodes.size()},
-                {"edges",   (int)edges.size()},
-                {"project", ctx.cfg.project_root.filename().string()}
-            };
+            std::unordered_set<std::string> node_files;
+            for (const auto& n : nodes)
+                if (n.contains("path")) node_files.insert(n["path"].get<std::string>());
+            json meta = {{"files", (int)node_files.size()},
+                         {"symbols", (int)nodes.size()},
+                         {"edges", (int)edges.size()},
+                         {"project", ctx.cfg.project_root.filename().string()}};
             return json{{"nodes", nodes}, {"edges", edges}, {"meta", meta}}.dump();
         }
 
@@ -190,30 +739,33 @@ static std::string handle_request(const std::string& method, const std::string& 
 
             int deg = ctx.graph.degree(id);
             std::string label = fpath.substr(fpath.find_last_of('/') + 1);
-            nodes.push_back({{"id", fpath}, {"label", label}, {"language", lang},
-                             {"path", fpath}, {"size", deg}, {"kind", "file"}});
+            nodes.push_back({{"id", fpath},
+                             {"label", label},
+                             {"language", lang},
+                             {"path", fpath},
+                             {"size", deg},
+                             {"kind", "file"}});
         }
 
         // Prefer DB query to get symbol-granular edge info; fall back to in-memory
         if (ctx.db_ready()) {
-            auto eres = ctx.db->conn().Query(
-                "SELECT f1.path, f2.path, e.kind, s1.name, s2.name "
-                "FROM edges e "
-                "JOIN files f1 ON e.from_file = f1.id "
-                "JOIN files f2 ON e.to_file   = f2.id "
-                "LEFT JOIN symbols s1 ON e.from_symbol = s1.id "
-                "LEFT JOIN symbols s2 ON e.to_symbol   = s2.id");
+            auto eres = ctx.db->conn().Query("SELECT f1.path, f2.path, e.kind, s1.name, s2.name "
+                                             "FROM edges e "
+                                             "JOIN files f1 ON e.from_file = f1.id "
+                                             "JOIN files f2 ON e.to_file   = f2.id "
+                                             "LEFT JOIN symbols s1 ON e.from_symbol = s1.id "
+                                             "LEFT JOIN symbols s2 ON e.to_symbol   = s2.id");
             if (!eres->HasError()) {
                 for (duckdb::idx_t i = 0; i < eres->RowCount(); i++) {
                     std::string from = eres->GetValue(0, i).ToString();
-                    std::string to   = eres->GetValue(1, i).ToString();
+                    std::string to = eres->GetValue(1, i).ToString();
                     std::string kind = eres->GetValue(2, i).ToString();
-                    json edge = {{"id", from + "->" + to}, {"source", from},
-                                 {"target", to}, {"kind", kind}};
+                    json edge = {
+                        {"id", from + "->" + to}, {"source", from}, {"target", to}, {"kind", kind}};
                     auto fsym = eres->GetValue(3, i);
                     auto tsym = eres->GetValue(4, i);
                     if (!fsym.IsNull()) edge["from_symbol"] = fsym.ToString();
-                    if (!tsym.IsNull()) edge["to_symbol"]   = tsym.ToString();
+                    if (!tsym.IsNull()) edge["to_symbol"] = tsym.ToString();
                     edges.push_back(edge);
                 }
             }
@@ -234,70 +786,86 @@ static std::string handle_request(const std::string& method, const std::string& 
 
         // Aggregate extra repos if --group or --all was specified
         std::vector<axon::RepoEntry> extra_repos;
-        if (cfg.all_repos) {
+        json secondary_errors = json::array();
+        if (cfg.all_repos || !cfg.group.empty()) {
             auto reg = axon::load_registry();
-            extra_repos = axon::get_repos(reg);
-        } else if (!cfg.group.empty()) {
-            auto reg = axon::load_registry();
-            extra_repos = axon::get_group_repos(reg, cfg.group);
+            auto selection = axon::aggregation_repos(
+                reg, cfg.group.empty() ? std::optional<std::string>{}
+                                       : std::optional<std::string>{cfg.group});
+            extra_repos = std::move(selection.repos);
+            for (const auto& issue : selection.issues)
+                secondary_errors.push_back({{"repo", nullptr},
+                                            {"code", issue.code},
+                                            {"path", issue.path},
+                                            {"message", issue.message}});
         }
 
         for (auto& repo : extra_repos) {
             if (repo.db_path == ctx.cfg.db_path.string()) continue; // skip self
-            try {
-                duckdb::DBConfig db_cfg;
-                db_cfg.options.access_mode = duckdb::AccessMode::READ_ONLY;
-                duckdb::DuckDB other_db(repo.db_path, &db_cfg);
-                duckdb::Connection other_conn(other_db);
+            auto secondary = axon::open_secondary_read_only(repo);
+            if (!secondary) {
+                secondary_errors.push_back({{"repo", repo.name},
+                                            {"code", secondary.error_code},
+                                            {"message", secondary.error}});
+                continue;
+            }
+            duckdb::Connection other_conn(*secondary.db);
 
-                // Query nodes (degree = outgoing + incoming edges)
-                auto res = other_conn.Query(
-                    "SELECT f.path, "
-                    "  (SELECT COUNT(*) FROM edges WHERE from_file = f.id) + "
-                    "  (SELECT COUNT(*) FROM edges WHERE to_file   = f.id) AS degree "
-                    "FROM files f");
-                if (!res->HasError()) {
-                    for (size_t i = 0; i < res->RowCount(); i++) {
-                        std::string path = repo.name + "/" + res->GetValue(0, i).ToString();
-                        int degree = 0;
-                        try { degree = std::stoi(res->GetValue(1, i).ToString()); } catch (...) {}
-                        std::string label = fs::path(path).filename().string();
-                        nodes.push_back({{"id", path}, {"label", label}, {"degree", degree},
-                                         {"path", path}, {"size", degree}, {"kind", "file"},
-                                         {"repo", repo.name}});
+            // Query nodes (degree = outgoing + incoming edges)
+            auto res =
+                other_conn.Query("SELECT f.path, "
+                                 "  (SELECT COUNT(*) FROM edges WHERE from_file = f.id) + "
+                                 "  (SELECT COUNT(*) FROM edges WHERE to_file   = f.id) AS degree "
+                                 "FROM files f");
+            if (!res->HasError()) {
+                for (size_t i = 0; i < res->RowCount(); i++) {
+                    std::string path = repo.name + "/" + res->GetValue(0, i).ToString();
+                    int degree = 0;
+                    try {
+                        degree = std::stoi(res->GetValue(1, i).ToString());
+                    } catch (...) {
                     }
-                } else {
-                    std::cerr << "[axon] skip repo " << repo.name << " nodes: " << res->GetError() << "\n";
+                    std::string label = fs::path(path).filename().string();
+                    nodes.push_back({{"id", path},
+                                     {"label", label},
+                                     {"degree", degree},
+                                     {"path", path},
+                                     {"size", degree},
+                                     {"kind", "file"},
+                                     {"repo", repo.name}});
                 }
+            } else {
+                secondary_errors.push_back({{"repo", repo.name},
+                                            {"code", "nodes_query_failed"},
+                                            {"message", res->GetError()}});
+            }
 
-                // Query edges
-                auto eres = other_conn.Query(
-                    "SELECT f1.path, f2.path FROM edges e "
-                    "JOIN files f1 ON e.from_file = f1.id "
-                    "JOIN files f2 ON e.to_file   = f2.id");
-                if (!eres->HasError()) {
-                    for (size_t i = 0; i < eres->RowCount(); i++) {
-                        std::string from = repo.name + "/" + eres->GetValue(0, i).ToString();
-                        std::string to   = repo.name + "/" + eres->GetValue(1, i).ToString();
-                        edges.push_back({{"id", from + "->" + to}, {"source", from}, {"target", to},
-                                         {"kind", "imports"}, {"repo", repo.name}});
-                    }
-                } else {
-                    std::cerr << "[axon] skip repo " << repo.name << " edges: " << eres->GetError() << "\n";
+            // Query edges
+            auto eres = other_conn.Query("SELECT f1.path, f2.path FROM edges e "
+                                         "JOIN files f1 ON e.from_file = f1.id "
+                                         "JOIN files f2 ON e.to_file   = f2.id");
+            if (!eres->HasError()) {
+                for (size_t i = 0; i < eres->RowCount(); i++) {
+                    std::string from = repo.name + "/" + eres->GetValue(0, i).ToString();
+                    std::string to = repo.name + "/" + eres->GetValue(1, i).ToString();
+                    edges.push_back({{"id", from + "->" + to},
+                                     {"source", from},
+                                     {"target", to},
+                                     {"kind", "imports"},
+                                     {"repo", repo.name}});
                 }
-            } catch (const std::exception& e) {
-                std::cerr << "[axon] skip repo " << repo.name << ": " << e.what() << "\n";
-            } catch (...) {
-                std::cerr << "[axon] skip repo " << repo.name << ": unknown error\n";
+            } else {
+                secondary_errors.push_back({{"repo", repo.name},
+                                            {"code", "edges_query_failed"},
+                                            {"message", eres->GetError()}});
             }
         }
 
-        json meta = {
-            {"files",   (int)ctx.graph.id_to_path.size()},
-            {"symbols", 0},  // filled below if DB available
-            {"edges",   (int)edges.size()},
-            {"project", ctx.cfg.project_root.filename().string()}
-        };
+        json meta = {{"files", (int)ctx.graph.id_to_path.size()},
+                     {"symbols", 0}, // filled below if DB available
+                     {"edges", (int)edges.size()},
+                     {"project", ctx.cfg.project_root.filename().string()},
+                     {"secondary_errors", secondary_errors}};
 
         if (ctx.db_ready()) {
             auto sr = ctx.db->conn().Query("SELECT count(*) FROM symbols");
@@ -317,14 +885,13 @@ static std::string handle_request(const std::string& method, const std::string& 
 
         json top_symbols = json::array();
         if (ctx.db_ready()) {
-            auto sr = ctx.db->conn().Query(
-                "SELECT s.name, s.kind, f.path FROM symbols s "
-                "JOIN files f ON s.file_id = f.id LIMIT 20");
+            auto sr = ctx.db->conn().Query("SELECT s.name, s.kind, f.path FROM symbols s "
+                                           "JOIN files f ON s.file_id = f.id LIMIT 20");
             if (!sr->HasError()) {
                 for (duckdb::idx_t i = 0; i < sr->RowCount(); i++)
-                    top_symbols.push_back({{"name", sr->GetValue(0,i).ToString()},
-                                          {"kind", sr->GetValue(1,i).ToString()},
-                                          {"file", sr->GetValue(2,i).ToString()}});
+                    top_symbols.push_back({{"name", sr->GetValue(0, i).ToString()},
+                                           {"kind", sr->GetValue(1, i).ToString()},
+                                           {"file", sr->GetValue(2, i).ToString()}});
             }
         }
         return json{{"top_files", top_files}, {"top_symbols", top_symbols}}.dump();
@@ -337,23 +904,24 @@ static std::string handle_request(const std::string& method, const std::string& 
         json symbols = json::array();
 
         if (!q.empty() && ctx.db_ready()) {
-            auto fr = ctx.db->conn().Query(
-                "SELECT path, language FROM files WHERE path LIKE '%" + sq(q) + "%' LIMIT 20");
+            auto fr = ctx.db->conn().Query("SELECT path, language FROM files WHERE path LIKE '%" +
+                                           sq(q) + "%' LIMIT 20");
             if (!fr->HasError())
                 for (duckdb::idx_t i = 0; i < fr->RowCount(); i++)
-                    files.push_back({{"path", fr->GetValue(0,i).ToString()},
-                                    {"language", fr->GetValue(1,i).ToString()}});
+                    files.push_back({{"path", fr->GetValue(0, i).ToString()},
+                                     {"language", fr->GetValue(1, i).ToString()}});
 
-            auto sr = ctx.db->conn().Query(
-                "SELECT s.name, s.kind, f.path, s.start_line FROM symbols s "
-                "JOIN files f ON s.file_id = f.id "
-                "WHERE s.name LIKE '%" + sq(q) + "%' LIMIT 20");
+            auto sr =
+                ctx.db->conn().Query("SELECT s.name, s.kind, f.path, s.start_line FROM symbols s "
+                                     "JOIN files f ON s.file_id = f.id "
+                                     "WHERE s.name LIKE '%" +
+                                     sq(q) + "%' LIMIT 20");
             if (!sr->HasError())
                 for (duckdb::idx_t i = 0; i < sr->RowCount(); i++)
-                    symbols.push_back({{"name", sr->GetValue(0,i).ToString()},
-                                      {"kind", sr->GetValue(1,i).ToString()},
-                                      {"file", sr->GetValue(2,i).ToString()},
-                                      {"line", sr->GetValue(3,i).GetValue<int32_t>()}});
+                    symbols.push_back({{"name", sr->GetValue(0, i).ToString()},
+                                       {"kind", sr->GetValue(1, i).ToString()},
+                                       {"file", sr->GetValue(2, i).ToString()},
+                                       {"line", sr->GetValue(3, i).GetValue<int32_t>()}});
         }
         return json{{"files", files}, {"symbols", symbols}}.dump();
     }
@@ -367,7 +935,8 @@ static std::string handle_request(const std::string& method, const std::string& 
             auto sr = ctx.db->conn().Query(
                 "SELECT s.name, s.kind, f.path, s.start_line, s.signature, s.file_id "
                 "FROM symbols s JOIN files f ON s.file_id = f.id "
-                "WHERE s.name = '" + sq(sym_name) + "' LIMIT 1");
+                "WHERE s.name = '" +
+                sq(sym_name) + "' LIMIT 1");
             if (!sr->HasError() && sr->RowCount() > 0) {
                 int64_t file_id = sr->GetValue<int64_t>(5, 0);
                 json caller_files = json::array();
@@ -375,14 +944,13 @@ static std::string handle_request(const std::string& method, const std::string& 
                 if (it != ctx.graph.incoming.end())
                     for (int64_t src : it->second) {
                         auto pit = ctx.graph.id_to_path.find(src);
-                        if (pit != ctx.graph.id_to_path.end())
-                            caller_files.push_back(pit->second);
+                        if (pit != ctx.graph.id_to_path.end()) caller_files.push_back(pit->second);
                     }
-                result = {{"name",         sr->GetValue(0,0).ToString()},
-                          {"kind",         sr->GetValue(1,0).ToString()},
-                          {"file",         sr->GetValue(2,0).ToString()},
-                          {"line",         sr->GetValue(3,0).GetValue<int32_t>()},
-                          {"signature",    sr->GetValue(4,0).ToString()},
+                result = {{"name", sr->GetValue(0, 0).ToString()},
+                          {"kind", sr->GetValue(1, 0).ToString()},
+                          {"file", sr->GetValue(2, 0).ToString()},
+                          {"line", sr->GetValue(3, 0).GetValue<int32_t>()},
+                          {"signature", sr->GetValue(4, 0).ToString()},
                           {"caller_files", caller_files}};
             }
         }
@@ -397,11 +965,11 @@ static std::string handle_request(const std::string& method, const std::string& 
                 auto b = json::parse(body);
                 ref = b.value("ref", "HEAD");
             }
-        } catch (...) {}
+        } catch (...) {
+        }
 
         std::string root = ctx.cfg.project_root.string();
-        if (!axon::is_git_repo(root))
-            return json{{"error","Not a git repository"}}.dump();
+        if (!axon::is_git_repo(root)) return json{{"error", "Not a git repository"}}.dump();
 
         auto diffs = axon::get_git_diffs(root, ref);
         json changed_files = json::array();
@@ -411,10 +979,15 @@ static std::string handle_request(const std::string& method, const std::string& 
             changed_files.push_back(diff.path);
             if (!ctx.db_ready() || diff.hunks.empty()) continue;
             auto sq2 = [&](const std::string& s) -> std::string {
-                std::string o; for (char c : s) { if (c=='\'') o+='\''; o+=c; } return o;
+                std::string o;
+                for (char c : s) {
+                    if (c == '\'') o += '\'';
+                    o += c;
+                }
+                return o;
             };
-            auto fid_res = ctx.db->conn().Query(
-                "SELECT id FROM files WHERE path = '" + sq2(diff.path) + "'");
+            auto fid_res =
+                ctx.db->conn().Query("SELECT id FROM files WHERE path = '" + sq2(diff.path) + "'");
             if (fid_res->HasError() || fid_res->RowCount() == 0) continue;
             int64_t file_id = fid_res->GetValue<int64_t>(0, 0);
             for (const auto& hunk : diff.hunks) {
@@ -425,14 +998,16 @@ static std::string handle_request(const std::string& method, const std::string& 
                     " AND end_line >= " + std::to_string(hunk.start_line));
                 if (sym_res->HasError()) continue;
                 for (duckdb::idx_t i = 0; i < sym_res->RowCount(); i++)
-                    affected_symbols.push_back({{"name", sym_res->GetValue(0,i).ToString()},
-                                               {"kind", sym_res->GetValue(1,i).ToString()},
-                                               {"file", diff.path},
-                                               {"line", sym_res->GetValue(2,i).GetValue<int32_t>()}});
+                    affected_symbols.push_back(
+                        {{"name", sym_res->GetValue(0, i).ToString()},
+                         {"kind", sym_res->GetValue(1, i).ToString()},
+                         {"file", diff.path},
+                         {"line", sym_res->GetValue(2, i).GetValue<int32_t>()}});
             }
         }
-        return json{{"ref", ref}, {"changed_files", changed_files},
-                   {"affected_symbols", affected_symbols}}.dump();
+        return json{
+            {"ref", ref}, {"changed_files", changed_files}, {"affected_symbols", affected_symbols}}
+            .dump();
     }
 
     // GET /api/observations?q=<text>&limit=N
@@ -447,29 +1022,36 @@ static std::string handle_request(const std::string& method, const std::string& 
                 auto emb = ctx.model->embed(q);
                 std::ostringstream vs;
                 vs << "[";
-                for (size_t i = 0; i < emb.size(); i++) { if (i) vs << ","; vs << emb[i]; }
+                for (size_t i = 0; i < emb.size(); i++) {
+                    if (i) vs << ",";
+                    vs << emb[i];
+                }
                 vs << "]";
                 auto res = ctx.db->conn().Query(
                     "SELECT id, content, file_path, created_at FROM observations "
                     "WHERE embedding IS NOT NULL "
-                    "ORDER BY array_cosine_similarity(embedding, " + vs.str() + "::FLOAT[768]) DESC "
-                    "LIMIT " + std::to_string(limit));
+                    "ORDER BY array_cosine_similarity(embedding, " +
+                    vs.str() +
+                    "::FLOAT[768]) DESC "
+                    "LIMIT " +
+                    std::to_string(limit));
                 if (!res->HasError())
                     for (duckdb::idx_t i = 0; i < res->RowCount(); i++)
-                        obs.push_back({{"id",         res->GetValue<int64_t>(0, i)},
-                                      {"content",    res->GetValue(1, i).ToString()},
-                                      {"file_path",  res->GetValue(2, i).ToString()},
-                                      {"created_at", res->GetValue(3, i).ToString()}});
+                        obs.push_back({{"id", res->GetValue<int64_t>(0, i)},
+                                       {"content", res->GetValue(1, i).ToString()},
+                                       {"file_path", res->GetValue(2, i).ToString()},
+                                       {"created_at", res->GetValue(3, i).ToString()}});
             } else {
                 auto res = ctx.db->conn().Query(
                     "SELECT id, content, file_path, created_at FROM observations "
-                    "ORDER BY created_at DESC LIMIT " + std::to_string(limit));
+                    "ORDER BY created_at DESC LIMIT " +
+                    std::to_string(limit));
                 if (!res->HasError())
                     for (duckdb::idx_t i = 0; i < res->RowCount(); i++)
-                        obs.push_back({{"id",         res->GetValue<int64_t>(0, i)},
-                                      {"content",    res->GetValue(1, i).ToString()},
-                                      {"file_path",  res->GetValue(2, i).ToString()},
-                                      {"created_at", res->GetValue(3, i).ToString()}});
+                        obs.push_back({{"id", res->GetValue<int64_t>(0, i)},
+                                       {"content", res->GetValue(1, i).ToString()},
+                                       {"file_path", res->GetValue(2, i).ToString()},
+                                       {"created_at", res->GetValue(3, i).ToString()}});
             }
         }
         return json{{"observations", obs}, {"count", (int)obs.size()}}.dump();
@@ -482,8 +1064,14 @@ static std::string handle_request(const std::string& method, const std::string& 
         std::string pivots_param = url_decode(get_query_param(query, "pivots"));
         int budget = budget_str.empty() ? 8000 : std::stoi(budget_str);
 
-        if (q.empty() || !ctx.db_ready())
-            return json{{"error", "q parameter required and DB must be ready"}}.dump();
+        if (q.empty()) {
+            http_status = 400;
+            return json{{"error", "q parameter required"}}.dump();
+        }
+        if (!ctx.db_ready()) {
+            http_status = 503;
+            return json{{"error", "DB not ready. Run axon index first."}}.dump();
+        }
 
         std::vector<std::string> explicit_pivots;
         if (!pivots_param.empty()) {
@@ -493,88 +1081,156 @@ static std::string handle_request(const std::string& method, const std::string& 
                 if (!pivot.empty()) explicit_pivots.push_back(pivot);
         }
 
-        if (!ctx.model_ready())
-            return json{{"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}.dump();
+        auto capsule_to_json = [](const axon::ContextCapsule& c,
+                                  const char* cache_state) -> std::string {
+            json pivot_files = json::array();
+            for (const auto& f : c.pivot_files)
+                pivot_files.push_back({{"path", f.path},
+                                       {"content", f.content},
+                                       {"source_ref", f.source_ref},
+                                       {"expand_command", f.expand_command},
+                                       {"is_skeleton", f.is_skeleton},
+                                       {"token_estimate", f.token_estimate}});
+            json support_files = json::array();
+            for (const auto& f : c.support_files)
+                support_files.push_back({{"path", f.path},
+                                         {"content", f.content},
+                                         {"source_ref", f.source_ref},
+                                         {"expand_command", f.expand_command},
+                                         {"is_skeleton", f.is_skeleton},
+                                         {"token_estimate", f.token_estimate}});
+            json cap = {{"query", c.query},
+                        {"pivot_files", pivot_files},
+                        {"support_files", support_files},
+                        {"token_estimate", c.token_estimate},
+                        {"compression",
+                         {{"input_tokens", c.compression_input_tokens},
+                          {"output_tokens", c.compression_output_tokens},
+                          {"tokens_saved", c.compression_tokens_saved}}},
+                        {"ccr_artifact_ids", c.ccr_artifact_ids},
+                        {"total_files", c.total_files}};
+            if (cache_state) cap["cache"] = cache_state;
+            return json{{"capsule", cap}}.dump();
+        };
 
-        auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model,
-                                              ctx.graph, ctx.cfg.project_root, budget);
+        // Same cache policy as the MCP handler: only query-driven capsules are
+        // eligible (explicit pivots steer assembly and must not reuse entries
+        // generated for the implicit-pivot path). Hits don't need the model.
+        const std::string epoch = axon::current_project_epoch(*ctx.db);
+        const bool eligible_for_cache = explicit_pivots.empty();
+        std::string cache_key;
+        if (eligible_for_cache) {
+            cache_key = axon::compute_capsule_cache_key(q, budget, epoch, axon::VERSION);
+            if (auto hit = axon::capsule_cache_lookup(*ctx.db, cache_key, epoch))
+                return capsule_to_json(*hit, "hit");
+        }
 
-        json pivot_files = json::array();
-        for (const auto& f : capsule.pivot_files)
-            pivot_files.push_back({{"path", f.path}, {"content", f.content},
-                                   {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
+        if (!ctx.model_ready()) {
+            http_status = 503;
+            return json{
+                {"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}
+                .dump();
+        }
 
-        json support_files = json::array();
-        for (const auto& f : capsule.support_files)
-            support_files.push_back({{"path", f.path}, {"content", f.content},
-                                     {"is_skeleton", f.is_skeleton}, {"token_estimate", f.token_estimate}});
+        auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model, ctx.graph,
+                                              ctx.cfg.project_root, budget);
+        if (eligible_for_cache) axon::capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
 
-        return json{{"capsule", {{"query",          capsule.query},
-                                 {"pivot_files",    pivot_files},
-                                 {"support_files",  support_files},
-                                 {"token_estimate", capsule.token_estimate},
-                                 {"total_files",    capsule.total_files}}}}.dump();
+        return capsule_to_json(capsule, nullptr);
+    }
+
+    // GET /api/artifact/<artifact_id>
+    if (method == "GET" && path.rfind("/api/artifact/", 0) == 0) {
+        std::string artifact_id = url_decode(path.substr(std::string("/api/artifact/").size()));
+        std::optional<axon::CcrArtifact> artifact;
+        if (ctx.db_ready()) artifact = axon::ccr_retrieve_artifact(*ctx.db, artifact_id);
+        // Fall back to the file sidecar (populated by `axon filter` while
+        // another process held the DB lock).
+        if (!artifact)
+            artifact = axon::ccr_retrieve_artifact_file(ctx.cfg.axon_dir / "ccr", artifact_id);
+        if (!artifact) {
+            if (!ctx.db_ready()) {
+                http_status = 503;
+                return json{{"error", "DB not ready"}}.dump();
+            }
+            http_status = 404;
+            return json{{"error", "artifact not found"}, {"artifact_id", artifact_id}}.dump();
+        }
+        return json{{"artifact",
+                     {{"artifact_id", artifact->artifact_id},
+                      {"kind", artifact->kind},
+                      {"source_ref", artifact->source_ref},
+                      {"content", artifact->content},
+                      {"token_estimate", artifact->token_estimate}}}}
+            .dump();
     }
 
     // ── Dialogue Layer HTTP endpoints ─────────────────────────────────────────
 
     // GET /api/threads
     if (method == "GET" && path == "/api/threads") {
-        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
         auto threads = axon::thread_list(*ctx.db);
         json result = json::array();
         for (const auto& t : threads)
-            result.push_back({{"id",t.id},{"name",t.name},{"kind",t.kind},{"created_at",t.created_at}});
+            result.push_back(
+                {{"id", t.id}, {"name", t.name}, {"kind", t.kind}, {"created_at", t.created_at}});
         return json{{"threads", result}, {"count", (int)result.size()}}.dump();
     }
 
     // GET /api/threads/:id/sessions
     if (method == "GET" && path.rfind("/api/threads/", 0) == 0 &&
         path.find("/sessions") != std::string::npos) {
-        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
         auto slash = path.rfind('/', path.size() - 9);
         int64_t thread_id = std::stoll(path.substr(13, slash - 13));
         auto sessions = axon::thread_get_sessions(*ctx.db, thread_id);
         json result = json::array();
         for (const auto& s : sessions)
-            result.push_back({{"id",s.id},{"label",s.label},
-                              {"started_at",s.started_at},{"ended_at",s.ended_at},
-                              {"digest",s.digest}});
+            result.push_back({{"id", s.id},
+                              {"label", s.label},
+                              {"started_at", s.started_at},
+                              {"ended_at", s.ended_at},
+                              {"digest", s.digest}});
         return json{{"sessions", result}}.dump();
     }
 
     // GET /api/sessions/:id/turns
     if (method == "GET" && path.rfind("/api/sessions/", 0) == 0 &&
         path.find("/turns") != std::string::npos) {
-        if (!ctx.db_ready()) return json{{"error","DB not ready"}}.dump();
+        if (!ctx.db_ready()) return json{{"error", "DB not ready"}}.dump();
         int64_t session_id = std::stoll(path.substr(14, path.find("/turns") - 14));
         auto turns = axon::session_get(*ctx.db, session_id);
         json result = json::array();
         for (const auto& t : turns)
-            result.push_back({{"id",t.id},{"role",t.role},{"content",t.content},{"ts",t.ts}});
+            result.push_back(
+                {{"id", t.id}, {"role", t.role}, {"content", t.content}, {"ts", t.ts}});
         return json{{"turns", result}, {"session_id", session_id}}.dump();
     }
 
     // GET /api/dialogue/search?q=<query>&limit=N&thread_id=N
     if (method == "GET" && path == "/api/dialogue/search") {
         if (!ctx.db_ready() || !ctx.model_ready())
-            return json{{"error","DB or model not ready"}}.dump();
-        std::string q     = url_decode(get_query_param(query, "q"));
-        std::string lim   = get_query_param(query, "limit");
+            return json{{"error", "DB or model not ready"}}.dump();
+        std::string q = url_decode(get_query_param(query, "q"));
+        std::string lim = get_query_param(query, "limit");
         std::string tid_s = get_query_param(query, "thread_id");
-        int limit         = lim.empty()   ? 5  : std::stoi(lim);
+        int limit = lim.empty() ? 5 : std::stoi(lim);
         int64_t thread_id = tid_s.empty() ? -1 : std::stoll(tid_s);
         auto hits = axon::turn_search(*ctx.db, *ctx.model, q, limit, thread_id);
         json result = json::array();
         for (const auto& h : hits)
-            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
-                              {"content",h.turn.content},{"ts",h.turn.ts},
-                              {"session",h.session_label},{"thread",h.thread_name},
-                              {"score",h.score}});
+            result.push_back({{"turn_id", h.turn.id},
+                              {"role", h.turn.role},
+                              {"content", h.turn.content},
+                              {"ts", h.turn.ts},
+                              {"session", h.session_label},
+                              {"thread", h.thread_name},
+                              {"score", h.score}});
         return json{{"results", result}, {"count", (int)result.size()}}.dump();
     }
 
-    return json{{"error","Not found"}}.dump();
+    return json{{"error", "Not found"}}.dump();
 }
 
 void run_http(ServerContext& ctx, const HttpConfig& cfg) {
@@ -588,14 +1244,18 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
 #endif
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) { std::cerr << "socket() failed\n"; return; }
+    if (server_fd < 0) {
+        std::cerr << "socket() failed\n";
+        return;
+    }
 
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt),
+               sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(cfg.port);
+    addr.sin_port = htons(cfg.port);
     inet_pton(AF_INET, cfg.host.c_str(), &addr.sin_addr);
 
     if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -604,14 +1264,20 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
         return;
     }
     listen(server_fd, 16);
-    std::cout << "Axon HTTP API listening on http://" << cfg.host << ":" << cfg.port << "\n";
-    std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  /api/detect-changes  /api/observations  /api/capsule\n";
+    std::cout << "Axon Web listening on http://" << cfg.host << ":" << cfg.port << "\n";
+    std::cout << "Endpoints: /api/graph  /api/overview  /api/search?q=  /api/symbol/<name>  "
+                 "/api/detect-changes  /api/observations  /api/capsule\n";
+
+    // Same peer-proxy mechanism as stdio serves: a localhost listener that
+    // executes tool calls for latecomer serves while this process holds the
+    // DuckDB write lock (always on 127.0.0.1 even when --host is public).
+    if (start_peer_listener(ctx) && ctx.db_ready()) register_self_as_owner(ctx, ctx.peer_port);
 
     while (g_running) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(server_fd, &fds);
-        timeval tv{1, 0};  // 1s timeout to check g_running
+        timeval tv{1, 0}; // 1s timeout to check g_running
         if (select(server_fd + 1, &fds, nullptr, nullptr, &tv) <= 0) continue;
 
         int client_fd = accept(server_fd, nullptr, nullptr);
@@ -626,15 +1292,43 @@ void run_http(ServerContext& ctx, const HttpConfig& cfg) {
             parse_request_line(request, method, path, query, body);
 
             std::string response_body;
+            int http_status = 200;
+            auto start = std::chrono::steady_clock::now();
+            // Serialize against the peer listener thread, which may be
+            // executing a proxied tool call on the same ctx right now.
+            std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
             if (method == "OPTIONS") {
                 response_body = "";
             } else {
-                response_body = handle_request(method, path, query, body, ctx, cfg);
+                response_body =
+                    handle_request(method, path, query, body,
+                                   request_header(request, "Authorization"), ctx, cfg, http_status);
             }
-            build_response(client_fd, 200, response_body);
+            if (path != "/api/metrics") {
+                int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - start)
+                                         .count();
+                int64_t tokens = static_cast<int64_t>(response_body.size() / 4);
+                bool cache_hit = response_body.find("\"cache\":\"hit\"") != std::string::npos;
+                axon::record_telemetry(
+                    ctx.cfg, ctx.db.get(),
+                    {path, "http", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""});
+            }
+            ctx.last_tool_activity = std::chrono::steady_clock::now();
+            if (ctx.last_tool_activity - ctx.last_owner_heartbeat >= std::chrono::seconds(60)) {
+                heartbeat_self_as_owner(ctx);
+                ctx.last_owner_heartbeat = ctx.last_tool_activity;
+            }
+            std::string content_type =
+                (path == "/" || path == "/index.html" || path == "/portfolio") ? "text/html"
+                                                                               : "application/json";
+            build_response(client_fd, http_status, response_body, content_type);
         }
         close(client_fd);
     }
+
+    unregister_self_as_owner(ctx);
+    stop_peer_listener();
 
     close(server_fd);
 #ifdef _WIN32

@@ -3,7 +3,7 @@
 ## Getting Started
 
 **Q: Do I need the embedding model to use axon?**
-No. All 26 MCP tools work without it. The embedding model only enables `search_memory`, `turn_search`, `dialogue_context` and the semantic-query path of `get_context_capsule`. Without it, `get_context_capsule` falls back to graph-based pivot selection.
+No. Most of the 41 MCP tools work without it. The embedding model enables `search_memory`, `turn_search`, `dialogue_context` and the semantic-query path of `get_context_capsule`. Without it, `get_context_capsule` falls back to graph-based pivot selection.
 
 **Q: Can I use axon with editors other than Claude Code?**
 Yes. Axon speaks stdio JSON-RPC 2.0 (the MCP protocol). Any MCP-compatible client works. HTTP mode also exposes a plain REST API.
@@ -25,7 +25,7 @@ No. Everything runs locally. The embedding model runs via llama.cpp on your CPU.
 Use `get_overview` at the start of a session on an unfamiliar codebase — it shows the most connected files and most-referenced symbols, like a map. Use `get_context_capsule` when you have a specific query or task.
 
 **Q: Why does `get_callers` return files, not call sites?**
-Axon's edges are file-granular (not symbol-granular) in the current release. `get_callers` tells you which files import the defining file. To narrow to call sites, follow up with `get_skeleton(caller_files)`.
+By default, Axon's dependency edges are file-granular. When `granularity = "symbol"` is enabled and the project is reindexed, `get_callers` also returns `caller_symbols`. To narrow broad file-level results, follow up with `get_skeleton(caller_files)` or expand from a capsule file's `expand_command`.
 
 **Q: How does `detect_changes` work?**
 It runs `git diff --unified=0` from the specified ref, parses hunk positions, and finds symbols whose line ranges overlap with the diff. Then it runs `get_impact_graph` on the changed files to return downstream impact.
@@ -50,7 +50,7 @@ In `.axon/index.duckdb` at the project root (detected via `.git` walk-up).
 Pass `token_budget` to `get_context_capsule`. Default is 8000 tokens.
 
 **Q: Can I configure which file extensions axon indexes?**
-Yes, via `.axon/config.toml`. See `index_routes`, `exclude_patterns`, and `extensions` keys.
+Not yet. Axon indexes the built-in supported extensions and uses `.axonignore` for path-level exclusions. `.axon/config.toml` currently supports `granularity`, `index_routes`, `fts_enabled`, `token_budget`, `telemetry`, and `capsule_compression`.
 
 **Q: How do I add a project to a named group?**
 Edit `~/.axon/registry.json` directly, or use `axon serve --group=<name>` — axon will auto-register the current repo and associate it with the group.
@@ -60,7 +60,7 @@ Edit `~/.axon/registry.json` directly, or use `axon serve --group=<name>` — ax
 ## Troubleshooting
 
 **Q: `axon: error while loading shared libraries: libduckdb.so`**
-Set `LD_LIBRARY_PATH`:
+Release packages are relocatable and should not need `LD_LIBRARY_PATH`. For source-tree runs, set it manually:
 ```bash
 export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
 ```
@@ -72,10 +72,10 @@ git submodule update --init --recursive
 ```
 
 **Q: `search_memory` returns nothing**
-The embedding model is not loaded. Check that `models/nomic-embed-text-v1.5.Q4_K_M.gguf` exists and `AXON_MODEL_PATH` points to it.
+The embedding model is not loaded. Check that `models/nomic-embed-text-v1.5.Q4_K_M.gguf` exists and `AXON_EMBEDDING_MODEL` points to it when using a custom path.
 
 **Q: Claude Code shows axon as disconnected**
-1. Check `LD_LIBRARY_PATH` is set in the MCP `env` block in `~/.claude.json`
+1. If running from a source tree, check `LD_LIBRARY_PATH` is set in the MCP `env` block in `~/.claude.json`
 2. Run `axon serve` manually and check for errors
 3. Verify the binary path is correct
 

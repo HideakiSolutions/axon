@@ -11,9 +11,8 @@ namespace fs = std::filesystem;
 
 static fs::path make_temp_db() {
     static int counter = 0;
-    return fs::temp_directory_path() /
-           ("axon_sem_test_" + std::to_string(::getpid()) + "_" +
-            std::to_string(++counter) + ".duckdb");
+    return fs::temp_directory_path() / ("axon_sem_test_" + std::to_string(::getpid()) + "_" +
+                                        std::to_string(++counter) + ".duckdb");
 }
 
 // ── Fixture: loads the real embedding model, skips when unavailable ───────────
@@ -21,21 +20,17 @@ static fs::path make_temp_db() {
 class SemanticTest : public ::testing::Test {
 protected:
     fs::path db_path;
-    std::unique_ptr<axon::Database>       db;
+    std::unique_ptr<axon::Database> db;
     std::unique_ptr<axon::EmbeddingModel> model;
 
     void SetUp() override {
-        fs::path mp;
-        if (const char* env = std::getenv("AXON_EMBEDDING_MODEL")) {
-            mp = env;
-        } else {
-            // __FILE__ is .../tests/unit/test_semantic.cpp
-            // repo root is three levels up → models/ dir
-            mp = fs::path(__FILE__).parent_path()
-                     .parent_path().parent_path()
-                 / "models" / "nomic-embed-text-v1.5.Q4_K_M.gguf";
+        const char* env = std::getenv("AXON_EMBEDDING_MODEL");
+        if (!env || std::string(env).empty()) {
+            GTEST_SKIP() << "Set AXON_EMBEDDING_MODEL to a GGUF embedding model "
+                         << "to enable semantic tests";
         }
 
+        fs::path mp = env;
         if (!fs::exists(mp)) {
             GTEST_SKIP() << "Embedding model not found at " << mp.string()
                          << " — set AXON_EMBEDDING_MODEL to enable semantic tests";
@@ -56,16 +51,15 @@ protected:
         fs::remove(db_path);
     }
 
-    int64_t make_session(const std::string& thread_name = "t",
-                         const std::string& label       = "s") {
+    int64_t make_session(const std::string& thread_name = "t", const std::string& label = "s") {
         int64_t tid = axon::thread_create(*db, thread_name);
         return axon::session_start(*db, tid, label);
     }
 
     int64_t insert_file(const std::string& path) {
-        db->conn().Query(
-            "INSERT INTO files (id, path, language, hash, byte_size) VALUES "
-            "(nextval('seq_id'), '" + path + "', 'typescript', 'h1', 500)");
+        db->conn().Query("INSERT INTO files (id, path, language, hash, byte_size) VALUES "
+                         "(nextval('seq_id'), '" +
+                         path + "', 'typescript', 'h1', 500)");
         auto r = db->conn().Query("SELECT id FROM files WHERE path = '" + path + "'");
         return r->GetValue<int64_t>(0, 0);
     }
@@ -99,7 +93,7 @@ TEST_F(SemanticTest, EmbedPendingTurns_IdempotentWhenAlreadyEmbedded) {
     EXPECT_EQ(r->GetValue<int64_t>(0, 0), 0);
 
     int drained = axon::embed_pending_turns(*db, *model);
-    EXPECT_EQ(drained, 0);  // nothing pending
+    EXPECT_EQ(drained, 0); // nothing pending
 }
 
 // =============================================================================
@@ -156,7 +150,7 @@ TEST_F(SemanticTest, TurnSearch_EmptyWhenNoEmbeddings) {
     axon::turn_add(*db, nullptr, sid, "user", "some content about auth tokens");
 
     auto hits = axon::turn_search(*db, *model, "auth tokens", 5);
-    EXPECT_EQ(hits.size(), 0u);  // WHERE embedding IS NOT NULL filters them out
+    EXPECT_EQ(hits.size(), 0u); // WHERE embedding IS NOT NULL filters them out
 }
 
 // =============================================================================
@@ -183,14 +177,14 @@ TEST_F(SemanticTest, TurnsForFiles_RespectsTokenBudget) {
     // Each turn: ~200 chars ≈ 50 tokens
     std::string body(200, 'x');
     for (int i = 0; i < 5; i++) {
-        int64_t tid = axon::turn_add(*db, model.get(), sid, "user",
-                                     "Refactor db.cpp query: " + body);
+        int64_t tid =
+            axon::turn_add(*db, model.get(), sid, "user", "Refactor db.cpp query: " + body);
         axon::anchor_link(*db, tid, fid, -1, "mentions");
     }
 
     // Budget = 75 tokens → fits at most 1 turn of ~50 tokens
     auto hits = axon::turns_for_files(*db, *model, "database query", {fid}, 75);
-    EXPECT_LE(hits.size(), 2u);  // at most 1-2 turns within 75-token budget
+    EXPECT_LE(hits.size(), 2u); // at most 1-2 turns within 75-token budget
 }
 
 TEST_F(SemanticTest, TurnsForFiles_EmptyWhenNoAnchors) {
@@ -210,14 +204,14 @@ TEST_F(SemanticTest, SessionEnd_DigestEmbeddingPopulated) {
     int64_t tid = axon::thread_create(*db, "auth-sprint");
     int64_t sid = axon::session_start(*db, tid, "Token TTL review");
 
-    axon::turn_add(*db, model.get(), sid, "user",      "What is the token TTL?");
+    axon::turn_add(*db, model.get(), sid, "user", "What is the token TTL?");
     axon::turn_add(*db, model.get(), sid, "assistant", "7 days — set in validateToken.");
 
     axon::session_end(*db, sid, model.get(), true);
 
-    auto r = db->conn().Query(
-        "SELECT digest IS NOT NULL, digest_embedding IS NOT NULL"
-        " FROM sessions WHERE id = " + std::to_string(sid));
+    auto r = db->conn().Query("SELECT digest IS NOT NULL, digest_embedding IS NOT NULL"
+                              " FROM sessions WHERE id = " +
+                              std::to_string(sid));
     ASSERT_EQ(r->RowCount(), 1u);
     EXPECT_TRUE(r->GetValue<bool>(0, 0)) << "digest should be non-null";
     EXPECT_TRUE(r->GetValue<bool>(1, 0)) << "digest_embedding should be non-null";

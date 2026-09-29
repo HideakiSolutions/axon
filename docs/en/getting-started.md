@@ -13,7 +13,8 @@ flowchart TD
     A3[axon index --force] -->|reprocess unchanged files| A
     B --> C{How to serve?}
     C -->|stdio MCP| D[axon serve<br/>Claude Code MCP]
-    C -->|HTTP REST| E[axon serve --http<br/>axon-web frontend]
+    C -->|Web UI + HTTP REST| E[axon web<br/>browser graph explorer]
+    C -->|Language Server| L[axon lsp<br/>editor stdio LSP]
     E -->|--all flag| F[Aggregate all<br/>registered repos]
     E -->|--group=name| G[Aggregate<br/>named group]
     E -->|?mode=symbol| H[Symbol-level graph<br/>function/class/method nodes]
@@ -34,7 +35,7 @@ flowchart TD
 | **Write-through** | Axon hooks that auto-reindex files after every `Edit`/`Write` in Claude Code |
 | **MCP** | Model Context Protocol — the stdio JSON-RPC protocol Claude Code uses to talk to axon |
 | **Granularity** | `"file"` (default) emits file-to-file edges; `"symbol"` adds tree-sitter call graph extraction — `kind='calls'` edges with `from_symbol`/`to_symbol` populated |
-| **Call site** | A `call_expression` AST node — recorded as `CallSite{caller, callee, line}`; the caller is the smallest enclosing symbol whose line range contains it |
+| **Call site** | A call AST node — recorded as `CallSite{caller, callee, qualifier, argument_count, line}`; the caller is the smallest enclosing symbol and callee overloads are ranked by owner type, arity and locality |
 | **Symbol BFS** | Breadth-first traversal over `symbol_incoming` (callers). Expands a pivot symbol to its caller symbols (depth=1) for the capsule |
 
 ---
@@ -81,15 +82,11 @@ Expected output (last lines):
 [100%] Built target axon
 ```
 
-> **Why `-j2`?** The llama.cpp + 13 tree-sitter grammar compilation is memory-intensive. Higher parallelism can lock up shared development hosts. First build: ~10–12 min. Subsequent builds with ccache: ~3 min.
+> **Why `-j2`?** The llama.cpp + 18 tree-sitter grammar compilation is memory-intensive. Higher parallelism can lock up shared development hosts. First build: ~10–12 min. Subsequent builds with ccache: ~3 min.
 
-### Step 3 — Set library path
+### Step 3 — Library path
 
-```bash
-export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib
-# Persist it:
-echo 'export LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib' >> ~/.bashrc
-```
+Release packages are relocatable and should find bundled libraries automatically. For source-tree binaries, set `LD_LIBRARY_PATH=/path/to/axon/third_party/duckdb/lib` only if your shell cannot start `build/axon`.
 
 ### Step 4 — (Optional) Download embedding model
 
@@ -111,10 +108,7 @@ Add to `~/.claude.json`:
   "mcpServers": {
     "axon": {
       "command": "/path/to/axon/build/axon",
-      "args": ["serve"],
-      "env": {
-        "LD_LIBRARY_PATH": "/path/to/axon/third_party/duckdb/lib"
-      }
+      "args": ["serve"]
     }
   }
 }
@@ -170,15 +164,12 @@ What would break if I change src/auth/token.ts?
 
 Claude will call `get_impact_graph` and `get_tests_for` automatically.
 
-### 5. (Optional) Open axon-web
+### 5. (Optional) Open Axon Web
 
 ```bash
-# Start HTTP server (in background)
-axon serve --http --port=7070 &
-
-# In axon-web directory:
-npm run dev
-# Open http://localhost:5173
+# Start browser graph explorer + REST API
+axon web --port=7070
+# Open http://localhost:7070
 ```
 
 ### 6. (Optional) Enable symbol-level granularity
@@ -223,6 +214,8 @@ curl -s "http://localhost:7070/api/graph?mode=symbol" | jq '.edges | length'
 ## What's Next
 
 - [Architecture](architecture.md) — how axon works internally
-- [API Reference](api-reference.md) — all 26 MCP tools with parameters
+- [API Reference](api-reference.md) — all 41 MCP tools with parameters
+- [Native memory operations](native-memory.md) — capture recovery, hybrid retrieval, and typed handoffs
+- [Axon-first context and shell filtering](axon-primary-rtk-optional.md) — keep RTK optional while Axon handles primary context and shell-output optimization
 - [FAQ](faq.md) — common questions
 - [Troubleshooting](troubleshooting.md) — build and runtime problems

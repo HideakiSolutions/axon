@@ -1,6 +1,6 @@
 # Axon Context Engine
 
-Este projeto está indexado pelo axon. Toda exploração de código roteia por MCP tools do axon — Grep/Glob estão bloqueados por hook. Garantia: 76-98% menos tokens sem perda de qualidade.
+Este projeto está indexado pelo axon. Toda exploração de código roteia por MCP tools do axon; Grep/Glob e shell output bruto ruidoso são bloqueados por hook. Garantia: 76-98% menos tokens sem perda de qualidade.
 
 ## Linguagens suportadas (13)
 
@@ -16,7 +16,7 @@ TypeScript, JavaScript, Python, Rust, Go, C#, PHP, Dart, Java, **Bash**, **C++**
 | `get_callers(symbol_name, file_path?, limit?)` | **Debug / root cause.** Backward trace file-granular: dado um símbolo, retorna os arquivos que importam o arquivo-definidor. Narrowing com `get_skeleton(caller_files)` para chegar a call sites. |
 | `get_tests_for(files)` | **Test impact.** Testes (por convenção de path) que importam os arquivos dados. Use antes de mergear. |
 | `get_skeleton(files)` | **Inspeção rápida.** Só assinaturas, sem corpos de função. |
-| `search_memory(query, limit?)` | **Memória cross-session.** Recupera observações salvas. |
+| `search_memory(query, limit?, tags?)` | **Memória cross-session.** Busca híbrida RRF com evidências de ranking. |
 | `save_observation(content, tags?, file_path?)` | **Persistir insight.** Chame após descoberta arquitetural não-óbvia. |
 | `index_paths(paths, prune?)` / `run_pipeline(root?)` | **Reset.** Normalmente desnecessário — write-through é automático via hooks. Use só se o índice parecer corrompido ou após operações em massa fora do Claude Code. |
 
@@ -58,7 +58,7 @@ get_tests_for(files=[arquivos editados])
 
 Hook PostToolUse (`axon-post-edit.sh`) cobre toda mudança no filesystem e o MCP server reconcilia antes de cada tool call — **não é preciso chamar `run_pipeline` entre edições**:
 
-- **Write / Edit / MultiEdit / NotebookEdit** → path entra em `.axon/pending-writes.txt`; drain re-indexa + embeda na próxima tool call.
+- **Write / Edit / MultiEdit / NotebookEdit** → path entra em `.axon/pending-writes.txt`; drain re-indexa + embeda na próxima tool call. Se o cliente ficar ocioso, o fallback automático do próprio projeto drena apenas quando a fila atinge o limiar de idade ou tamanho configurado.
 - **Bash** (rm, mv, git checkout, scripts) → toca `.axon/sync-requested`; walk + BLAKE3-skip + prune detecta deletes/renames/gerados.
 
 ## Build constraints — sempre `-j2`
@@ -74,6 +74,44 @@ Escape (casos justificados, ex: primeira build em máquina ociosa):
 AXON_ALLOW_HIGH_PARALLELISM=1 make -j8
 ```
 
+## Shell output — sempre filtrado
+
+Hook PreToolUse `axon-shell-guard.sh` bloqueia comandos Bash conhecidos por despejar muito texto sem métrica/CCR:
+
+- busca: `rg`, `grep`, `ack`, `ag`
+- diffs: `git diff` completo
+- leituras brutas de source/docs: `cat`, `sed`, `awk`, `nl`
+- testes/build diagnostics: `pytest`, `vitest`, `ctest`, `gtest`, `tsc`
+- lint/package/logs: `eslint`, `ruff`, `prettier`, `npm install`, `journalctl`, `docker logs`, `kubectl logs`
+
+Use MCP para contexto de código:
+```text
+get_context_capsule(query="...", pivot_files=[...], token_budget=...)
+get_skeleton(files=[...])
+```
+
+Use filtros Axon quando precisar rodar o comando:
+```bash
+git diff -- src | axon filter diff --budget=600 --metrics=json
+rg -n "symbol" src | axon filter grep --budget=600 --metrics=json
+pytest tests 2>&1 | axon filter test --budget=700 --metrics=json
+tsc --noEmit 2>&1 | axon filter tsc --budget=500 --metrics=json
+journalctl -n 500 2>&1 | axon filter log --budget=700 --metrics=json
+```
+
+Escape para casos intencionais e pequenos:
+```bash
+AXON_ALLOW_RAW_SHELL=1 sed -n '1,80p' file.cpp
+```
+
+## Subagentes (Agent tool)
+
+Subagentes não herdam a descoberta de tools da sessão principal — apenas a lista de nomes deferred. Contrato para qualquer prompt de Agent neste projeto:
+
+1. **Embuta a instrução de descoberta no prompt**: "exploração de código via `mcp__axon__*` — carregue os schemas com ToolSearch (`select:mcp__axon__get_context_capsule,mcp__axon__get_skeleton,...`) antes do primeiro uso; comece por `get_overview` (repo desconhecido) ou `get_context_capsule(query)`".
+2. **Fallback sem MCP** (harness externo, cron, CI): a CLI `axon` no PATH cobre o essencial — `axon capsule "<query>"`, `axon skeleton <file>`, `<cmd> | axon filter <kind> --budget=N`. Mesmo índice, mesma economia.
+3. **Os hooks valem para subagentes**: Grep/Glob e shell bruto ruidoso são bloqueados também no contexto deles — a mensagem de bloqueio ensina a rota certa, mas embutir o contrato no prompt evita o desvio.
+
 ## Por que
 
-Grep/Glob bloqueados por hook — contexto pré-indexado + grafo de impacto elimina buscas redundantes. Build-guard protege host de paralelismo agressivo. Write-through sincroniza filesystem ↔ índice sem ação manual do agente.
+Grep/Glob e shell bruto ruidoso são bloqueados por hook — contexto pré-indexado, filtros com orçamento, métricas e CCR eliminam buscas redundantes e outputs irreversíveis. Build-guard protege host de paralelismo agressivo. Write-through sincroniza filesystem ↔ índice sem ação manual do agente.

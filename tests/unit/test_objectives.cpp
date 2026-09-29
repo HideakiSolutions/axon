@@ -11,9 +11,8 @@ namespace fs = std::filesystem;
 
 static fs::path make_temp_db() {
     static int counter = 0;
-    return fs::temp_directory_path() /
-           ("axon_obj_test_" + std::to_string(::getpid()) + "_" +
-            std::to_string(++counter) + ".duckdb");
+    return fs::temp_directory_path() / ("axon_obj_test_" + std::to_string(::getpid()) + "_" +
+                                        std::to_string(++counter) + ".duckdb");
 }
 
 class ObjTest : public ::testing::Test {
@@ -31,9 +30,9 @@ protected:
     }
 
     int64_t file_id(const std::string& path) {
-        db->conn().Query(
-            "INSERT INTO files (id, path, language, hash, byte_size) VALUES "
-            "(nextval('seq_id'), '" + path + "', 'typescript', 'hash1', 500)");
+        db->conn().Query("INSERT INTO files (id, path, language, hash, byte_size) VALUES "
+                         "(nextval('seq_id'), '" +
+                         path + "', 'typescript', 'hash1', 500)");
         auto r = db->conn().Query("SELECT id FROM files WHERE path = '" + path + "'");
         return r->GetValue<int64_t>(0, 0);
     }
@@ -59,7 +58,7 @@ TEST(TokenEstimate, FourCharsIsOneToken) {
 }
 
 TEST(TokenEstimate, FiveCharsIsTwoTokens) {
-    EXPECT_EQ(axon::estimate_tokens("abcde"), 2);  // (5+3)/4 = 2
+    EXPECT_EQ(axon::estimate_tokens("abcde"), 2); // (5+3)/4 = 2
 }
 
 TEST(TokenEstimate, Monotonic) {
@@ -84,10 +83,10 @@ TEST_F(ObjTest, DialogueTurnTokenEstimateAccumulates) {
     // Simula o que assemble_capsule faz ao popular related_turns:
     // token_estimate de cada turn é somado ao total da cápsula.
     int64_t sid = make_thread_session();
-    std::string content_a(400, 'a');  // 100 tokens
-    std::string content_b(400, 'b');  // 100 tokens
+    std::string content_a(400, 'a'); // 100 tokens
+    std::string content_b(400, 'b'); // 100 tokens
 
-    axon::turn_add(*db, nullptr, sid, "user",      content_a);
+    axon::turn_add(*db, nullptr, sid, "user", content_a);
     axon::turn_add(*db, nullptr, sid, "assistant", content_b);
 
     auto turns = axon::session_get(*db, sid);
@@ -97,22 +96,81 @@ TEST_F(ObjTest, DialogueTurnTokenEstimateAccumulates) {
     for (const auto& t : turns)
         total_tokens += axon::estimate_tokens(t.content);
 
-    EXPECT_EQ(total_tokens, 200);  // 100 + 100
+    EXPECT_EQ(total_tokens, 200); // 100 + 100
 }
 
 TEST_F(ObjTest, TokenBudgetDoesNotExceedForSmallContent) {
     // Verifica que estimate_tokens(content) <= content.size() sempre.
     // (A fórmula ceil(n/4) < n para n > 1, portanto cápsula < raw bytes.)
     int64_t sid = make_thread_session();
-    std::string large_content(8000, 'z');  // 8 kB raw
+    std::string large_content(8000, 'z'); // 8 kB raw
 
     axon::turn_add(*db, nullptr, sid, "user", large_content);
     auto turns = axon::session_get(*db, sid);
     ASSERT_EQ(turns.size(), 1u);
 
     int tokens = axon::estimate_tokens(turns[0].content);
-    EXPECT_EQ(tokens, 2000);                         // 8000/4
-    EXPECT_LT(tokens, (int)large_content.size());    // tokens < raw bytes
+    EXPECT_EQ(tokens, 2000);                      // 8000/4
+    EXPECT_LT(tokens, (int)large_content.size()); // tokens < raw bytes
+}
+
+TEST_F(ObjTest, CapsuleFileTraceabilitySurvivesCacheRoundTrip) {
+    axon::ContextCapsule capsule;
+    capsule.query = "auth token";
+    capsule.token_estimate = 42;
+    capsule.total_files = 2;
+
+    axon::CapsuleFile pivot;
+    pivot.path = "src/auth/token.ts";
+    pivot.source_ref = "src/auth/token.ts:10-40";
+    pivot.expand_command = "get_skeleton {\"files\":[\"src/auth/token.ts\"]}";
+    pivot.content = "export function token() {}\n";
+    pivot.is_skeleton = false;
+    pivot.token_estimate = axon::estimate_tokens(pivot.content);
+    capsule.pivot_files.push_back(pivot);
+
+    axon::CapsuleFile support;
+    support.path = "src/auth/session.ts";
+    support.source_ref = "src/auth/session.ts";
+    support.expand_command =
+        "get_context_capsule {\"pivot_files\":[\"src/auth/session.ts\"],\"no_cache\":true}";
+    support.content = "export function session();\n";
+    support.is_skeleton = true;
+    support.token_estimate = axon::estimate_tokens(support.content);
+    capsule.support_files.push_back(support);
+
+    axon::capsule_cache_insert(*db, "trace-key", "epoch-1", capsule);
+    auto hit = axon::capsule_cache_lookup(*db, "trace-key", "epoch-1");
+    ASSERT_TRUE(hit.has_value());
+    ASSERT_EQ(hit->pivot_files.size(), 1u);
+    ASSERT_EQ(hit->support_files.size(), 1u);
+
+    EXPECT_EQ(hit->pivot_files[0].source_ref, "src/auth/token.ts:10-40");
+    EXPECT_NE(hit->pivot_files[0].expand_command.find("get_skeleton"), std::string::npos);
+    EXPECT_EQ(hit->support_files[0].source_ref, "src/auth/session.ts");
+    EXPECT_NE(hit->support_files[0].expand_command.find("get_context_capsule"), std::string::npos);
+}
+
+TEST_F(ObjTest, CapsuleCachePruneReapsForeignEpochsOnly) {
+    // Entries keyed to another epoch are unreachable forever (lookup requires
+    // an exact epoch match) — before the prune they just accumulated.
+    axon::ContextCapsule cap;
+    cap.query = "q";
+    cap.token_estimate = 1;
+    axon::capsule_cache_insert(*db, "key-old", "epoch-A", cap);
+    axon::capsule_cache_insert(*db, "key-older", "epoch-A2", cap);
+    axon::capsule_cache_insert(*db, "key-cur", "epoch-B", cap);
+
+    EXPECT_EQ(axon::capsule_cache_prune(*db, "epoch-B"), 2);
+
+    EXPECT_FALSE(axon::capsule_cache_lookup(*db, "key-old", "epoch-A").has_value());
+    EXPECT_TRUE(axon::capsule_cache_lookup(*db, "key-cur", "epoch-B").has_value());
+
+    // Idempotent: nothing foreign left to reap.
+    EXPECT_EQ(axon::capsule_cache_prune(*db, "epoch-B"), 0);
+
+    auto count = db->conn().Query("SELECT COUNT(*) FROM capsule_cache");
+    EXPECT_EQ(count->GetValue<int64_t>(0, 0), 1);
 }
 
 // ── Pending embed tracking: turns sem modelo → embedding IS NULL ──────────────
@@ -132,6 +190,48 @@ TEST_F(ObjTest, EmbedPendingCountZeroWhenNoNullEmbeddings) {
     int64_t sid = make_thread_session();
     auto r = db->conn().Query("SELECT COUNT(*) FROM turns WHERE embedding IS NULL");
     EXPECT_EQ(r->GetValue<int64_t>(0, 0), 0);
+}
+
+TEST_F(ObjTest, ObservationTagsRequireEveryRequestedTag) {
+    db->conn().Query("INSERT INTO observations (id, content, created_at) VALUES "
+                     "(nextval('seq_id'), 'both', now()), (nextval('seq_id'), 'only-one', now()), "
+                     "(nextval('seq_id'), 'untagged', now())");
+    auto ids = db->conn().Query("SELECT id, content FROM observations ORDER BY id");
+    const auto both_id = ids->GetValue<int64_t>(0, 0);
+    const auto one_id = ids->GetValue<int64_t>(0, 1);
+
+    auto insert =
+        db->conn().Prepare("INSERT INTO observation_tags (observation_id, tag) VALUES ($1, $2)");
+    insert->Execute(both_id, "backend");
+    insert->Execute(both_id, "security");
+    insert->Execute(one_id, "backend");
+
+    auto filtered =
+        db->conn().Query("SELECT o.content FROM observations o "
+                         "WHERE (SELECT COUNT(DISTINCT ot.tag) FROM observation_tags ot "
+                         "       WHERE ot.observation_id = o.id "
+                         "         AND ot.tag IN ('backend', 'security')) = 2");
+    ASSERT_FALSE(filtered->HasError()) << filtered->GetError();
+    ASSERT_EQ(filtered->RowCount(), 1u);
+    EXPECT_EQ(filtered->GetValue(0, 0).ToString(), "both");
+}
+
+TEST_F(ObjTest, ObservationTagsAreUniqueAndExistingRowsRemainValid) {
+    db->conn().Query("INSERT INTO observations (id, content, created_at) "
+                     "VALUES (nextval('seq_id'), 'legacy-row', now())");
+    auto id = db->conn()
+                  .Query("SELECT id FROM observations WHERE content = 'legacy-row'")
+                  ->GetValue<int64_t>(0, 0);
+
+    auto first = db->conn().Query("INSERT INTO observation_tags VALUES (" + std::to_string(id) +
+                                  ", 'migration')");
+    ASSERT_FALSE(first->HasError()) << first->GetError();
+    auto duplicate = db->conn().Query("INSERT INTO observation_tags VALUES (" + std::to_string(id) +
+                                      ", 'migration')");
+    EXPECT_TRUE(duplicate->HasError());
+
+    auto rows = db->conn().Query("SELECT COUNT(*) FROM observations");
+    EXPECT_EQ(rows->GetValue<int64_t>(0, 0), 1);
 }
 
 // =============================================================================
@@ -161,7 +261,7 @@ TEST_F(ObjTest, VerbatimBackslashesAndNewlines) {
 // ── Isolamento de sessões: turns de sessões distintas não vazam ───────────────
 
 TEST_F(ObjTest, SessionIsolation) {
-    int64_t tid  = axon::thread_create(*db, "t");
+    int64_t tid = axon::thread_create(*db, "t");
     int64_t sid1 = axon::session_start(*db, tid, "session-1");
     int64_t sid2 = axon::session_start(*db, tid, "session-2");
 
@@ -204,13 +304,13 @@ TEST_F(ObjTest, AnchorDeduplicationSameFileTwice) {
 
     // Content mentions "token.ts" twice
     int64_t turn_id = axon::turn_add(*db, nullptr, sid, "user",
-        "Change token.ts TTL. Also check token.ts imports.");
+                                     "Change token.ts TTL. Also check token.ts imports.");
 
     auto anchors = axon::turn_get_anchors(*db, turn_id);
     int file_anchors = 0;
     for (const auto& a : anchors)
         if (a.file_id == fid) file_anchors++;
-    EXPECT_EQ(file_anchors, 1);  // deduplicado
+    EXPECT_EQ(file_anchors, 1); // deduplicado
 }
 
 // ── Anchor: múltiplos arquivos distintos em um turn ───────────────────────────
@@ -221,7 +321,7 @@ TEST_F(ObjTest, AnchorMultipleDistinctFiles) {
     int64_t sid = make_thread_session();
 
     int64_t turn_id = axon::turn_add(*db, nullptr, sid, "user",
-        "Update token.ts and also refactor db.cpp query paths.");
+                                     "Update token.ts and also refactor db.cpp query paths.");
 
     auto anchors = axon::turn_get_anchors(*db, turn_id);
     std::set<int64_t> found_files;
@@ -238,7 +338,7 @@ TEST_F(ObjTest, DigestADFHasRequiredMarkers) {
     int64_t tid = axon::thread_create(*db, "auth-review");
     int64_t sid = axon::session_start(*db, tid, "Sprint TTL");
 
-    axon::turn_add(*db, nullptr, sid, "user",      "What's the auth token TTL?");
+    axon::turn_add(*db, nullptr, sid, "user", "What's the auth token TTL?");
     axon::turn_add(*db, nullptr, sid, "assistant", "It is 7 days, set in validateToken.");
     axon::session_end(*db, sid, nullptr, true);
 
@@ -247,10 +347,10 @@ TEST_F(ObjTest, DigestADFHasRequiredMarkers) {
     const std::string& d = sessions[0].digest;
 
     EXPECT_FALSE(d.empty());
-    EXPECT_NE(d.find("[SESSION:"),  std::string::npos) << "ADF missing [SESSION:] marker";
+    EXPECT_NE(d.find("[SESSION:"), std::string::npos) << "ADF missing [SESSION:] marker";
     EXPECT_NE(d.find("Sprint TTL"), std::string::npos) << "ADF missing session label";
-    EXPECT_NE(d.find("---"),        std::string::npos) << "ADF missing turn separator";
-    EXPECT_NE(d.find("user:"),      std::string::npos) << "ADF missing user role";
+    EXPECT_NE(d.find("---"), std::string::npos) << "ADF missing turn separator";
+    EXPECT_NE(d.find("user:"), std::string::npos) << "ADF missing user role";
     EXPECT_NE(d.find("assistant:"), std::string::npos) << "ADF missing assistant role";
 }
 
@@ -259,15 +359,14 @@ TEST_F(ObjTest, DigestADFWithAnchorsListsFiles) {
     int64_t tid = axon::thread_create(*db, "t");
     int64_t sid = axon::session_start(*db, tid, "anchor-session");
 
-    axon::turn_add(*db, nullptr, sid, "user",
-                   "The file auth/token.ts has a 7-day TTL.");
+    axon::turn_add(*db, nullptr, sid, "user", "The file auth/token.ts has a 7-day TTL.");
     axon::session_end(*db, sid, nullptr, true);
 
     auto sessions = axon::thread_get_sessions(*db, tid);
     ASSERT_EQ(sessions.size(), 1u);
     // [ANCHORS:] line should mention the detected file
     EXPECT_NE(sessions[0].digest.find("[ANCHORS:"), std::string::npos);
-    EXPECT_NE(sessions[0].digest.find("token.ts"),  std::string::npos);
+    EXPECT_NE(sessions[0].digest.find("token.ts"), std::string::npos);
 }
 
 // ── Digest: sessão vazia produz ADF válido ────────────────────────────────────
@@ -280,7 +379,7 @@ TEST_F(ObjTest, DigestEmptySessionIsValidADF) {
     auto sessions = axon::thread_get_sessions(*db, tid);
     ASSERT_EQ(sessions.size(), 1u);
     EXPECT_NE(sessions[0].digest.find("[SESSION:"), std::string::npos);
-    EXPECT_NE(sessions[0].digest.find("empty"),     std::string::npos);
+    EXPECT_NE(sessions[0].digest.find("empty"), std::string::npos);
 }
 
 // ── Thread kinds preservados exatamente ──────────────────────────────────────
@@ -293,7 +392,8 @@ TEST_F(ObjTest, ThreadKindsRoundtrip) {
     ASSERT_EQ(threads.size(), 3u);
 
     std::set<std::string> kinds;
-    for (const auto& t : threads) kinds.insert(t.kind);
+    for (const auto& t : threads)
+        kinds.insert(t.kind);
     EXPECT_TRUE(kinds.count("project"));
     EXPECT_TRUE(kinds.count("person"));
     EXPECT_TRUE(kinds.count("topic"));
@@ -315,8 +415,8 @@ TEST_F(ObjTest, TurnsReturnedInChronologicalOrder) {
 // ── Anchor manual: kind "decides" e "questions" preservados ──────────────────
 
 TEST_F(ObjTest, ManualAnchorKindRoundtrip) {
-    int64_t fid     = file_id("src/main.ts");
-    int64_t sid     = make_thread_session();
+    int64_t fid = file_id("src/main.ts");
+    int64_t sid = make_thread_session();
     int64_t turn_id = axon::turn_add(*db, nullptr, sid, "user", "context");
 
     axon::anchor_link(*db, turn_id, fid, -1, "decides");
@@ -352,8 +452,22 @@ TEST_F(ObjTest, SessionGetLimitRespected) {
     for (int i = 0; i < 20; i++)
         axon::turn_add(*db, nullptr, sid, "user", "turn " + std::to_string(i));
 
-    auto all    = axon::session_get(*db, sid, 500);
+    auto all = axon::session_get(*db, sid, 500);
     auto capped = axon::session_get(*db, sid, 5);
-    EXPECT_EQ(all.size(),    20u);
-    EXPECT_EQ(capped.size(),  5u);
+    EXPECT_EQ(all.size(), 20u);
+    EXPECT_EQ(capped.size(), 5u);
+}
+
+// ── Cache key: versão do binário invalida entradas pós-upgrade ───────────────
+
+TEST(CapsuleCacheKey, BinaryVersionIsPartOfTheKey) {
+    // Uma cápsula montada pela versão N não pode ser servida pela versão N+1:
+    // a lógica de assembly muda entre releases (observado: entrada estourando
+    // budget cacheada pela 1.2.8 ainda era servida pela 1.2.9).
+    auto old_key = axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.2.8");
+    auto new_key = axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.2.9");
+    EXPECT_NE(old_key, new_key);
+
+    // Determinístico para os mesmos inputs.
+    EXPECT_EQ(old_key, axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.2.8"));
 }

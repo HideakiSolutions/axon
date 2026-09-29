@@ -7,9 +7,11 @@
 // exists yet (a smaller refactor for a future wave).
 
 #include "parser/parser.hpp"
+#include "core/skeleton.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -21,26 +23,88 @@ namespace fs = std::filesystem;
 // language_from_extension() routes correctly. Path is unique per test.
 fs::path write_temp(const std::string& ext, const std::string& content) {
     static int counter = 0;
-    auto p = fs::temp_directory_path() /
-             ("axon_test_" + std::to_string(::getpid()) + "_" +
-              std::to_string(++counter) + "." + ext);
+    auto p = fs::temp_directory_path() / ("axon_test_" + std::to_string(::getpid()) + "_" +
+                                          std::to_string(++counter) + "." + ext);
     std::ofstream f(p);
     f << content;
     return p;
 }
 
 bool has_kind(const std::vector<axon::Symbol>& syms, const std::string& kind) {
-    for (const auto& s : syms) if (s.kind == kind) return true;
+    for (const auto& s : syms)
+        if (s.kind == kind) return true;
     return false;
 }
 
-const axon::Symbol* find_named(const std::vector<axon::Symbol>& syms,
-                               const std::string& name) {
-    for (const auto& s : syms) if (s.name == name) return &s;
+const axon::Symbol* find_named(const std::vector<axon::Symbol>& syms, const std::string& name) {
+    for (const auto& s : syms)
+        if (s.name == name) return &s;
     return nullptr;
 }
 
-}  // namespace
+} // namespace
+
+TEST(ParserGDScript, GodotDeclarationsImportsAndSkeleton) {
+    auto p = write_temp("gd", R"GD(@tool
+class_name Actor
+extends "res://scripts/base_actor.gd"
+
+signal health_changed(value: int)
+enum State { IDLE, MOVING }
+enum { ANONYMOUS }
+const Helper = preload("res://scripts/helper.gd")
+@export var speed: float = 120.0
+
+func _ready() -> void:
+    move_actor(1)
+    helper.run(2)
+
+func move_actor(distance: int) -> void:
+    print(distance)
+
+class Inner:
+    func greet() -> void:
+        print("hello")
+)GD");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+    EXPECT_EQ(pf->language, axon::Language::GDScript);
+    EXPECT_EQ(axon::language_name(pf->language), "gdscript");
+    EXPECT_NE(find_named(pf->symbols, "Actor"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "Inner"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "_ready"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "move_actor"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "health_changed"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "State"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "Helper"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "speed"), nullptr);
+    auto* actor = find_named(pf->symbols, "Actor");
+    ASSERT_NE(actor, nullptr);
+    ASSERT_TRUE(actor->docstring.has_value());
+    EXPECT_NE(actor->docstring->find("@tool"), std::string::npos);
+    EXPECT_TRUE(std::any_of(pf->imports.begin(), pf->imports.end(), [](const auto& edge) {
+        return edge.to_specifier == "res://scripts/base_actor.gd" && edge.kind == "extends";
+    }));
+    EXPECT_TRUE(std::any_of(pf->imports.begin(), pf->imports.end(), [](const auto& edge) {
+        return edge.to_specifier == "res://scripts/helper.gd" && edge.kind == "imports";
+    }));
+    EXPECT_TRUE(std::any_of(pf->calls.begin(), pf->calls.end(), [](const auto& call) {
+        return call.caller_name == "_ready" && call.callee_name == "move_actor";
+    }));
+    EXPECT_TRUE(std::any_of(pf->calls.begin(), pf->calls.end(), [](const auto& call) {
+        return call.caller_name == "_ready" && call.callee_name == "run" &&
+               call.qualifier == "helper" && call.argument_count == 1;
+    }));
+
+    const std::string skeleton = axon::skeletonize(
+        "@tool\nclass_name Actor\nextends Node2D\nfunc _ready():\n    print(42)\n",
+        axon::Language::GDScript);
+    EXPECT_NE(skeleton.find("@tool"), std::string::npos);
+    EXPECT_NE(skeleton.find("class_name Actor"), std::string::npos);
+    EXPECT_NE(skeleton.find("func _ready()"), std::string::npos);
+    EXPECT_EQ(skeleton.find("print(42)"), std::string::npos);
+}
 
 // ── Rust (W1.T03) ──────────────────────────────────────────────────────────
 TEST(ParserRust, TraitsEnumsModulesMacrosImpl) {
@@ -57,15 +121,16 @@ macro_rules! shout { () => { 42 }; }
     fs::remove(p);
     ASSERT_TRUE(pf.has_value());
 
-    EXPECT_TRUE(has_kind(pf->symbols, "trait"))   << "trait_item missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))    << "enum_item missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "module"))  << "mod_item missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "macro"))   << "macro_definition missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "impl"))    << "impl_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "trait")) << "trait_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "module")) << "mod_item missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "macro")) << "macro_definition missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "impl")) << "impl_item missed";
 
     // impl Trait for Type vs inherent impl: names must differ.
     int impl_count = 0;
-    for (const auto& s : pf->symbols) if (s.kind == "impl") impl_count++;
+    for (const auto& s : pf->symbols)
+        if (s.kind == "impl") impl_count++;
     EXPECT_GE(impl_count, 2);
 }
 
@@ -118,8 +183,8 @@ public class UserController {
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_TRUE(has_kind(pf->symbols, "sealed_class")) << "sealed modifier missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "record"))        << "record_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))          << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "record")) << "record_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
 
     auto* ctrl = find_named(pf->symbols, "UserController");
     ASSERT_NE(ctrl, nullptr);
@@ -140,8 +205,42 @@ foo() { echo hi; }
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_NE(find_named(pf->symbols, "AXON_FOO"), nullptr) << "export missed";
-    EXPECT_NE(find_named(pf->symbols, "LIMIT"),    nullptr) << "readonly missed";
-    EXPECT_NE(find_named(pf->symbols, "foo"),      nullptr) << "function missed";
+    EXPECT_NE(find_named(pf->symbols, "LIMIT"), nullptr) << "readonly missed";
+    EXPECT_NE(find_named(pf->symbols, "foo"), nullptr) << "function missed";
+}
+
+// ── Lua ────────────────────────────────────────────────────────────────────
+TEST(ParserLua, FunctionsRequireMethods) {
+    auto p = write_temp("lua", R"LUA(
+local M = require("util.strings")
+local json = require("cjson")
+
+function M.greet(name)
+    return "hi " .. name
+end
+
+function M:fly()
+    return self
+end
+
+local function helper(x)
+    return x * 2
+end
+)LUA");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "function")) << "function_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "method")) << "method_index_expression missed";
+
+    bool saw_strings = false, saw_cjson = false;
+    for (const auto& imp : pf->imports) {
+        if (imp.to_specifier == "util.strings") saw_strings = true;
+        if (imp.to_specifier == "cjson") saw_cjson = true;
+    }
+    EXPECT_TRUE(saw_strings) << "require() import missed";
+    EXPECT_TRUE(saw_cjson) << "require() import missed";
 }
 
 // ── Kotlin (W1.T11) ────────────────────────────────────────────────────────
@@ -166,8 +265,7 @@ class Box {
     // Extension function detection is grammar-shape-sensitive; we accept
     // either flag depending on which child shape tree-sitter-kotlin uses.
     EXPECT_TRUE(has_kind(pf->symbols, "extension_function") ||
-                has_kind(pf->symbols, "suspend_function") ||
-                has_kind(pf->symbols, "function"))
+                has_kind(pf->symbols, "suspend_function") || has_kind(pf->symbols, "function"))
         << "function emitted with no kind variant at all";
 }
 
@@ -189,13 +287,78 @@ async function loadAll() { return []; }
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "internal_module missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))      << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
     EXPECT_TRUE(has_kind(pf->symbols, "async_function"));
 
     auto* svc = find_named(pf->symbols, "UserService");
     ASSERT_NE(svc, nullptr);
     ASSERT_TRUE(svc->docstring.has_value());
     EXPECT_NE(svc->docstring->find("@Injectable"), std::string::npos);
+}
+
+TEST(ParserTypeScript, CallSitesCaptureQualifierAndArgumentCount) {
+    auto p = write_temp("ts", R"TS(
+class Beta {
+  static run(left: string, right: string) {}
+}
+function invoke() {
+  Beta.run("left", "right");
+}
+)TS");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    auto call = std::find_if(pf->calls.begin(), pf->calls.end(), [](const axon::CallSite& value) {
+        return value.callee_name == "run";
+    });
+    ASSERT_NE(call, pf->calls.end());
+    EXPECT_EQ(call->caller_name, "invoke");
+    EXPECT_EQ(call->qualifier, "Beta");
+    EXPECT_EQ(call->argument_count, 2);
+}
+
+TEST(ParserJava, CallSitesCaptureCallNodeNameAndReceiver) {
+    auto p = write_temp("java", R"JAVA(
+class Beta { static void run(String left, String right) {} }
+class Caller {
+    void invoke() { Beta.run("left", "right"); }
+}
+)JAVA");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    auto call = std::find_if(pf->calls.begin(), pf->calls.end(), [](const axon::CallSite& value) {
+        return value.callee_name == "run";
+    });
+    ASSERT_NE(call, pf->calls.end());
+    EXPECT_EQ(call->caller_name, "invoke");
+    EXPECT_EQ(call->qualifier, "Beta");
+    EXPECT_EQ(call->argument_count, 2);
+}
+
+TEST(ParserPython, CallSitesCaptureAttributeReceiverAndArgumentCount) {
+    auto p = write_temp("py", R"PY(
+class Beta:
+    @staticmethod
+    def run(left, right):
+        pass
+
+def invoke():
+    Beta.run("left", "right")
+)PY");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    auto call = std::find_if(pf->calls.begin(), pf->calls.end(), [](const axon::CallSite& value) {
+        return value.callee_name == "run";
+    });
+    ASSERT_NE(call, pf->calls.end());
+    EXPECT_EQ(call->caller_name, "invoke");
+    EXPECT_EQ(call->qualifier, "Beta");
+    EXPECT_EQ(call->argument_count, 2);
 }
 
 // ── Go (W1.T04) ────────────────────────────────────────────────────────────
@@ -222,7 +385,7 @@ func (s *Service) Run() {}
     // The classifier descends into type_spec/type_alias and reads the inner
     // type kind; v0.5.0 collapsed all three onto kind="type".
     EXPECT_TRUE(has_kind(pf->symbols, "interface")) << "interface_type not classified";
-    EXPECT_TRUE(has_kind(pf->symbols, "struct"))    << "struct_type not classified";
+    EXPECT_TRUE(has_kind(pf->symbols, "struct")) << "struct_type not classified";
     // Method on receiver is captured via method_declaration.
     EXPECT_NE(find_named(pf->symbols, "Run"), nullptr);
 }
@@ -246,10 +409,10 @@ namespace MyApp {
     fs::remove(p);
     ASSERT_TRUE(pf.has_value());
 
-    EXPECT_TRUE(has_kind(pf->symbols, "property"))      << "property_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "record"))        << "record_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))          << "enum_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "namespace"))     << "namespace_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "property")) << "property_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "record")) << "record_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "namespace_declaration missed";
 
     auto* ctrl = find_named(pf->symbols, "UserController");
     ASSERT_NE(ctrl, nullptr);
@@ -283,7 +446,7 @@ interface Repository {}
     ASSERT_TRUE(pf.has_value());
 
     EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "namespace_definition missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "trait"))     << "trait_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "trait")) << "trait_declaration missed";
     EXPECT_TRUE(has_kind(pf->symbols, "interface")) << "interface_declaration missed";
 
     auto* ctrl = find_named(pf->symbols, "UserController");
@@ -327,11 +490,10 @@ enum Status { active, inactive }
     // grammar-bump task in docs/audit-2026-05-handoff.md; the assertion
     // here would become EXPECT_TRUE(has_kind(... "mixin")) at that point.
     EXPECT_TRUE(has_kind(pf->symbols, "extension")) << "extension_declaration missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))      << "enum_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_declaration missed";
     // Factory or constructor must exist; some grammar shapes emit one or
     // the other depending on whether the body uses arrow syntax.
-    EXPECT_TRUE(has_kind(pf->symbols, "factory") ||
-                has_kind(pf->symbols, "constructor"))
+    EXPECT_TRUE(has_kind(pf->symbols, "factory") || has_kind(pf->symbols, "constructor"))
         << "neither factory nor constructor kind emitted";
 }
 
@@ -361,10 +523,10 @@ class Array {
     fs::remove(p);
     ASSERT_TRUE(pf.has_value());
 
-    EXPECT_TRUE(has_kind(pf->symbols, "enum"))       << "enum_specifier missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "union"))      << "union_specifier missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "namespace"))  << "namespace_definition missed";
-    EXPECT_TRUE(has_kind(pf->symbols, "friend"))     << "friend_declaration missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "enum")) << "enum_specifier missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "union")) << "union_specifier missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "namespace")) << "namespace_definition missed";
+    EXPECT_TRUE(has_kind(pf->symbols, "friend")) << "friend_declaration missed";
 
     // template_declaration parents have their parameter list folded into
     // the inner class's docstring via template_params_for. The folded text
@@ -377,4 +539,127 @@ class Array {
         << "template parameter list did not reach Array's docstring";
     EXPECT_NE(arr->docstring->find("typename"), std::string::npos)
         << "expected typename T in folded template params, got: " << *arr->docstring;
+}
+
+// ── Nix ────────────────────────────────────────────────────────────────────
+TEST(ParserNix, BindingsImportsInherit) {
+    auto p = write_temp("nix", R"NIX(
+{ pkgs, lib, ... }:
+let
+  helper = x: x + 1;
+  pinned = import ./pinned.nix;
+  channel = import <nixpkgs> {};
+in
+{
+  services.nginx = {
+    enable = true;
+    virtualHosts = {};
+  };
+  environment.systemPackages = with pkgs; [ git vim ];
+  inherit (pkgs) bash coreutils;
+}
+)NIX");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "function"))
+        << "function_expression RHS did not produce function kind";
+    EXPECT_TRUE(has_kind(pf->symbols, "attrset"))
+        << "attrset_expression RHS did not produce attrset kind";
+    EXPECT_TRUE(has_kind(pf->symbols, "variable"))
+        << "inherit clause did not emit per-attr variable symbols";
+
+    auto* helper = find_named(pf->symbols, "helper");
+    ASSERT_NE(helper, nullptr);
+    EXPECT_EQ(helper->kind, "function");
+
+    auto* nginx = find_named(pf->symbols, "services.nginx");
+    ASSERT_NE(nginx, nullptr) << "dotted attrpath name not captured verbatim";
+
+    bool saw_pinned = false, saw_channel = false;
+    for (const auto& e : pf->imports) {
+        if (e.to_specifier == "./pinned.nix") saw_pinned = true;
+        if (e.to_specifier == "nixpkgs") saw_channel = true;
+    }
+    EXPECT_TRUE(saw_pinned) << "`import ./pinned.nix` did not produce import edge";
+    EXPECT_TRUE(saw_channel) << "`import <nixpkgs>` did not strip angle brackets";
+}
+
+// ── Ruby ──────────────────────────────────────────────────────────────────
+TEST(ParserRuby, ModulesClassesMethodsRequire) {
+    auto p = write_temp("rb", R"RB(
+require "json"
+require_relative "support/user"
+
+module Billing
+  class Invoice
+    def total
+      42
+    end
+  end
+end
+)RB");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "module"));
+    EXPECT_TRUE(has_kind(pf->symbols, "class"));
+    EXPECT_TRUE(has_kind(pf->symbols, "method"));
+
+    bool saw_json = false, saw_support = false;
+    for (const auto& e : pf->imports) {
+        if (e.to_specifier == "json") saw_json = true;
+        if (e.to_specifier == "support/user") saw_support = true;
+    }
+    EXPECT_TRUE(saw_json);
+    EXPECT_TRUE(saw_support);
+}
+
+// ── Swift ─────────────────────────────────────────────────────────────────
+TEST(ParserSwift, StructProtocolClassFunctionImports) {
+    auto p = write_temp("swift", R"SWIFT(
+import Foundation
+
+protocol Payable { func pay() }
+struct Invoice { let id: String }
+class BillingService {
+  func total() -> Int { return 42 }
+}
+func makeInvoice() -> Invoice { Invoice(id: "1") }
+)SWIFT");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "protocol"));
+    EXPECT_TRUE(has_kind(pf->symbols, "struct"));
+    EXPECT_TRUE(has_kind(pf->symbols, "class"));
+    EXPECT_TRUE(has_kind(pf->symbols, "function"));
+    EXPECT_FALSE(pf->imports.empty());
+}
+
+// ── Scala ─────────────────────────────────────────────────────────────────
+TEST(ParserScala, TraitsObjectsClassesFunctionsImports) {
+    auto p = write_temp("scala", R"SCALA(
+import scala.concurrent.Future
+
+trait Repository { def find(id: String): String }
+class UserRepository extends Repository {
+  def find(id: String): String = id
+}
+object Main {
+  def run(): Unit = println("ok")
+}
+)SCALA");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    EXPECT_TRUE(has_kind(pf->symbols, "trait"));
+    EXPECT_TRUE(has_kind(pf->symbols, "class"));
+    EXPECT_TRUE(has_kind(pf->symbols, "object"));
+    EXPECT_TRUE(has_kind(pf->symbols, "function"));
+    EXPECT_FALSE(pf->imports.empty());
 }

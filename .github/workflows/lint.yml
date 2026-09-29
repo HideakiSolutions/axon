@@ -13,31 +13,36 @@ concurrency:
 
 jobs:
   shellcheck:
-    name: ShellCheck (scripts/)
+    # Single ShellCheck gate (the duplicate job in ci.yml was removed; this
+    # name matches the required status check on main).
+    name: ShellCheck
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run ShellCheck
-        run: shellcheck scripts/install.sh scripts/hooks/*.sh
+        # scripts/ gates at default severity; tests/ (smoke + e2e harnesses,
+        # added later with pre-existing style infos) gates at warning+.
+        run: |
+          find scripts -name "*.sh" -print0 | xargs -0 shellcheck
+          find tests -name "*.sh" -print0 | xargs -0 shellcheck --severity=warning
 
   clang-format:
     name: clang-format
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format-15
       - name: Check formatting
-        # First-pass enforcement is advisory: report diffs but don't block PRs
-        # while existing source predates the .clang-format file. Flip
-        # `continue-on-error` to false once the back-catalog is normalized.
-        continue-on-error: true
+        # Back-catalog normalized (style: normalize src/ with clang-format 15,
+        # tests/ normalized 2026-07-09); this is a real gate and a required
+        # check on main.
         run: |
-          files=$(find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \))
+          files=$(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \))
           fail=0
           for f in $files; do
             if ! diff -u "$f" <(clang-format-15 "$f") > /dev/null; then
-              echo "::warning file=$f::clang-format would reformat"
+              echo "::error file=$f::clang-format would reformat"
               fail=1
             fi
           done

@@ -8,9 +8,11 @@
 #   1. ~/.claude/hooks/axon-guard.sh       — hook PreToolUse global (bloqueia Grep/Glob)
 #   2. ~/.claude/hooks/axon-auto-index.sh  — hook UserPromptSubmit (sweep horário de deletados)
 #   3. ~/.claude/hooks/axon-post-edit.sh   — hook PostToolUse (write-through síncrono após Write/Edit)
-#   4. ~/.claude/hooks/axon-build-guard.sh — hook PreToolUse (bloqueia make/ninja com -j alto)
-#   5. <project>/.claude/CLAUDE.md         — instruções de uso do axon
-#   6. <project>/.claude/settings.json     — registra hooks para Grep, Glob, Bash (build), UserPromptSubmit, PostToolUse
+#   4. ~/.claude/hooks/axon-queue-drain.sh — fallback limitado para clientes ociosos
+#   5. ~/.claude/hooks/axon-build-guard.sh — hook PreToolUse (bloqueia make/ninja com -j alto)
+#   6. ~/.claude/hooks/axon-shell-guard.sh — hook PreToolUse (bloqueia shell output bruto ruidoso)
+#   7. <project>/.claude/CLAUDE.md         — instruções de uso do axon
+#   8. <project>/.claude/settings.json     — registra hooks para Grep, Glob, Bash, UserPromptSubmit, PostToolUse
 
 set -euo pipefail
 
@@ -109,9 +111,17 @@ cp "$SCRIPTS_DIR/hooks/axon-post-edit.sh" "$HOOKS_DIR/axon-post-edit.sh"
 chmod +x "$HOOKS_DIR/axon-post-edit.sh"
 echo "[axon] ✓ Hook post-edit: $HOOKS_DIR/axon-post-edit.sh"
 
+cp "$SCRIPTS_DIR/hooks/axon-queue-drain.sh" "$HOOKS_DIR/axon-queue-drain.sh"
+chmod +x "$HOOKS_DIR/axon-queue-drain.sh"
+echo "[axon] ✓ Queue drain fallback: $HOOKS_DIR/axon-queue-drain.sh"
+
 cp "$SCRIPTS_DIR/hooks/axon-build-guard.sh" "$HOOKS_DIR/axon-build-guard.sh"
 chmod +x "$HOOKS_DIR/axon-build-guard.sh"
 echo "[axon] ✓ Hook build-guard: $HOOKS_DIR/axon-build-guard.sh"
+
+cp "$SCRIPTS_DIR/hooks/axon-shell-guard.sh" "$HOOKS_DIR/axon-shell-guard.sh"
+chmod +x "$HOOKS_DIR/axon-shell-guard.sh"
+echo "[axon] ✓ Hook shell-guard: $HOOKS_DIR/axon-shell-guard.sh"
 
 # 2. Criar diretório .claude do projeto
 mkdir -p "$CLAUDE_DIR"
@@ -127,6 +137,7 @@ HOOK_CMD="bash $HOOKS_DIR/axon-guard.sh"
 AUTO_INDEX_CMD="bash $HOOKS_DIR/axon-auto-index.sh"
 POST_EDIT_CMD="bash $HOOKS_DIR/axon-post-edit.sh"
 BUILD_GUARD_CMD="bash $HOOKS_DIR/axon-build-guard.sh"
+SHELL_GUARD_CMD="bash $HOOKS_DIR/axon-shell-guard.sh"
 
 GREP_HOOK=$(jq -n --arg cmd "$HOOK_CMD" '{
   "matcher": "Grep",
@@ -139,6 +150,11 @@ GLOB_HOOK=$(jq -n --arg cmd "$HOOK_CMD" '{
 }')
 
 BUILD_GUARD_HOOK=$(jq -n --arg cmd "$BUILD_GUARD_CMD" '{
+  "matcher": "Bash",
+  "hooks": [{"type": "command", "command": $cmd, "timeout": 5}]
+}')
+
+SHELL_GUARD_HOOK=$(jq -n --arg cmd "$SHELL_GUARD_CMD" '{
   "matcher": "Bash",
   "hooks": [{"type": "command", "command": $cmd, "timeout": 5}]
 }')
@@ -158,9 +174,10 @@ if [ ! -f "$SETTINGS" ]; then
     --argjson grep "$GREP_HOOK" \
     --argjson glob "$GLOB_HOOK" \
     --argjson buildguard "$BUILD_GUARD_HOOK" \
+    --argjson shellguard "$SHELL_GUARD_HOOK" \
     --argjson autoindex "$AUTO_INDEX_HOOK" \
     --argjson postedit "$POST_EDIT_HOOK" \
-    '{"hooks": {"PreToolUse": [$grep, $glob, $buildguard], "UserPromptSubmit": [$autoindex], "PostToolUse": [$postedit]}}' > "$SETTINGS"
+    '{"hooks": {"PreToolUse": [$grep, $glob, $buildguard, $shellguard], "UserPromptSubmit": [$autoindex], "PostToolUse": [$postedit]}}' > "$SETTINGS"
 else
   # Merge: adiciona entradas axon evitando duplicatas
   EXISTING=$(cat "$SETTINGS")
@@ -168,6 +185,7 @@ else
     --argjson grep "$GREP_HOOK" \
     --argjson glob "$GLOB_HOOK" \
     --argjson buildguard "$BUILD_GUARD_HOOK" \
+    --argjson shellguard "$SHELL_GUARD_HOOK" \
     --argjson autoindex "$AUTO_INDEX_HOOK" \
     --argjson postedit "$POST_EDIT_HOOK" \
     '
@@ -176,9 +194,10 @@ else
         [.[] | select(
           .matcher != "Grep" and
           .matcher != "Glob" and
-          (.hooks[0].command | contains("axon-build-guard") | not)
+          (.hooks[0].command | contains("axon-build-guard") | not) and
+          (.hooks[0].command | contains("axon-shell-guard") | not)
         )] +
-        [$grep, $glob, $buildguard]
+        [$grep, $glob, $buildguard, $shellguard]
       ) |
       .hooks.UserPromptSubmit //= [] |
       .hooks.UserPromptSubmit |= (
@@ -206,14 +225,14 @@ DEFAULT_MODEL_NAME="nomic-embed-text-v1.5.Q4_K_M.gguf"
 DEFAULT_MODEL_URL="${AXON_EMBEDDING_MODEL_URL:-https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/$DEFAULT_MODEL_NAME}"
 
 if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME" ]; then
-  do_download=0
-  if [ "${AXON_DOWNLOAD_MODEL:-}" = "1" ]; then
-    do_download=1
-  elif [ "${AXON_DOWNLOAD_MODEL:-}" = "0" ]; then
+  do_download=1
+  if [ "${AXON_DOWNLOAD_MODEL:-}" = "0" ]; then
     do_download=0
+  elif [ "${AXON_DOWNLOAD_MODEL:-}" = "1" ]; then
+    do_download=1
   elif [ -t 0 ]; then
-    read -r -p "[axon] Download embedding model (~150 MiB) to $MODEL_DIR? [y/N] " yn
-    [[ "$yn" =~ ^[Yy] ]] && do_download=1
+    read -r -p "[axon] Download embedding model (~80 MiB) to $MODEL_DIR? [Y/n] " yn
+    [[ "$yn" =~ ^[Nn] ]] && do_download=0
   fi
   if [ "$do_download" = 1 ]; then
     mkdir -p "$MODEL_DIR"
@@ -234,7 +253,7 @@ if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME"
     fi
     echo "[axon] ✓ Model: $MODEL_DIR/$DEFAULT_MODEL_NAME"
   else
-    echo "[axon] (skipped model download — set AXON_EMBEDDING_MODEL=<path> or AXON_DOWNLOAD_MODEL=1 later)"
+    echo "[axon] (skipped model download — set AXON_DOWNLOAD_MODEL=1 or AXON_EMBEDDING_MODEL=<path> to enable later)"
   fi
 fi
 
@@ -247,5 +266,26 @@ else
   echo "[axon] WARN: binary not found at $AXON_BIN — index manually with: axon index $PROJECT"
 fi
 
+# 7. Register the MCP server with Claude Code (out-of-the-box usability)
+AXON_BIN_ABS="$(realpath "$AXON_BIN" 2>/dev/null || echo "$AXON_BIN")"
+AXON_LIB_ABS="$(realpath "$AXON_LIB" 2>/dev/null || echo "$AXON_LIB")"
+MODEL_ABS=""
+if [ -n "${AXON_EMBEDDING_MODEL:-}" ]; then MODEL_ABS="$AXON_EMBEDDING_MODEL"
+elif [ -f "$MODEL_DIR/$DEFAULT_MODEL_NAME" ]; then MODEL_ABS="$MODEL_DIR/$DEFAULT_MODEL_NAME"; fi
+MCP_JSON=$(jq -n --arg cmd "$AXON_BIN_ABS" --arg lib "$AXON_LIB_ABS" --arg model "$MODEL_ABS" \
+  '{command:$cmd, args:["serve"], env:({LD_LIBRARY_PATH:$lib} + (if $model != "" then {AXON_EMBEDDING_MODEL:$model} else {} end))}')
+if command -v claude >/dev/null 2>&1; then
+  claude mcp remove axon -s user >/dev/null 2>&1 || true
+  if claude mcp add-json axon "$MCP_JSON" -s user >/dev/null 2>&1; then
+    echo "[axon] ✓ MCP server registered with Claude Code (user scope)"
+  else
+    echo "[axon] WARN: could not auto-register the MCP server. Add this to ~/.claude.json:"
+    echo "$MCP_JSON" | jq '{mcpServers:{axon:.}}'
+  fi
+else
+  echo "[axon] Claude CLI not on PATH. Add this to ~/.claude.json to enable axon in Claude Code:"
+  echo "$MCP_JSON" | jq '{mcpServers:{axon:.}}'
+fi
+
 echo ""
-echo "[axon] Install complete. Restart Claude Code to activate the hooks."
+echo "[axon] Install complete. MCP server registered. Restart Claude Code to activate the hooks."

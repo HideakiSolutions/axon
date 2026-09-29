@@ -1,15 +1,22 @@
 #include "server.hpp"
 #include "protocol.hpp"
+#include "peer.hpp"
 #include "version.hpp"
 #include "../core/registry.hpp"
 #include "../core/indexer.hpp"
 #include "../core/capsule.hpp"
+#include "../core/ccr.hpp"
+#include "../core/compress.hpp"
 #include "../core/skeleton.hpp"
 #include "../core/embeddings.hpp"
 #include "../core/rename.hpp"
 #include "../core/git.hpp"
 #include "../core/routes.hpp"
 #include "../core/dialogue.hpp"
+#include "../core/telemetry.hpp"
+#include "../core/pending_writes.hpp"
+#include "../core/memory_search.hpp"
+#include "../portfolio/delivery/portfolio_capability_catalog.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -19,149 +26,496 @@
 #include <queue>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <atomic>
+#include <condition_variable>
+#include <cstdlib>
+#include <thread>
+#include <vector>
 
 namespace {
 inline std::string sql_escape(const std::string& s) {
-    std::string out; out.reserve(s.size() + 4);
-    for (char c : s) { if (c == '\'') out += '\''; out += c; }
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (char c : s) {
+        if (c == '\'') out += '\'';
+        out += c;
+    }
     return out;
 }
+
+std::vector<std::string> normalized_tags(const nlohmann::json& args) {
+    std::vector<std::string> tags;
+    if (!args.contains("tags") || !args["tags"].is_array()) return tags;
+
+    std::unordered_set<std::string> seen;
+    for (const auto& item : args["tags"]) {
+        if (!item.is_string()) continue;
+        std::string tag = item.get<std::string>();
+        auto first = std::find_if_not(tag.begin(), tag.end(),
+                                      [](unsigned char ch) { return std::isspace(ch); });
+        auto last = std::find_if_not(tag.rbegin(), tag.rend(), [](unsigned char ch) {
+                        return std::isspace(ch);
+                    }).base();
+        if (first >= last) continue;
+        tag = std::string(first, last);
+        if (seen.insert(tag).second) tags.push_back(std::move(tag));
+    }
+    return tags;
 }
+
+std::string sql_string_list(const std::vector<std::string>& values) {
+    std::ostringstream out;
+    out << "(";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i) out << ",";
+        out << "'" << sql_escape(values[i]) << "'";
+    }
+    out << ")";
+    return out.str();
+}
+} // namespace
 
 namespace axon::mcp {
 
 static json tools_list() {
-    return {{"tools", json::array({
-        {{"name","run_pipeline"},
-         {"description","Index the project: parse source files, build dependency graph, compute embeddings."},
-         {"inputSchema",{{"type","object"},{"properties",{{"root",{{"type","string"}}}}}}}},
-        {{"name","index_paths"},
-         {"description","Incrementally reindex specific files for write-through after Write/Edit. Pass an empty paths array with prune=true to only sweep deleted files from the index."},
-         {"inputSchema",{{"type","object"},{"required",{"paths"}},{"properties",{
-             {"paths",{{"type","array"},{"items",{{"type","string"}}}}},
-             {"prune",{{"type","boolean"},{"default",false}}}}}}}},
-        {{"name","get_context_capsule"},
-         {"description","Return token-efficient context: pivot files in full + support files skeletonized. Repeat queries against an unchanged index hit a server-side cache (~9x faster); pass no_cache=true or supply explicit pivot_files to bypass. Set dialogue_budget>0 to include relevant conversation turns anchored to the pivot files."},
-         {"inputSchema",{{"type","object"},{"properties",{
-             {"query",{{"type","string"}}},
-             {"pivot_files",{{"type","array"},{"items",{{"type","string"}}}}},
-             {"token_budget",{{"type","integer"},{"default",8000}}},
-             {"dialogue_budget",{{"type","integer"},{"default",0}}},
-             {"no_cache",{{"type","boolean"},{"default",false}}}}}}}},
-        {{"name","get_impact_graph"},
-         {"description","Return files that depend on (or are depended on by) the given files."},
-         {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
-             {"files",{{"type","array"},{"items",{{"type","string"}}}}}}}}}},
-        {{"name","get_skeleton"},
-         {"description","Return signatures-only view of one or more files."},
-         {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
-             {"files",{{"type","array"},{"items",{{"type","string"}}}}}}}}}},
-        {{"name","search_memory"},
-         {"description","Semantic search over saved observations."},
-         {"inputSchema",{{"type","object"},{"required",{"query"}},{"properties",{
-             {"query",{{"type","string"}}},
-             {"limit",{{"type","integer"},{"default",5}}}}}}}},
-        {{"name","save_observation"},
-         {"description","Persist a text observation for future retrieval."},
-         {"inputSchema",{{"type","object"},{"required",{"content"}},{"properties",{
-             {"content",{{"type","string"}}},
-             {"tags",{{"type","array"},{"items",{{"type","string"}}}}},
-             {"file_path",{{"type","string"}}}}}}}},
-        {{"name","get_overview"},
-         {"description","Return codebase entry points: top files by coupling (incoming+outgoing edges) and top referenced symbols. Use for onboarding / vibe coding when no specific query is formed yet."},
-         {"inputSchema",{{"type","object"},{"properties",{
-             {"limit",{{"type","integer"},{"default",10}}}}}}}},
-        {{"name","get_callers"},
-         {"description","Backward trace (file-granular): locates the symbol by name, then returns the list of files that import the file defining it. Narrow to concrete call sites with get_skeleton(caller_files) afterwards. Use for debugging and root-cause analysis."},
-         {"inputSchema",{{"type","object"},{"required",{"symbol_name"}},{"properties",{
-             {"symbol_name",{{"type","string"}}},
-             {"file_path",{{"type","string"},{"description","Optional: disambiguate when multiple symbols share a name"}}},
-             {"limit",{{"type","integer"},{"default",50}}}}}}}},
-        {{"name","get_tests_for"},
-         {"description","Return test files (by path convention) that import/reference the given files. Use for test-impact analysis before merging."},
-         {"inputSchema",{{"type","object"},{"required",{"files"}},{"properties",{
-             {"files",{{"type","array"},{"items",{{"type","string"}}}}}}}}}},
-        {{"name","rename"},
-         {"description","Graph-assisted rename: find all occurrences of a symbol name across the codebase and return line-level edits. With dry_run=false, writes files to disk."},
-         {"inputSchema",{{"type","object"},{"required",{"symbol_name","new_name"}},{"properties",{
-             {"symbol_name",{{"type","string"},{"description","Current name of the symbol to rename"}}},
-             {"new_name",   {{"type","string"},{"description","New name for the symbol"}}},
-             {"dry_run",    {{"type","boolean"},{"default",true},{"description","If true, return edits without writing to disk"}}}}}}}},
-        {{"name","route_map"},
-         {"description","List all detected HTTP routes with their handler files and framework. Requires index_routes=true in .axon/config.toml."},
-         {"inputSchema",{{"type","object"},{"properties",{
-             {"framework",{{"type","string"},{"description","Filter by framework: nextjs|express|fastapi|flask"}}}}}}}},
-        {{"name","api_impact"},
-         {"description","Given a route path, return its handler file and the full impact graph of files that depend on the handler."},
-         {"inputSchema",{{"type","object"},{"required",{"route_path"}},{"properties",{
-             {"route_path",{{"type","string"},{"description","Route path to analyze, e.g. /api/users/:id"}}}}}}}},
-        {{"name","detect_changes"},
-         {"description","Detect which symbols and files are affected by recent git changes. Returns changed files, affected symbols (those whose line ranges overlap with the diff hunks), and impacted downstream files."},
-         {"inputSchema",{{"type","object"},{"properties",{
-             {"ref",{{"type","string"},{"default","HEAD"},{"description","Git ref to diff against, e.g. HEAD~1, main, a commit SHA"}}}}}}}},
-        {{"name","group_list"},
-         {"description","List all repos registered in the global Axon registry (~/.axon/registry.json) and their groups."},
-         {"inputSchema",{{"type","object"},{"properties",json::object()}}}},
-        {{"name","group_impact"},
-         {"description","Cross-repo blast radius: given a file path in the current repo, return impacted files in other registered repos that import the same module path."},
-         {"inputSchema",{{"type","object"},{"required",{"file"}},{"properties",{
-             {"file",{{"type","string"},{"description","Relative or absolute path to the file to analyze"}}},
-             {"group",{{"type","string"},{"description","Optional: limit to repos in this group"}}}}}}}},
-        // ── Dialogue Layer ─────────────────────────────────────────────────────
-        {{"name","thread_create"},
-         {"description","Create a named conversation thread. kind: project|person|topic."},
-         {"inputSchema",{{"type","object"},{"required",{"name"}},{"properties",{
-             {"name",{{"type","string"}}},
-             {"kind",{{"type","string"},{"default","project"}}}}}}}},
-        {{"name","thread_list"},
-         {"description","List all conversation threads with session counts."},
-         {"inputSchema",{{"type","object"},{"properties",json::object()}}}},
-        {{"name","session_start"},
-         {"description","Start a new session within a thread. Returns the session id."},
-         {"inputSchema",{{"type","object"},{"required",{"thread_id"}},{"properties",{
-             {"thread_id",{{"type","integer"}}},
-             {"label",{{"type","string"}}}}}}}},
-        {{"name","session_end"},
-         {"description","Close a session and optionally compute its digest (compressed summary)."},
-         {"inputSchema",{{"type","object"},{"required",{"session_id"}},{"properties",{
-             {"session_id",{{"type","integer"}}},
-             {"compute_digest",{{"type","boolean"},{"default",true}}}}}}}},
-        {{"name","turn_add"},
-         {"description","Append a verbatim turn to a session. Automatically detects and anchors file paths and symbol names found in the content."},
-         {"inputSchema",{{"type","object"},{"required",{"session_id","role","content"}},{"properties",{
-             {"session_id",{{"type","integer"}}},
-             {"role",{{"type","string"},{"enum",{"user","assistant"}}}},
-             {"content",{{"type","string"}}}}}}}},
-        {{"name","turn_search"},
-         {"description","Semantic search over conversation turns. Returns the most relevant turns with session and thread context."},
-         {"inputSchema",{{"type","object"},{"required",{"query"}},{"properties",{
-             {"query",{{"type","string"}}},
-             {"limit",{{"type","integer"},{"default",5}}},
-             {"thread_id",{{"type","integer"},{"description","Scope to a specific thread. Omit for global search."}}}}}}}},
-        {{"name","session_get"},
-         {"description","Get all turns in a session, ordered by time."},
-         {"inputSchema",{{"type","object"},{"required",{"session_id"}},{"properties",{
-             {"session_id",{{"type","integer"}}},
-             {"limit",{{"type","integer"},{"default",500}}}}}}}},
-        {{"name","thread_get"},
-         {"description","Get all sessions in a thread, with digests."},
-         {"inputSchema",{{"type","object"},{"required",{"thread_id"}},{"properties",{
-             {"thread_id",{{"type","integer"}}}}}}}},
-        {{"name","anchor_link"},
-         {"description","Manually link a turn to a file or symbol in the project graph."},
-         {"inputSchema",{{"type","object"},{"required",{"turn_id"}},{"properties",{
-             {"turn_id",{{"type","integer"}}},
-             {"file_id",{{"type","integer"}}},
-             {"symbol_id",{{"type","integer"}}},
-             {"kind",{{"type","string"},{"default","mentions"}}}}}}}},
-        {{"name","dialogue_context"},
-         {"description","Return conversation turns relevant to a query or set of files. Use to surface past decisions and discussions before editing code."},
-         {"inputSchema",{{"type","object"},{"required",{"query"}},{"properties",{
-             {"query",{{"type","string"}}},
-             {"file_paths",{{"type","array"},{"items",{{"type","string"}}}}},
-             {"limit",{{"type","integer"},{"default",5}}},
-             {"thread_id",{{"type","integer"}}}}}}}}
-    })}};
+    return {
+        {"tools",
+         json::array(
+             {{{"name", "run_pipeline"},
+               {"description", "Index the project: parse source files, build dependency graph, "
+                               "compute embeddings."},
+               {"inputSchema",
+                {{"type", "object"}, {"properties", {{"root", {{"type", "string"}}}}}}}},
+              {{"name", "index_paths"},
+               {"description",
+                "Incrementally reindex specific files for write-through after Write/Edit. Pass an "
+                "empty paths array with prune=true to only sweep deleted files from the index."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"paths"}},
+                 {"properties",
+                  {{"paths", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                   {"prune", {{"type", "boolean"}, {"default", false}}}}}}}},
+              {{"name", "get_context_capsule"},
+               {"description",
+                "Return token-efficient context: pivot files in full + support files skeletonized. "
+                "Repeat queries against an unchanged index hit a server-side cache (~9x faster); "
+                "pass no_cache=true or supply explicit pivot_files to bypass. Set "
+                "dialogue_budget>0 to include relevant conversation turns anchored to the pivot "
+                "files. Set compression=\"body\" to classify oversized bodies before lossy "
+                "compression, pass through unsafe inputs, validate token savings, and report "
+                "compression counters; default \"off\" is byte-identical to the previous "
+                "behaviour."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"query", {{"type", "string"}}},
+                   {"pivot_files", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                   {"token_budget", {{"type", "integer"}, {"default", 8000}}},
+                   {"dialogue_budget", {{"type", "integer"}, {"default", 0}}},
+                   {"no_cache", {{"type", "boolean"}, {"default", false}}},
+                   {"compression",
+                    {{"type", "string"},
+                     {"enum", {"off", "body"}},
+                     {"description",
+                      "\"off\" (default) = current behaviour; \"body\" = type-aware compression "
+                      "preserving significant source lines and using safe passthrough when "
+                      "compression is unsafe or not beneficial"}}}}}}}},
+              {{"name", "get_impact_graph"},
+               {"description",
+                "Return files that depend on (or are depended on by) the given files."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"files"}},
+                 {"properties",
+                  {{"files", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
+              {{"name", "get_skeleton"},
+               {"description", "Return signatures-only view of one or more files."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"files"}},
+                 {"properties",
+                  {{"files", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
+              {{"name", "search_memory"},
+               {"description",
+                "Hybrid semantic and lexical search over saved observations. Results use "
+                "authority-bounded Reciprocal Rank Fusion and expose ranking evidence."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"query"}},
+                 {"properties",
+                  {{"query", {{"type", "string"}}},
+                   {"limit", {{"type", "integer"}, {"default", 5}}},
+                   {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
+              {{"name", "save_observation"},
+               {"description", "Persist a text observation for future retrieval."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"content"}},
+                 {"properties",
+                  {{"content", {{"type", "string"}}},
+                   {"tags", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                   {"file_path", {{"type", "string"}}},
+                   {"authority",
+                    {{"type", "number"},
+                     {"minimum", 0.5},
+                     {"maximum", 2.0},
+                     {"default", 1.0},
+                     {"description",
+                      "Bounded ranking hint; never an authorization decision"}}}}}}}},
+              {{"name", "get_overview"},
+               {"description", "Return codebase entry points: top files by coupling "
+                               "(incoming+outgoing edges) and top referenced symbols. Use for "
+                               "onboarding / vibe coding when no specific query is formed yet."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties", {{"limit", {{"type", "integer"}, {"default", 10}}}}}}}},
+              {{"name", "get_callers"},
+               {"description", "Backward trace (file-granular): locates the symbol by name, then "
+                               "returns the list of files that import the file defining it. Narrow "
+                               "to concrete call sites with get_skeleton(caller_files) afterwards. "
+                               "Use for debugging and root-cause analysis."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"symbol_name"}},
+                 {"properties",
+                  {{"symbol_name", {{"type", "string"}}},
+                   {"file_path",
+                    {{"type", "string"},
+                     {"description", "Optional: disambiguate when multiple symbols share a name"}}},
+                   {"limit", {{"type", "integer"}, {"default", 50}}}}}}}},
+              {{"name", "get_tests_for"},
+               {"description", "Return test files (by path convention) that import/reference the "
+                               "given files. Use for test-impact analysis before merging."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"files"}},
+                 {"properties",
+                  {{"files", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
+              {{"name", "rename"},
+               {"description",
+                "Graph-assisted rename: find all occurrences of a symbol name across the codebase "
+                "and return line-level edits. With dry_run=false, writes files to disk."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"symbol_name", "new_name"}},
+                 {"properties",
+                  {{"symbol_name",
+                    {{"type", "string"}, {"description", "Current name of the symbol to rename"}}},
+                   {"new_name", {{"type", "string"}, {"description", "New name for the symbol"}}},
+                   {"dry_run",
+                    {{"type", "boolean"},
+                     {"default", true},
+                     {"description", "If true, return edits without writing to disk"}}}}}}}},
+              {{"name", "route_map"},
+               {"description", "List all detected HTTP routes with their handler files and "
+                               "framework. Requires index_routes=true in .axon/config.toml."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"framework",
+                    {{"type", "string"},
+                     {"description", "Filter by framework: nextjs|express|fastapi|flask"}}}}}}}},
+              {{"name", "api_impact"},
+               {"description", "Given a route path, return its handler file and the full impact "
+                               "graph of files that depend on the handler."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"route_path"}},
+                 {"properties",
+                  {{"route_path",
+                    {{"type", "string"},
+                     {"description", "Route path to analyze, e.g. /api/users/:id"}}}}}}}},
+              {{"name", "detect_changes"},
+               {"description", "Detect which symbols and files are affected by recent git changes. "
+                               "Returns changed files, affected symbols (those whose line ranges "
+                               "overlap with the diff hunks), and impacted downstream files."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"ref",
+                    {{"type", "string"},
+                     {"default", "HEAD"},
+                     {"description",
+                      "Git ref to diff against, e.g. HEAD~1, main, a commit SHA"}}}}}}}},
+              {{"name", "group_list"},
+               {"description", "List all repos registered in the global Axon registry "
+                               "(~/.axon/registry.json) and their groups."},
+               {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}},
+              {{"name", "group_impact"},
+               {"description",
+                "Cross-repo blast radius: given a file path in the current repo, return impacted "
+                "files in other registered repos that import the same module path."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"file"}},
+                 {"properties",
+                  {{"file",
+                    {{"type", "string"},
+                     {"description", "Relative or absolute path to the file to analyze"}}},
+                   {"group",
+                    {{"type", "string"},
+                     {"description", "Optional: limit to repos in this group"}}}}}}}},
+              {{"name", "portfolio_status"},
+               {"description", "Report the derived portfolio capability catalog status."},
+               {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}},
+              {{"name", "portfolio_sync"},
+               {"description", "Synchronize registered project indexes into the derived portfolio "
+                               "catalog, read-only at every source."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"group", {{"type", "string"}}},
+                   {"rebuild", {{"type", "boolean"}, {"default", false}}}}}}}},
+              {{"name", "capability_list"},
+               {"description", "List observed portfolio capabilities."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"repository_id", {{"type", "string"}}},
+                   {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 10000}}}}}}}},
+              {{"name", "capability_search"},
+               {"description", "Search observed capability metadata."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"query"}},
+                 {"properties",
+                  {{"query", {{"type", "string"}}},
+                   {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 10000}}}}}}}},
+              {{"name", "capability_duplicates"},
+               {"description", "Return explainable multi-signal duplicate candidates."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"threshold", {{"type", "number"}, {"minimum", 0}, {"maximum", 1}}}}}}}},
+              {{"name", "capability_compare"},
+               {"description", "Return one candidate's scores and invalidators."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"candidate_id"}},
+                 {"properties", {{"candidate_id", {{"type", "string"}}}}}}}},
+              {{"name", "capability_consumers"},
+               {"description",
+                "Return the repository and evidence references for an observed capability."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"capability_id"}},
+                 {"properties", {{"capability_id", {{"type", "string"}}}}}}}},
+              {{"name", "capability_drift"},
+               {"description",
+                "Compare observed capabilities with a read-only Git declaration fragment."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"graph_root", "fragment"}},
+                 {"properties",
+                  {{"graph_root", {{"type", "string"}}}, {"fragment", {{"type", "string"}}}}}}}},
+              // ── Dialogue Layer ─────────────────────────────────────────────────────
+              {{"name", "thread_create"},
+               {"description", "Create a named conversation thread. kind: project|person|topic."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"name"}},
+                 {"properties",
+                  {{"name", {{"type", "string"}}},
+                   {"kind", {{"type", "string"}, {"default", "project"}}}}}}}},
+              {{"name", "thread_list"},
+               {"description", "List all conversation threads with session counts."},
+               {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}},
+              {{"name", "session_start"},
+               {"description", "Start a new session within a thread. An optional idempotency key "
+                               "makes retries return the original session id."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"thread_id"}},
+                 {"properties",
+                  {{"thread_id", {{"type", "integer"}}},
+                   {"label", {{"type", "string"}}},
+                   {"idempotency_key", {{"type", "string"}, {"maxLength", 256}}}}}}}},
+              {{"name", "session_end"},
+               {"description",
+                "Close a session and optionally compute its digest (compressed summary)."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"session_id"}},
+                 {"properties",
+                  {{"session_id", {{"type", "integer"}}},
+                   {"compute_digest", {{"type", "boolean"}, {"default", true}}}}}}}},
+              {{"name", "turn_add"},
+               {"description", "Append a verbatim turn to a session. Automatically detects and "
+                               "anchors file paths and symbol names found in the content."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"session_id", "role", "content"}},
+                 {"properties",
+                  {{"session_id", {{"type", "integer"}}},
+                   {"role", {{"type", "string"}, {"enum", {"user", "assistant"}}}},
+                   {"content", {{"type", "string"}}}}}}}},
+              {{"name", "turn_search"},
+               {"description", "Semantic search over conversation turns. Returns the most relevant "
+                               "turns with session and thread context."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"query"}},
+                 {"properties",
+                  {{"query", {{"type", "string"}}},
+                   {"limit", {{"type", "integer"}, {"default", 5}}},
+                   {"thread_id",
+                    {{"type", "integer"},
+                     {"description", "Scope to a specific thread. Omit for global search."}}}}}}}},
+              {{"name", "session_get"},
+               {"description", "Get all turns in a session, ordered by time."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"session_id"}},
+                 {"properties",
+                  {{"session_id", {{"type", "integer"}}},
+                   {"limit", {{"type", "integer"}, {"default", 500}}}}}}}},
+              {{"name", "thread_get"},
+               {"description", "Get all sessions in a thread, with digests."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"thread_id"}},
+                 {"properties", {{"thread_id", {{"type", "integer"}}}}}}}},
+              {{"name", "anchor_link"},
+               {"description", "Manually link a turn to a file or symbol in the project graph."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"turn_id"}},
+                 {"properties",
+                  {{"turn_id", {{"type", "integer"}}},
+                   {"file_id", {{"type", "integer"}}},
+                   {"symbol_id", {{"type", "integer"}}},
+                   {"kind", {{"type", "string"}, {"default", "mentions"}}}}}}}},
+              {{"name", "dialogue_context"},
+               {"description", "Return conversation turns relevant to a query or set of files. Use "
+                               "to surface past decisions and discussions before editing code."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"query"}},
+                 {"properties",
+                  {{"query", {{"type", "string"}}},
+                   {"file_paths", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                   {"limit", {{"type", "integer"}, {"default", 5}}},
+                   {"thread_id", {{"type", "integer"}}}}}}}},
+              {{"name", "handoff_create"},
+               {"description", "Create a typed, project-scoped handoff for another agent."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"target_agent", "objective"}},
+                 {"properties",
+                  {{"source_session_id", {{"type", "integer"}}},
+                   {"target_agent", {{"type", "string"}, {"maxLength", 128}}},
+                   {"working_directory", {{"type", "string"}}},
+                   {"objective", {{"type", "string"}, {"maxLength", 8192}}},
+                   {"context", {{"type", "string"}, {"maxLength", 65536}}},
+                   {"idempotency_key", {{"type", "string"}, {"maxLength", 256}}}}}}}},
+              {{"name", "handoff_get"},
+               {"description", "Get one typed handoff by id."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id"}},
+                 {"properties", {{"handoff_id", {{"type", "integer"}}}}}}}},
+              {{"name", "handoff_list"},
+               {"description", "List handoffs, optionally filtered by status or target agent."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"status",
+                    {{"type", "string"},
+                     {"enum", {"pending", "claimed", "completed", "cancelled"}}}},
+                   {"target_agent", {{"type", "string"}, {"maxLength", 128}}},
+                   {"limit", {{"type", "integer"}, {"default", 100}}}}}}}},
+              {{"name", "handoff_claim"},
+               {"description", "Atomically claim a pending handoff. Replay by the same claimant "
+                               "is idempotent."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id", "claimed_by"}},
+                 {"properties",
+                  {{"handoff_id", {{"type", "integer"}}},
+                   {"claimed_by", {{"type", "string"}, {"maxLength", 128}}}}}}}},
+              {{"name", "handoff_complete"},
+               {"description", "Complete a claimed handoff as its current claimant."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id", "claimed_by"}},
+                 {"properties",
+                  {{"handoff_id", {{"type", "integer"}}},
+                   {"claimed_by", {{"type", "string"}, {"maxLength", 128}}},
+                   {"result", {{"type", "string"}, {"maxLength", 65536}}}}}}}},
+              {{"name", "handoff_cancel"},
+               {"description", "Cancel a pending or claimed handoff."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"handoff_id"}},
+                 {"properties", {{"handoff_id", {{"type", "integer"}}}}}}}},
+              {{"name", "artifact_retrieve"},
+               {"description", "Retrieve the original content for an Axon CCR artifact emitted by "
+                               "lossy compression."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"artifact_id"}},
+                 {"properties", {{"artifact_id", {{"type", "string"}}}}}}}}})}};
+}
+
+static std::string bounded_string_arg(const json& args, const char* name, size_t max_length,
+                                      bool required = false) {
+    if (!args.contains(name)) {
+        if (required) throw std::invalid_argument(std::string(name) + " is required");
+        return "";
+    }
+    if (!args[name].is_string())
+        throw std::invalid_argument(std::string(name) + " must be a string");
+    auto value = args[name].get<std::string>();
+    if (required && value.empty()) throw std::invalid_argument(std::string(name) + " is required");
+    if (value.size() > max_length)
+        throw std::invalid_argument(std::string(name) + " exceeds maximum length");
+    return value;
+}
+
+static bool is_within_path(const std::filesystem::path& root,
+                           const std::filesystem::path& candidate) {
+    auto root_it = root.begin();
+    auto candidate_it = candidate.begin();
+    while (root_it != root.end() && candidate_it != candidate.end() && *root_it == *candidate_it) {
+        ++root_it;
+        ++candidate_it;
+    }
+    return root_it == root.end();
+}
+
+static std::filesystem::path validated_working_directory(const Config& cfg,
+                                                         const std::string& requested) {
+    std::error_code ec;
+    const auto root = std::filesystem::weakly_canonical(cfg.project_root, ec);
+    if (ec) throw std::invalid_argument("project_root cannot be canonicalized");
+    auto candidate = requested.empty() ? root : std::filesystem::path(requested);
+    if (candidate.is_relative()) candidate = root / candidate;
+    candidate = std::filesystem::weakly_canonical(candidate, ec);
+    if (ec || !std::filesystem::is_directory(candidate, ec))
+        throw std::invalid_argument("working_directory must be an existing directory");
+    if (!is_within_path(root, candidate))
+        throw std::invalid_argument("working_directory must stay within the project root");
+    return candidate;
+}
+
+static json handoff_json(const Handoff& handoff) {
+    return {{"handoff_id", handoff.id},
+            {"source_session_id",
+             handoff.source_session_id >= 0 ? json(handoff.source_session_id) : json(nullptr)},
+            {"target_agent", handoff.target_agent},
+            {"project_root", handoff.project_root},
+            {"working_directory", handoff.working_directory},
+            {"objective", handoff.objective},
+            {"context", handoff.context},
+            {"status", handoff.status},
+            {"claimed_by", handoff.claimed_by},
+            {"result", handoff.result},
+            {"idempotency_key", handoff.idempotency_key},
+            {"created_at", handoff.created_at},
+            {"claimed_at", handoff.claimed_at},
+            {"completed_at", handoff.completed_at}};
 }
 
 // Drain the PostToolUse pending-writes queue ($PROJECT/.axon/pending-writes.txt)
@@ -170,54 +524,77 @@ static json tools_list() {
 // the queue file; we atomically steal it (rename to tmp) before processing to
 // avoid racing the hook's flock on new appends.
 static int drain_pending_writes(ServerContext& ctx) {
-    namespace fs = std::filesystem;
     if (!ctx.db_ready()) return 0;
 
-    fs::path queue = ctx.cfg.axon_dir / "pending-writes.txt";
-    std::error_code ec;
-    if (!fs::exists(queue, ec) || fs::file_size(queue, ec) == 0) return 0;
+    auto claim = PendingWriteClaim::acquire(ctx.cfg.axon_dir);
+    if (claim.quarantined_path()) {
+        std::cerr << json{{"event", "queue_drain_quarantined"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"failed_batch", claim.quarantined_path()->filename().string()}}
+                         .dump()
+                  << "\n";
+    }
+    if (!claim.has_batch()) return 0;
 
-    // Atomically claim the queue — any concurrent hook append after this rename
-    // writes to a fresh empty file we'll pick up next drain.
-    fs::path claimed = ctx.cfg.axon_dir / "pending-writes.processing";
-    fs::remove(claimed, ec);
-    fs::rename(queue, claimed, ec);
-    if (ec) return 0;
+    if (claim.attempt() > 1) {
+        std::cerr << json{{"event", "queue_drain_recovered"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"path_count", claim.paths().size()},
+                          {"attempt", claim.attempt()}}
+                         .dump()
+                  << "\n";
+    }
 
-    std::vector<fs::path> paths;
-    {
-        std::ifstream in(claimed);
-        std::string line;
-        while (std::getline(in, line)) {
-            if (line.empty()) continue;
-            paths.emplace_back(line);
+    try {
+        auto stats = index_files(ctx.cfg, *ctx.db, claim.paths(), false);
+        if (ctx.model_ready()) {
+            try {
+                embed_pending_symbols(*ctx.db, *ctx.model);
+                embed_pending_turns(*ctx.db, *ctx.model);
+            } catch (const std::exception& error) {
+                std::cerr << json{{"event", "queue_embedding_retry_pending"},
+                                  {"service", "axon"},
+                                  {"environment", "local"},
+                                  {"correlationId", "queue-drain"},
+                                  {"error", error.what()}}
+                                 .dump()
+                          << "\n";
+                throw;
+            }
         }
+        if (stats.files_indexed > 0) ctx.graph = load_graph(*ctx.db);
+
+        const auto path_count = claim.paths().size();
+        const auto attempt = claim.attempt();
+        claim.acknowledge();
+        std::cerr << json{{"event", "queue_drain_completed"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"path_count", path_count},
+                          {"files_indexed", stats.files_indexed},
+                          {"attempt", attempt}}
+                         .dump()
+                  << "\n";
+        return stats.files_indexed;
+    } catch (const std::exception& error) {
+        // Do not acknowledge: the durable .processing claim is replayed on
+        // the next tool call, then quarantined after the bounded retry limit.
+        std::cerr << json{{"event", "queue_drain_failed"},
+                          {"service", "axon"},
+                          {"environment", "local"},
+                          {"correlationId", "queue-drain"},
+                          {"path_count", claim.paths().size()},
+                          {"attempt", claim.attempt()},
+                          {"error", error.what()}}
+                         .dump()
+                  << "\n";
+        return 0;
     }
-    fs::remove(claimed, ec);
-
-    if (paths.empty()) return 0;
-
-    // Deduplicate while preserving order — same file edited N times in a row
-    // should only be reindexed once.
-    std::vector<fs::path> unique;
-    std::unordered_set<std::string> seen;
-    for (auto& p : paths) {
-        auto key = p.string();
-        if (seen.insert(key).second) unique.push_back(std::move(p));
-    }
-
-    auto stats = index_files(ctx.cfg, *ctx.db, unique, false);
-    if (stats.files_indexed > 0 && ctx.model_ready()) {
-        try {
-            embed_pending_symbols(*ctx.db, *ctx.model);
-            embed_pending_turns(*ctx.db, *ctx.model);
-        }
-        catch (...) { /* silent — will retry on next drain */ }
-    }
-    if (stats.files_indexed > 0)
-        ctx.graph = load_graph(*ctx.db);
-
-    return stats.files_indexed;
 }
 
 // Filesystem-change signal: PostToolUse(Bash) and UserPromptSubmit hooks touch
@@ -238,11 +615,10 @@ static void maybe_run_sync(ServerContext& ctx) {
         try {
             embed_pending_symbols(*ctx.db, *ctx.model);
             embed_pending_turns(*ctx.db, *ctx.model);
+        } catch (...) { /* silent — will retry next drain */
         }
-        catch (...) { /* silent — will retry next drain */ }
     }
-    if (stats.files_indexed > 0 || stats.files_pruned > 0)
-        ctx.graph = load_graph(*ctx.db);
+    if (stats.files_indexed > 0 || stats.files_pruned > 0) ctx.graph = load_graph(*ctx.db);
 }
 
 static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
@@ -251,8 +627,8 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
 
     ctx.db_error.clear();
     if (!create_if_missing && !fs::exists(ctx.cfg.db_path)) {
-        ctx.db_error = "No Axon index found at " + ctx.cfg.db_path.string() +
-                       ". Run run_pipeline first.";
+        ctx.db_error =
+            "No Axon index found at " + ctx.cfg.db_path.string() + ". Run run_pipeline first.";
         return false;
     }
 
@@ -262,9 +638,8 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
         ctx.graph = load_graph(*ctx.db);
         if (!ctx.model_ready()) {
             try {
-                fs::path binary_dir = ctx.binary_dir.empty()
-                    ? ctx.cfg.project_root / "models"
-                    : ctx.binary_dir;
+                fs::path binary_dir =
+                    ctx.binary_dir.empty() ? ctx.cfg.project_root / "models" : ctx.binary_dir;
                 auto model_path = find_model(binary_dir);
                 ctx.model = std::make_unique<EmbeddingModel>(model_path);
             } catch (...) {
@@ -272,6 +647,9 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
                 // already return an explicit error when it is unavailable.
             }
         }
+        // We now hold the DuckDB write lock: publish ourselves so latecomer
+        // serves can proxy their tool calls here instead of failing.
+        register_self_as_owner(ctx, ctx.peer_port);
         return true;
     } catch (const std::exception& e) {
         ctx.db.reset();
@@ -281,21 +659,77 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
     }
 }
 
-static json db_unavailable_result(const ServerContext& ctx) {
-    std::string detail = ctx.db_error.empty()
-        ? "Axon index database is not initialized."
-        : ctx.db_error;
+// nlohmann's value() throws type_error 302 when a key is present but null —
+// a common agent mistake that leaked "[json.exception.type_error.302] ..."
+// through tool errors. Treat null / wrong-typed values as absent instead.
+static int64_t arg_int64(const json& args, const char* key, int64_t fallback) {
+    auto it = args.find(key);
+    if (it == args.end() || !it->is_number()) return fallback;
+    return it->get<int64_t>();
+}
 
-    return make_tool_result({
-        {"error", "Axon index database unavailable"},
-        {"db_path", ctx.cfg.db_path.string()},
-        {"detail", detail},
-        {"hint", "If another Claude/Codex session is open in this project, close it or stop the older axon serve process, then retry this tool. If no index exists yet, call run_pipeline."}
-    }, true);
+static std::string arg_str(const json& args, const char* key, const std::string& fallback) {
+    auto it = args.find(key);
+    if (it == args.end() || !it->is_string()) return fallback;
+    return it->get<std::string>();
+}
+
+// C/C++-style declaration/definition splits: a symbol defined in ccr.cpp is
+// consumed through ccr.hpp, so callers/tests of the .cpp must also count
+// importers of same-stem peers connected to it by an import edge (in either
+// direction). Returns the file itself plus those peers.
+static std::vector<int64_t> definition_surface(const ServerContext& ctx, int64_t file_id) {
+    std::vector<int64_t> ids{file_id};
+    auto stem_of = [](const std::string& path) {
+        auto base = path.substr(path.find_last_of("/\\") + 1);
+        auto dot = base.find_last_of('.');
+        return dot == std::string::npos ? base : base.substr(0, dot);
+    };
+    auto path_it = ctx.graph.id_to_path.find(file_id);
+    if (path_it == ctx.graph.id_to_path.end()) return ids;
+    const std::string stem = stem_of(path_it->second);
+
+    auto consider = [&](int64_t other) {
+        auto oit = ctx.graph.id_to_path.find(other);
+        if (oit == ctx.graph.id_to_path.end()) return;
+        if (stem_of(oit->second) != stem) return;
+        if (std::find(ids.begin(), ids.end(), other) == ids.end()) ids.push_back(other);
+    };
+    if (auto out = ctx.graph.outgoing.find(file_id); out != ctx.graph.outgoing.end())
+        for (int64_t o : out->second)
+            consider(o);
+    if (auto in = ctx.graph.incoming.find(file_id); in != ctx.graph.incoming.end())
+        for (int64_t o : in->second)
+            consider(o);
+    return ids;
+}
+
+static json db_unavailable_result(const ServerContext& ctx) {
+    std::string detail =
+        ctx.db_error.empty() ? "Axon index database is not initialized." : ctx.db_error;
+
+    return make_tool_result(
+        {{"error", "Axon index database unavailable"},
+         {"db_path", ctx.cfg.db_path.string()},
+         {"detail", detail},
+         {"hint",
+          "If another Claude/Codex session is open in this project, close it or stop the older "
+          "axon serve process, then retry this tool. If no index exists yet, call run_pipeline."}},
+        true);
 }
 
 static json handle_tool(const std::string& name, const json& args, ServerContext& ctx) {
     ensure_db_open(ctx, name == "run_pipeline");
+
+    // Another axon process holds the DuckDB write lock (typically a second
+    // Claude/Codex session or `axon web` in the same project). Forward the
+    // call to it over localhost instead of failing; if the owner is gone,
+    // fall through — the next ensure_db_open attempt will take the lock.
+    if (!ctx.db_ready() && is_database_lock_error(ctx.db_error)) {
+        std::string proxy_error;
+        if (auto proxied = proxy_tool_call(ctx, name, args, proxy_error)) return *proxied;
+        ctx.db_error += " (proxy attempt failed: " + proxy_error + ")";
+    }
 
     // Order matters: sync first (full walk detects mv/rm/new-file side-effects),
     // then drain pending-writes (re-resolves edges for files that already have
@@ -306,8 +740,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     drain_pending_writes(ctx);
 
     if (name == "run_pipeline") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         auto stats = index_project(ctx.cfg, *ctx.db);
         ctx.graph = load_graph(*ctx.db);
@@ -317,36 +750,34 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 auto mp = find_model(ctx.cfg.project_root / "models");
                 ctx.model = std::make_unique<EmbeddingModel>(mp);
             } catch (const std::exception& e) {
-                return make_tool_result({
-                    {"warning", std::string("Indexed without embeddings: ") + e.what()},
-                    {"files_indexed", stats.files_indexed},
-                    {"symbols_found", stats.symbols_found}
-                });
+                return make_tool_result(
+                    {{"warning", std::string("Indexed without embeddings: ") + e.what()},
+                     {"files_indexed", stats.files_indexed},
+                     {"symbols_found", stats.symbols_found}});
             }
         }
 
         int sym_embedded = 0, turn_embedded = 0;
         try {
-            sym_embedded  = embed_pending_symbols(*ctx.db, *ctx.model);
+            sym_embedded = embed_pending_symbols(*ctx.db, *ctx.model);
             turn_embedded = embed_pending_turns(*ctx.db, *ctx.model);
-        } catch (...) { /* silent — will retry on next drain */ }
+        } catch (...) { /* silent — will retry on next drain */
+        }
 
-        return make_tool_result({
-            {"files_indexed",   stats.files_indexed},
-            {"symbols_found",   stats.symbols_found},
-            {"edges_found",     stats.edges_found},
-            {"symbols_embedded", sym_embedded},
-            {"turns_embedded",   turn_embedded}
-        });
+        return make_tool_result({{"files_indexed", stats.files_indexed},
+                                 {"symbols_found", stats.symbols_found},
+                                 {"edges_found", stats.edges_found},
+                                 {"symbols_embedded", sym_embedded},
+                                 {"turns_embedded", turn_embedded}});
     }
 
     if (name == "index_paths") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         std::vector<std::filesystem::path> paths;
         if (args.contains("paths"))
-            for (const auto& p : args["paths"]) paths.emplace_back(p.get<std::string>());
+            for (const auto& p : args["paths"])
+                paths.emplace_back(p.get<std::string>());
         bool prune = args.value("prune", false);
 
         auto stats = index_files(ctx.cfg, *ctx.db, paths, prune);
@@ -356,35 +787,30 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         int embedded = 0, turns_embedded = 0;
         if (stats.files_indexed > 0 && ctx.model_ready()) {
             try {
-                embedded       = embed_pending_symbols(*ctx.db, *ctx.model);
+                embedded = embed_pending_symbols(*ctx.db, *ctx.model);
                 turns_embedded = embed_pending_turns(*ctx.db, *ctx.model);
             } catch (const std::exception& e) {
-                return make_tool_result({
-                    {"warning", std::string("Indexed but embedding failed: ") + e.what()},
-                    {"files_indexed", stats.files_indexed},
-                    {"files_skipped", stats.files_skipped},
-                    {"files_pruned",  stats.files_pruned}
-                });
+                return make_tool_result(
+                    {{"warning", std::string("Indexed but embedding failed: ") + e.what()},
+                     {"files_indexed", stats.files_indexed},
+                     {"files_skipped", stats.files_skipped},
+                     {"files_pruned", stats.files_pruned}});
             }
         }
 
         // Refresh in-memory graph so subsequent get_impact_graph sees new edges
-        if (stats.files_indexed > 0 || stats.files_pruned > 0)
-            ctx.graph = load_graph(*ctx.db);
+        if (stats.files_indexed > 0 || stats.files_pruned > 0) ctx.graph = load_graph(*ctx.db);
 
-        return make_tool_result({
-            {"files_indexed",    stats.files_indexed},
-            {"files_skipped",    stats.files_skipped},
-            {"files_pruned",     stats.files_pruned},
-            {"symbols_found",    stats.symbols_found},
-            {"symbols_embedded", embedded},
-            {"turns_embedded",   turns_embedded}
-        });
+        return make_tool_result({{"files_indexed", stats.files_indexed},
+                                 {"files_skipped", stats.files_skipped},
+                                 {"files_pruned", stats.files_pruned},
+                                 {"symbols_found", stats.symbols_found},
+                                 {"symbols_embedded", embedded},
+                                 {"turns_embedded", turns_embedded}});
     }
 
     if (name == "get_context_capsule") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         std::string query = args.value("query", "");
         int budget = args.value("token_budget", 8000);
@@ -392,7 +818,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         bool no_cache = args.value("no_cache", false);
         std::vector<std::string> pivots;
         if (args.contains("pivot_files"))
-            for (const auto& p : args["pivot_files"]) pivots.push_back(p.get<std::string>());
+            for (const auto& p : args["pivot_files"])
+                pivots.push_back(p.get<std::string>());
+
+        // compression: caller arg wins; fall back to project config default.
+        std::string compression_str =
+            args.value("compression", ctx.cfg.project_cfg.capsule_compression);
+        CapsuleCompression compression = compression_from_string(compression_str);
 
         // Cache lookup is keyed by (query, budget, project_epoch). Pivots are
         // intentionally NOT in the key — different pivot sets steer the
@@ -401,69 +833,103 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         // override pivots. When pivots are explicit, skip cache to avoid
         // returning a cache entry generated for the implicit-pivot path.
         // Dialogue budget also bypasses cache (turns change independently of code index).
+        // Body compression produces a different output than Off — bypass cache to
+        // avoid serving a non-compressed entry under a compressed request or vice versa.
         const std::string epoch = current_project_epoch(*ctx.db);
-        const bool eligible_for_cache = !no_cache && pivots.empty() && dialogue_budget == 0;
+        const bool eligible_for_cache = !no_cache && pivots.empty() && dialogue_budget == 0 &&
+                                        compression == CapsuleCompression::Off;
         std::string cache_key;
         if (eligible_for_cache) {
-            cache_key = compute_capsule_cache_key(query, budget, epoch);
+            cache_key = compute_capsule_cache_key(query, budget, epoch, axon::VERSION);
             if (auto hit = capsule_cache_lookup(*ctx.db, cache_key, epoch)) {
                 json pf = json::array();
                 for (const auto& f : hit->pivot_files)
-                    pf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+                    pf.push_back({{"path", f.path},
+                                  {"source_ref", f.source_ref},
+                                  {"expand_command", f.expand_command},
+                                  {"content", f.content},
+                                  {"tokens", f.token_estimate}});
                 json sf = json::array();
                 for (const auto& f : hit->support_files)
-                    sf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
-                return make_tool_result({
-                    {"query", hit->query},
-                    {"pivot_files", pf},
-                    {"support_files", sf},
-                    {"related_turns", json::array()},
-                    {"token_estimate", hit->token_estimate},
-                    {"total_files_indexed", hit->total_files},
-                    {"cache", "hit"}
-                });
+                    sf.push_back({{"path", f.path},
+                                  {"source_ref", f.source_ref},
+                                  {"expand_command", f.expand_command},
+                                  {"content", f.content},
+                                  {"tokens", f.token_estimate}});
+                return make_tool_result({{"query", hit->query},
+                                         {"pivot_files", pf},
+                                         {"support_files", sf},
+                                         {"related_turns", json::array()},
+                                         {"token_estimate", hit->token_estimate},
+                                         {"total_files_indexed", hit->total_files},
+                                         {"compression",
+                                          {{"input_tokens", hit->compression_input_tokens},
+                                           {"output_tokens", hit->compression_output_tokens},
+                                           {"tokens_saved", hit->compression_tokens_saved}}},
+                                         {"ccr_artifact_ids", hit->ccr_artifact_ids},
+                                         {"cache", "hit"}});
             }
         }
 
         // Miss path needs the embedding model; defer the readiness check until
         // here so cache hits don't require it.
         if (!ctx.model_ready())
-            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
+                                    true);
 
-        auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model,
-                                        ctx.graph, ctx.cfg.project_root, budget,
-                                        dialogue_budget);
+        auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model, ctx.graph,
+                                        ctx.cfg.project_root, budget, dialogue_budget, compression);
 
         if (eligible_for_cache) {
             capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
         }
+        if (capsule.compression_tokens_saved > 0) {
+            axon::record_telemetry(ctx.cfg, ctx.db.get(),
+                                   {"get_context_capsule.compression", "mcp", 0,
+                                    capsule.compression_output_tokens,
+                                    capsule.compression_input_tokens,
+                                    capsule.compression_tokens_saved, false, "compression"});
+        }
 
         json pf = json::array();
         for (const auto& f : capsule.pivot_files)
-            pf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+            pf.push_back({{"path", f.path},
+                          {"source_ref", f.source_ref},
+                          {"expand_command", f.expand_command},
+                          {"content", f.content},
+                          {"tokens", f.token_estimate}});
         json sf = json::array();
         for (const auto& f : capsule.support_files)
-            sf.push_back({{"path",f.path},{"content",f.content},{"tokens",f.token_estimate}});
+            sf.push_back({{"path", f.path},
+                          {"source_ref", f.source_ref},
+                          {"expand_command", f.expand_command},
+                          {"content", f.content},
+                          {"tokens", f.token_estimate}});
         json rt = json::array();
         for (const auto& t : capsule.related_turns)
-            rt.push_back({{"role",t.role},{"content",t.content},
-                          {"session",t.session_label},{"thread",t.thread_name},
-                          {"ts",t.ts},{"tokens",t.token_estimate}});
+            rt.push_back({{"role", t.role},
+                          {"content", t.content},
+                          {"session", t.session_label},
+                          {"thread", t.thread_name},
+                          {"ts", t.ts},
+                          {"tokens", t.token_estimate}});
 
-        return make_tool_result({
-            {"query", capsule.query},
-            {"pivot_files", pf},
-            {"support_files", sf},
-            {"related_turns", rt},
-            {"token_estimate", capsule.token_estimate},
-            {"total_files_indexed", capsule.total_files},
-            {"cache", "miss"}
-        });
+        return make_tool_result({{"query", capsule.query},
+                                 {"pivot_files", pf},
+                                 {"support_files", sf},
+                                 {"related_turns", rt},
+                                 {"token_estimate", capsule.token_estimate},
+                                 {"total_files_indexed", capsule.total_files},
+                                 {"compression",
+                                  {{"input_tokens", capsule.compression_input_tokens},
+                                   {"output_tokens", capsule.compression_output_tokens},
+                                   {"tokens_saved", capsule.compression_tokens_saved}}},
+                                 {"ccr_artifact_ids", capsule.ccr_artifact_ids},
+                                 {"cache", "miss"}});
     }
 
     if (name == "get_impact_graph") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         json result = json::array();
         for (const auto& p : args["files"]) {
@@ -484,8 +950,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     }
 
     if (name == "get_skeleton") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         json result = json::array();
 
@@ -496,7 +961,10 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         for (const auto& p : args["files"]) {
             std::string path = p.get<std::string>();
             std::string escaped;
-            for (char c : path) { if (c == '\'') escaped += '\''; escaped += c; }
+            for (char c : path) {
+                if (c == '\'') escaped += '\'';
+                escaped += c;
+            }
             if (!first) in_clause << ",";
             in_clause << "'" << escaped << "'";
             first = false;
@@ -504,8 +972,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         in_clause << ")";
 
         // Fetch cached skeletons from DB in one query
-        auto sk_res = ctx.db->conn().Query(
-            "SELECT path, skeleton FROM files WHERE path IN " + in_clause.str());
+        auto sk_res = ctx.db->conn().Query("SELECT path, skeleton FROM files WHERE path IN " +
+                                           in_clause.str());
         auto& sk_mat = *sk_res;
         std::unordered_map<std::string, std::string> cached;
         for (duckdb::idx_t i = 0; i < sk_mat.RowCount(); i++) {
@@ -525,22 +993,55 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 std::string content((std::istreambuf_iterator<char>(f)), {});
 
                 // Resolve language
-                auto lang_res = ctx.db->conn().Query(
-                    "SELECT language FROM files WHERE path = '" + [&]{
-                        std::string e; for (char c : path) { if(c=='\'') e+='\''; e+=c; } return e;
+                auto lang_res =
+                    ctx.db->conn().Query("SELECT language FROM files WHERE path = '" + [&] {
+                        std::string e;
+                        for (char c : path) {
+                            if (c == '\'') e += '\'';
+                            e += c;
+                        }
+                        return e;
                     }() + "'");
                 auto& mat = *lang_res;
                 if (mat.RowCount() == 0) continue;
                 std::string ls = mat.GetValue(0, 0).ToString();
                 Language lang = Language::TypeScript;
-                if (ls == "python")          lang = Language::Python;
-                else if (ls == "rust")       lang = Language::Rust;
-                else if (ls == "go")         lang = Language::Go;
-                else if (ls == "javascript") lang = Language::JavaScript;
-                else if (ls == "csharp")     lang = Language::CSharp;
-                else if (ls == "php")        lang = Language::PHP;
-                else if (ls == "dart")       lang = Language::Dart;
-                else if (ls == "java")       lang = Language::Java;
+                if (ls == "python")
+                    lang = Language::Python;
+                else if (ls == "rust")
+                    lang = Language::Rust;
+                else if (ls == "go")
+                    lang = Language::Go;
+                else if (ls == "javascript")
+                    lang = Language::JavaScript;
+                else if (ls == "csharp")
+                    lang = Language::CSharp;
+                else if (ls == "php")
+                    lang = Language::PHP;
+                else if (ls == "dart")
+                    lang = Language::Dart;
+                else if (ls == "java")
+                    lang = Language::Java;
+                else if (ls == "bash")
+                    lang = Language::Bash;
+                else if (ls == "cpp")
+                    lang = Language::Cpp;
+                else if (ls == "kotlin")
+                    lang = Language::Kotlin;
+                else if (ls == "vue")
+                    lang = Language::Vue;
+                else if (ls == "lua")
+                    lang = Language::Lua;
+                else if (ls == "nix")
+                    lang = Language::Nix;
+                else if (ls == "ruby")
+                    lang = Language::Ruby;
+                else if (ls == "swift")
+                    lang = Language::Swift;
+                else if (ls == "scala")
+                    lang = Language::Scala;
+                else if (ls == "gdscript")
+                    lang = Language::GDScript;
 
                 result.push_back({{"path", path}, {"skeleton", skeletonize(content, lang)}});
             }
@@ -549,51 +1050,144 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     }
 
     if (name == "search_memory") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
+                                    true);
 
         std::string q = args.value("query", "");
         int limit = args.value("limit", 5);
+        if (limit < 1) limit = 1;
+        if (limit > 100) limit = 100;
+        const int candidate_limit = std::min(500, std::max(20, limit * 4));
+        const auto tags = normalized_tags(args);
+        const auto lexical_terms = memory_lexical_terms(q);
         auto qvec = ctx.model->embed(q);
 
         std::ostringstream vs;
         vs << "[";
-        for (size_t i = 0; i < qvec.size(); i++) { if (i) vs << ","; vs << qvec[i]; }
+        for (size_t i = 0; i < qvec.size(); i++) {
+            if (i) vs << ",";
+            vs << qvec[i];
+        }
         vs << "]";
 
-        std::string sql = "SELECT content, file_path, created_at FROM observations "
-            "WHERE embedding IS NOT NULL "
-            "ORDER BY array_cosine_similarity(embedding, " + vs.str() +
-            "::FLOAT[" + std::to_string(ctx.model->dims()) + "]) DESC LIMIT " +
-            std::to_string(limit);
+        std::string tag_filter;
+        if (!tags.empty()) {
+            tag_filter = " AND (SELECT COUNT(DISTINCT otf.tag) FROM observation_tags otf "
+                         "      WHERE otf.observation_id = o.id AND otf.tag IN " +
+                         sql_string_list(tags) + ") = " + std::to_string(tags.size()) + " ";
+        }
 
-        auto res = ctx.db->conn().Query(sql);
-        auto& mat = *res;
+        const std::string tag_projection =
+            "(SELECT list(ot.tag ORDER BY ot.tag) FROM observation_tags ot "
+            " WHERE ot.observation_id = o.id) AS tags";
+        const std::string similarity = "array_cosine_similarity(o.embedding, " + vs.str() +
+                                       "::FLOAT[" + std::to_string(ctx.model->dims()) + "])";
+        const std::string semantic_sql =
+            "SELECT o.id, o.content, o.file_path, CAST(o.created_at AS VARCHAR), "
+            "       COALESCE(o.authority, 1.0), " +
+            tag_projection + ", " + similarity +
+            " AS channel_score "
+            "FROM observations o WHERE o.embedding IS NOT NULL" +
+            tag_filter + " ORDER BY channel_score DESC, o.id ASC LIMIT " +
+            std::to_string(candidate_limit);
+
+        auto semantic_result = ctx.db->conn().Query(semantic_sql);
+        if (semantic_result->HasError())
+            throw std::runtime_error("search_memory semantic: " + semantic_result->GetError());
+
+        std::vector<int64_t> semantic_ids;
+        std::vector<int64_t> lexical_ids;
+        std::unordered_map<int64_t, double> authority_by_id;
+        std::unordered_map<int64_t, json> metadata;
+
+        const auto store_candidate = [&](duckdb::MaterializedQueryResult& rows, duckdb::idx_t row,
+                                         const char* channel_score_name) {
+            const int64_t id = rows.GetValue<int64_t>(0, row);
+            const double authority = bounded_memory_authority(rows.GetValue<double>(4, row));
+            authority_by_id[id] = authority;
+            auto [iterator, inserted] =
+                metadata.try_emplace(id, json{{"observation_id", id},
+                                              {"content", rows.GetValue(1, row).ToString()},
+                                              {"file_path", rows.GetValue(2, row).ToString()},
+                                              {"created_at", rows.GetValue(3, row).ToString()},
+                                              {"authority", authority},
+                                              {"tags", json::array()}});
+            auto& item = iterator->second;
+            if (inserted) {
+                auto tag_value = rows.GetValue(5, row);
+                if (!tag_value.IsNull()) {
+                    for (const auto& tag : duckdb::ListValue::GetChildren(tag_value))
+                        item["tags"].push_back(tag.GetValue<std::string>());
+                }
+            }
+            item[channel_score_name] = rows.GetValue<double>(6, row);
+            return id;
+        };
+
+        for (duckdb::idx_t row = 0; row < semantic_result->RowCount(); ++row)
+            semantic_ids.push_back(store_candidate(*semantic_result, row, "semantic_similarity"));
+
+        if (!lexical_terms.empty()) {
+            std::string lexical_expression = "(";
+            for (size_t index = 0; index < lexical_terms.size(); ++index) {
+                if (index) lexical_expression += " + ";
+                lexical_expression += "CASE WHEN contains(lower(o.content), '" +
+                                      sql_escape(lexical_terms[index]) + "') THEN 1 ELSE 0 END";
+            }
+            lexical_expression += ")";
+
+            const std::string lexical_sql =
+                "SELECT o.id, o.content, o.file_path, CAST(o.created_at AS VARCHAR), "
+                "       COALESCE(o.authority, 1.0), " +
+                tag_projection + ", CAST(" + lexical_expression +
+                " AS DOUBLE) AS channel_score "
+                "FROM observations o WHERE " +
+                lexical_expression + " > 0" + tag_filter +
+                " ORDER BY channel_score DESC, o.id ASC LIMIT " + std::to_string(candidate_limit);
+            auto lexical_result = ctx.db->conn().Query(lexical_sql);
+            if (lexical_result->HasError())
+                throw std::runtime_error("search_memory lexical: " + lexical_result->GetError());
+            for (duckdb::idx_t row = 0; row < lexical_result->RowCount(); ++row)
+                lexical_ids.push_back(store_candidate(*lexical_result, row, "lexical_hits"));
+        }
 
         json result = json::array();
-        for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
-            result.push_back({
-                {"content",    mat.GetValue(0, i).ToString()},
-                {"file_path",  mat.GetValue(1, i).ToString()},
-                {"created_at", mat.GetValue(2, i).ToString()}
-            });
+        for (const auto& rank :
+             fuse_memory_ranks(semantic_ids, lexical_ids, authority_by_id, limit)) {
+            auto item = metadata.at(rank.observation_id);
+            item["semantic_rank"] = rank.semantic_rank ? json(*rank.semantic_rank) : json(nullptr);
+            item["lexical_rank"] = rank.lexical_rank ? json(*rank.lexical_rank) : json(nullptr);
+            item["rrf_score"] = rank.rrf_score;
+            item["score"] = rank.final_score;
+            result.push_back(std::move(item));
         }
         return make_tool_result(result);
     }
 
     if (name == "save_observation") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
-        std::string content   = args.value("content", "");
+        std::string content = args.value("content", "");
         std::string file_path = args.value("file_path", "");
+        const auto tags = normalized_tags(args);
+        if (args.contains("authority") && !args["authority"].is_number())
+            return make_tool_result({{"error", "authority must be a number"}}, true);
+        const double authority = bounded_memory_authority(args.value("authority", 1.0));
+
+        auto id_result = ctx.db->conn().Query("SELECT nextval('seq_id')");
+        if (id_result->HasError()) throw std::runtime_error(id_result->GetError());
+        const int64_t observation_id = id_result->GetValue<int64_t>(0, 0);
 
         // Escape helper for inline SQL strings
         auto sq = [](const std::string& s) {
-            std::string out; out.reserve(s.size() + 4);
-            for (char c : s) { if (c == '\'') out += '\''; out += c; }
+            std::string out;
+            out.reserve(s.size() + 4);
+            for (char c : s) {
+                if (c == '\'') out += '\'';
+                out += c;
+            }
             return out;
         };
 
@@ -601,56 +1195,72 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             auto emb = ctx.model->embed(content);
             std::ostringstream vs;
             vs << "[";
-            for (size_t i = 0; i < emb.size(); i++) { if (i) vs << ","; vs << emb[i]; }
+            for (size_t i = 0; i < emb.size(); i++) {
+                if (i) vs << ",";
+                vs << emb[i];
+            }
             vs << "]";
 
-            std::string sql =
-                "INSERT INTO observations (id, content, file_path, embedding, created_at) VALUES ("
-                "nextval('seq_id'), '" + sq(content) + "', '" + sq(file_path) + "', " +
-                vs.str() + "::FLOAT[" + std::to_string(ctx.model->dims()) + "], now())";
-            ctx.db->conn().Query(sql);
+            std::string sql = "INSERT INTO observations (id, content, file_path, embedding, "
+                              "authority, created_at) VALUES (" +
+                              std::to_string(observation_id) + ", '" + sq(content) + "', '" +
+                              sq(file_path) + "', " + vs.str() + "::FLOAT[" +
+                              std::to_string(ctx.model->dims()) + "], " +
+                              std::to_string(authority) + ", now())";
+            auto inserted = ctx.db->conn().Query(sql);
+            if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
         } else {
             auto stmt = ctx.db->conn().Prepare(
-                "INSERT INTO observations (id, content, file_path, created_at) "
-                "VALUES (nextval('seq_id'), $1, $2, now())");
-            stmt->Execute(content, file_path);
+                "INSERT INTO observations (id, content, file_path, authority, created_at) "
+                "VALUES ($1, $2, $3, $4, now())");
+            auto inserted = stmt->Execute(observation_id, content, file_path, authority);
+            if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
         }
-        return make_tool_result({{"saved", true}});
+
+        if (!tags.empty()) {
+            auto stmt = ctx.db->conn().Prepare(
+                "INSERT INTO observation_tags (observation_id, tag) VALUES ($1, $2)");
+            for (const auto& tag : tags) {
+                auto inserted = stmt->Execute(observation_id, tag);
+                if (inserted->HasError()) throw std::runtime_error(inserted->GetError());
+            }
+        }
+        return make_tool_result({{"saved", true},
+                                 {"observation_id", observation_id},
+                                 {"tags", tags},
+                                 {"authority", authority}});
     }
 
     if (name == "get_overview") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         int limit = args.value("limit", 10);
-        if (limit < 1)   limit = 1;
+        if (limit < 1) limit = 1;
         if (limit > 100) limit = 100;
 
         auto top = ctx.graph.top_files_by_degree(limit);
 
         // Total indexed file count
         auto total_res = ctx.db->conn().Query("SELECT COUNT(*) FROM files");
-        int64_t total_files = total_res->RowCount() > 0
-            ? total_res->GetValue(0, 0).GetValue<int64_t>() : 0;
+        int64_t total_files =
+            total_res->RowCount() > 0 ? total_res->GetValue(0, 0).GetValue<int64_t>() : 0;
 
         json top_files = json::array();
         for (const auto& n : top) {
             int in_deg = 0, out_deg = 0;
-            auto it_in  = ctx.graph.incoming.find(n.file_id);
+            auto it_in = ctx.graph.incoming.find(n.file_id);
             auto it_out = ctx.graph.outgoing.find(n.file_id);
-            if (it_in  != ctx.graph.incoming.end()) in_deg  = (int)it_in->second.size();
+            if (it_in != ctx.graph.incoming.end()) in_deg = (int)it_in->second.size();
             if (it_out != ctx.graph.outgoing.end()) out_deg = (int)it_out->second.size();
             int64_t bsize = 0;
             auto it_sz = ctx.graph.file_byte_size.find(n.file_id);
             if (it_sz != ctx.graph.file_byte_size.end()) bsize = it_sz->second;
 
-            top_files.push_back({
-                {"path",         n.path},
-                {"in_degree",    in_deg},
-                {"out_degree",   out_deg},
-                {"total_degree", n.degree},
-                {"byte_size",    bsize}
-            });
+            top_files.push_back({{"path", n.path},
+                                 {"in_degree", in_deg},
+                                 {"out_degree", out_deg},
+                                 {"total_degree", n.degree},
+                                 {"byte_size", bsize}});
         }
 
         // Top referenced symbols (by number of edges into their file, grouped by name+file)
@@ -661,54 +1271,50 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             "FROM symbols s JOIN files f ON s.file_id = f.id "
             "WHERE s.kind IN ('function','class','method','interface','type','struct') "
             "ORDER BY refs DESC, s.name "
-            "LIMIT " + std::to_string(limit);
+            "LIMIT " +
+            std::to_string(limit);
         auto sym_res = ctx.db->conn().Query(sym_sql);
         if (!sym_res->HasError()) {
             auto& mat = *sym_res;
             for (duckdb::idx_t i = 0; i < mat.RowCount(); i++) {
-                top_symbols.push_back({
-                    {"name",       mat.GetValue(0, i).ToString()},
-                    {"kind",       mat.GetValue(1, i).ToString()},
-                    {"file",       mat.GetValue(2, i).ToString()},
-                    {"line",       mat.GetValue(3, i).GetValue<int32_t>()},
-                    {"signature",  mat.GetValue(4, i).ToString()},
-                    {"file_refs",  mat.GetValue(5, i).GetValue<int64_t>()}
-                });
+                top_symbols.push_back({{"name", mat.GetValue(0, i).ToString()},
+                                       {"kind", mat.GetValue(1, i).ToString()},
+                                       {"file", mat.GetValue(2, i).ToString()},
+                                       {"line", mat.GetValue(3, i).GetValue<int32_t>()},
+                                       {"signature", mat.GetValue(4, i).ToString()},
+                                       {"file_refs", mat.GetValue(5, i).GetValue<int64_t>()}});
             }
         }
 
-        return make_tool_result({
-            {"total_files_indexed", total_files},
-            {"top_files",           top_files},
-            {"top_symbols",         top_symbols},
-            {"hint", "Use get_context_capsule(query) with a query derived from these entry points, or get_skeleton(files) to inspect signatures."}
-        });
+        return make_tool_result(
+            {{"total_files_indexed", total_files},
+             {"top_files", top_files},
+             {"top_symbols", top_symbols},
+             {"hint", "Use get_context_capsule(query) with a query derived from these entry "
+                      "points, or get_skeleton(files) to inspect signatures."}});
     }
 
     if (name == "get_callers") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         std::string sym_name = args.value("symbol_name", "");
         std::string file_hint = args.value("file_path", "");
         int limit = args.value("limit", 50);
-        if (sym_name.empty())
-            return make_tool_result({{"error","symbol_name is required"}}, true);
-        if (limit < 1)    limit = 1;
-        if (limit > 500)  limit = 500;
+        if (sym_name.empty()) return make_tool_result({{"error", "symbol_name is required"}}, true);
+        if (limit < 1) limit = 1;
+        if (limit > 500) limit = 500;
 
         // Find all symbols matching the name (optionally filtered to a specific file)
         std::string sym_sql =
             "SELECT s.id, s.file_id, s.name, s.kind, s.start_line, s.signature, f.path "
             "FROM symbols s JOIN files f ON s.file_id = f.id "
-            "WHERE s.name = '" + sql_escape(sym_name) + "'";
-        if (!file_hint.empty())
-            sym_sql += " AND f.path = '" + sql_escape(file_hint) + "'";
+            "WHERE s.name = '" +
+            sql_escape(sym_name) + "'";
+        if (!file_hint.empty()) sym_sql += " AND f.path = '" + sql_escape(file_hint) + "'";
         sym_sql += " LIMIT 20";
 
         auto sym_res = ctx.db->conn().Query(sym_sql);
-        if (sym_res->HasError())
-            return make_tool_result({{"error", sym_res->GetError()}}, true);
+        if (sym_res->HasError()) return make_tool_result({{"error", sym_res->GetError()}}, true);
 
         json matches = json::array();
         auto& sm = *sym_res;
@@ -718,19 +1324,28 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             int64_t file_id = sm.GetValue(1, i).GetValue<int64_t>();
             std::string callee_file = sm.GetValue(6, i).ToString();
 
-            // File-level callers: files that import the file containing the symbol.
-            // Edges are file-granular in the current schema, so this is the tightest
-            // lower bound on true caller set. The agent should narrow with get_skeleton.
+            // File-level callers: files that import the file containing the
+            // symbol — or a same-stem peer of it (declaration header for a
+            // symbol defined in a .cpp/.c). Edges are file-granular in the
+            // current schema, so this is the tightest lower bound on the true
+            // caller set. The agent should narrow with get_skeleton.
             json callers = json::array();
-            auto it = ctx.graph.incoming.find(file_id);
-            if (it != ctx.graph.incoming.end()) {
+            auto surface = definition_surface(ctx, file_id);
+            std::unordered_set<std::string> seen_callers;
+            for (int64_t sid : surface) {
+                auto it = ctx.graph.incoming.find(sid);
+                if (it == ctx.graph.incoming.end()) continue;
                 for (int64_t src_id : it->second) {
+                    if (std::find(surface.begin(), surface.end(), src_id) != surface.end())
+                        continue; // ccr.cpp importing ccr.hpp is not a caller
                     auto pit = ctx.graph.id_to_path.find(src_id);
                     if (pit == ctx.graph.id_to_path.end()) continue;
+                    if (!seen_callers.insert(pit->second).second) continue;
                     callers.push_back(pit->second);
                     total_callers++;
                     if (total_callers >= limit) break;
                 }
+                if (total_callers >= limit) break;
             }
 
             // Symbol-level callers (populated when granularity=symbol)
@@ -740,43 +1355,42 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             if (sym_it != ctx.graph.symbol_incoming.end()) {
                 for (int64_t src_sym_id : sym_it->second) {
                     // Buscar detalhes do símbolo chamador
-                    auto src_res = ctx.db->conn().Query(
-                        "SELECT s.name, s.kind, f.path, s.start_line "
-                        "FROM symbols s JOIN files f ON s.file_id = f.id "
-                        "WHERE s.id = " + std::to_string(src_sym_id));
+                    auto src_res =
+                        ctx.db->conn().Query("SELECT s.name, s.kind, f.path, s.start_line "
+                                             "FROM symbols s JOIN files f ON s.file_id = f.id "
+                                             "WHERE s.id = " +
+                                             std::to_string(src_sym_id));
                     if (!src_res->HasError() && src_res->RowCount() > 0) {
-                        caller_symbols.push_back({
-                            {"name", src_res->GetValue(0, 0).ToString()},
-                            {"kind", src_res->GetValue(1, 0).ToString()},
-                            {"file", src_res->GetValue(2, 0).ToString()},
-                            {"line", src_res->GetValue(3, 0).GetValue<int32_t>()}
-                        });
+                        caller_symbols.push_back(
+                            {{"name", src_res->GetValue(0, 0).ToString()},
+                             {"kind", src_res->GetValue(1, 0).ToString()},
+                             {"file", src_res->GetValue(2, 0).ToString()},
+                             {"line", src_res->GetValue(3, 0).GetValue<int32_t>()}});
                     }
                 }
             }
 
-            matches.push_back({
-                {"symbol",         sm.GetValue(2, i).ToString()},
-                {"kind",           sm.GetValue(3, i).ToString()},
-                {"file",           callee_file},
-                {"line",           sm.GetValue(4, i).GetValue<int32_t>()},
-                {"signature",      sm.GetValue(5, i).ToString()},
-                {"caller_files",   callers},
-                {"caller_symbols", caller_symbols}
-            });
+            matches.push_back({{"symbol", sm.GetValue(2, i).ToString()},
+                               {"kind", sm.GetValue(3, i).ToString()},
+                               {"file", callee_file},
+                               {"line", sm.GetValue(4, i).GetValue<int32_t>()},
+                               {"signature", sm.GetValue(5, i).ToString()},
+                               {"caller_files", callers},
+                               {"caller_symbols", caller_symbols}});
             if (total_callers >= limit) break;
         }
 
-        return make_tool_result({
-            {"symbol_name",    sym_name},
-            {"matches",        matches},
-            {"note", "caller_files: files importing the defining file. caller_symbols: symbol-level callers (populated when granularity=symbol). Use get_skeleton(caller_files) to narrow to specific call sites."}
-        });
+        return make_tool_result(
+            {{"symbol_name", sym_name},
+             {"matches", matches},
+             {"note", "caller_files: files importing the defining file or a same-stem peer (e.g. "
+                      "the header declaring a symbol defined in a .cpp). caller_symbols: "
+                      "symbol-level callers (populated when granularity=symbol). Use "
+                      "get_skeleton(caller_files) to narrow to specific call sites."}});
     }
 
     if (name == "get_tests_for") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         json result = json::array();
         std::unordered_set<std::string> all_tests;
@@ -790,8 +1404,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             }
 
             json tests = json::array();
-            auto in = ctx.graph.incoming.find(it->second);
-            if (in != ctx.graph.incoming.end()) {
+            // Include importers of same-stem peers (declaration headers), so
+            // tests that include foo.hpp count as covering foo.cpp.
+            for (int64_t sid : definition_surface(ctx, it->second)) {
+                auto in = ctx.graph.incoming.find(sid);
+                if (in == ctx.graph.incoming.end()) continue;
                 for (int64_t src_id : in->second) {
                     auto p2 = ctx.graph.id_to_path.find(src_id);
                     if (p2 == ctx.graph.id_to_path.end()) continue;
@@ -811,26 +1428,27 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             result.push_back({{"file", path}, {"tests", tests}, {"indexed", true}});
         }
 
-        return make_tool_result({
-            {"per_file",     result},
-            {"all_tests",    std::vector<std::string>(all_tests.begin(), all_tests.end())},
-            {"total_tests",  (int)all_tests.size()},
-            {"note", "Tests are detected by path convention (_test.*, *.spec.*, /tests/, etc) among files that import the target. Check get_skeleton(tests) to confirm coverage."}
-        });
+        return make_tool_result(
+            {{"per_file", result},
+             {"all_tests", std::vector<std::string>(all_tests.begin(), all_tests.end())},
+             {"total_tests", (int)all_tests.size()},
+             {"note",
+              "Tests are detected by path convention (_test.*, *.spec.*, /tests/, etc) among files "
+              "that import the target or a same-stem peer (e.g. the header declaring symbols "
+              "defined in a .cpp). Check get_skeleton(tests) to confirm coverage."}});
     }
 
     if (name == "rename") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         std::string old_name = args.value("symbol_name", "");
         std::string new_name = args.value("new_name", "");
         bool dry_run = args.value("dry_run", true);
 
         if (old_name.empty() || new_name.empty())
-            return make_tool_result({{"error","symbol_name and new_name are required"}}, true);
+            return make_tool_result({{"error", "symbol_name and new_name are required"}}, true);
         if (old_name == new_name)
-            return make_tool_result({{"error","old and new name are the same"}}, true);
+            return make_tool_result({{"error", "old and new name are the same"}}, true);
 
         // Find all files containing the symbol (via DB symbols table + caller files)
         std::unordered_set<std::string> candidate_files;
@@ -838,15 +1456,16 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         // Files that define the symbol
         auto def_res = ctx.db->conn().Query(
             "SELECT DISTINCT f.path FROM symbols s JOIN files f ON s.file_id = f.id "
-            "WHERE s.name = '" + sql_escape(old_name) + "'");
+            "WHERE s.name = '" +
+            sql_escape(old_name) + "'");
         if (!def_res->HasError()) {
             for (duckdb::idx_t i = 0; i < def_res->RowCount(); i++) {
                 std::string fpath = def_res->GetValue(0, i).ToString();
                 candidate_files.insert(fpath);
 
                 // Also add files that import the defining file (callers)
-                auto fid_res = ctx.db->conn().Query(
-                    "SELECT id FROM files WHERE path = '" + sql_escape(fpath) + "'");
+                auto fid_res = ctx.db->conn().Query("SELECT id FROM files WHERE path = '" +
+                                                    sql_escape(fpath) + "'");
                 if (!fid_res->HasError() && fid_res->RowCount() > 0) {
                     int64_t fid = fid_res->GetValue<int64_t>(0, 0);
                     auto it = ctx.graph.incoming.find(fid);
@@ -861,12 +1480,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         }
 
         if (candidate_files.empty())
-            return make_tool_result({
-                {"symbol_name", old_name},
-                {"new_name",    new_name},
-                {"edits",       json::array()},
-                {"note",        "Symbol not found in index. Run run_pipeline first or check the name."}
-            });
+            return make_tool_result(
+                {{"symbol_name", old_name},
+                 {"new_name", new_name},
+                 {"edits", json::array()},
+                 {"note", "Symbol not found in index. Run run_pipeline first or check the name."}});
 
         // Collect edits from all candidate files
         std::vector<axon::RenameEdit> all_edits;
@@ -875,60 +1493,56 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             std::string abs_path = root + "/" + rel_path;
             auto file_edits = axon::collect_rename_edits(abs_path, old_name, new_name);
             for (auto& e : file_edits) {
-                e.file_path = rel_path;  // store relative path in result
+                e.file_path = rel_path; // store relative path in result
                 all_edits.push_back(e);
             }
         }
 
         json edits_json = json::array();
         for (const auto& e : all_edits) {
-            edits_json.push_back({
-                {"file", e.file_path},
-                {"line", e.line},
-                {"old",  e.old_text},
-                {"new",  e.new_text}
-            });
+            edits_json.push_back({{"file", e.file_path},
+                                  {"line", e.line},
+                                  {"old", e.old_text},
+                                  {"new", e.new_text}});
         }
 
         int files_written = 0;
         if (!dry_run && !all_edits.empty()) {
             // Restore absolute paths for writing
             std::vector<axon::RenameEdit> abs_edits = all_edits;
-            for (auto& e : abs_edits) e.file_path = root + "/" + e.file_path;
+            for (auto& e : abs_edits)
+                e.file_path = root + "/" + e.file_path;
             files_written = axon::apply_rename_edits(abs_edits);
         }
 
-        return make_tool_result({
-            {"symbol_name",    old_name},
-            {"new_name",       new_name},
-            {"dry_run",        dry_run},
-            {"edits",          edits_json},
-            {"total_edits",    (int)all_edits.size()},
-            {"files_affected", (int)candidate_files.size()},
-            {"files_written",  files_written},
-            {"note", dry_run ? "Dry run — no files written. Set dry_run=false to apply." : "Changes applied to disk. Run index_paths to update the index."}
-        });
+        return make_tool_result(
+            {{"symbol_name", old_name},
+             {"new_name", new_name},
+             {"dry_run", dry_run},
+             {"edits", edits_json},
+             {"total_edits", (int)all_edits.size()},
+             {"files_affected", (int)candidate_files.size()},
+             {"files_written", files_written},
+             {"note", dry_run ? "Dry run — no files written. Set dry_run=false to apply."
+                              : "Changes applied to disk. Run index_paths to update the index."}});
     }
 
     if (name == "detect_changes") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         std::string ref = args.value("ref", "HEAD");
         std::string root = ctx.cfg.project_root.string();
 
         if (!axon::is_git_repo(root))
-            return make_tool_result({{"error","Not a git repository"}}, true);
+            return make_tool_result({{"error", "Not a git repository"}}, true);
 
         auto diffs = axon::get_git_diffs(root, ref);
         if (diffs.empty())
-            return make_tool_result({
-                {"ref", ref},
-                {"changed_files", json::array()},
-                {"affected_symbols", json::array()},
-                {"impacted_files", json::array()},
-                {"note", "No changes detected for ref: " + ref}
-            });
+            return make_tool_result({{"ref", ref},
+                                     {"changed_files", json::array()},
+                                     {"affected_symbols", json::array()},
+                                     {"impacted_files", json::array()},
+                                     {"note", "No changes detected for ref: " + ref}});
 
         json changed_files = json::array();
         json affected_symbols = json::array();
@@ -938,35 +1552,36 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             changed_files.push_back(diff.path);
             if (diff.hunks.empty()) continue;
 
-            auto fid_res = ctx.db->conn().Query(
-                "SELECT id FROM files WHERE path = '" + sql_escape(diff.path) + "'");
+            auto fid_res = ctx.db->conn().Query("SELECT id FROM files WHERE path = '" +
+                                                sql_escape(diff.path) + "'");
             if (fid_res->HasError() || fid_res->RowCount() == 0) continue;
             int64_t file_id = fid_res->GetValue<int64_t>(0, 0);
 
             for (const auto& hunk : diff.hunks) {
                 auto sym_res = ctx.db->conn().Query(
                     "SELECT s.name, s.kind, s.start_line, s.end_line, s.signature "
-                    "FROM symbols s WHERE s.file_id = " + std::to_string(file_id) +
+                    "FROM symbols s WHERE s.file_id = " +
+                    std::to_string(file_id) +
                     " AND s.start_line <= " + std::to_string(hunk.end_line) +
                     " AND s.end_line   >= " + std::to_string(hunk.start_line));
                 if (sym_res->HasError()) continue;
                 auto& sr = *sym_res;
                 for (duckdb::idx_t i = 0; i < sr.RowCount(); i++) {
-                    affected_symbols.push_back({
-                        {"name",       sr.GetValue(0, i).ToString()},
-                        {"kind",       sr.GetValue(1, i).ToString()},
-                        {"file",       diff.path},
-                        {"start_line", sr.GetValue(2, i).GetValue<int32_t>()},
-                        {"end_line",   sr.GetValue(3, i).GetValue<int32_t>()},
-                        {"signature",  sr.GetValue(4, i).ToString()}
-                    });
+                    affected_symbols.push_back(
+                        {{"name", sr.GetValue(0, i).ToString()},
+                         {"kind", sr.GetValue(1, i).ToString()},
+                         {"file", diff.path},
+                         {"start_line", sr.GetValue(2, i).GetValue<int32_t>()},
+                         {"end_line", sr.GetValue(3, i).GetValue<int32_t>()},
+                         {"signature", sr.GetValue(4, i).ToString()}});
                 }
             }
 
             impacted_file_ids.insert(file_id);
             auto it = ctx.graph.incoming.find(file_id);
             if (it != ctx.graph.incoming.end())
-                for (int64_t src : it->second) impacted_file_ids.insert(src);
+                for (int64_t src : it->second)
+                    impacted_file_ids.insert(src);
         }
 
         std::unordered_set<std::string> changed_set(changed_files.begin(), changed_files.end());
@@ -977,24 +1592,25 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 impacted.push_back(pit->second);
         }
 
-        return make_tool_result({
-            {"ref",              ref},
-            {"changed_files",    changed_files},
-            {"affected_symbols", affected_symbols},
-            {"impacted_files",   impacted},
-            {"summary", std::to_string(changed_files.size()) + " files changed, " +
-                        std::to_string(affected_symbols.size()) + " symbols affected, " +
-                        std::to_string(impacted.size()) + " files impacted"}
-        });
+        return make_tool_result(
+            {{"ref", ref},
+             {"changed_files", changed_files},
+             {"affected_symbols", affected_symbols},
+             {"impacted_files", impacted},
+             {"summary", std::to_string(changed_files.size()) + " files changed, " +
+                             std::to_string(affected_symbols.size()) + " symbols affected, " +
+                             std::to_string(impacted.size()) + " files impacted"}});
     }
 
     if (name == "route_map") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         // Trigger route indexing if not done (or if index_routes enabled)
         if (ctx.cfg.project_cfg.index_routes) {
-            try { axon::index_routes(ctx.cfg, *ctx.db); } catch (...) {}
+            try {
+                axon::index_routes(ctx.cfg, *ctx.db);
+            } catch (...) {
+            }
         }
 
         std::string framework_filter = args.value("framework", "");
@@ -1003,39 +1619,36 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         json routes_json = json::array();
         for (const auto& r : routes) {
             if (!framework_filter.empty() && r.framework != framework_filter) continue;
-            routes_json.push_back({
-                {"method",       r.method},
-                {"path",         r.path},
-                {"handler_file", r.handler_file},
-                {"framework",    r.framework}
-            });
+            routes_json.push_back({{"method", r.method},
+                                   {"path", r.path},
+                                   {"handler_file", r.handler_file},
+                                   {"framework", r.framework}});
         }
-        return make_tool_result({
-            {"routes", routes_json},
-            {"total",  (int)routes_json.size()},
-            {"note", routes_json.empty()
-                ? "No routes found. Set index_routes=true in .axon/config.toml and run run_pipeline."
-                : ""}
-        });
+        return make_tool_result(
+            {{"routes", routes_json},
+             {"total", (int)routes_json.size()},
+             {"note", routes_json.empty() ? "No routes found. Set index_routes=true in "
+                                            ".axon/config.toml and run run_pipeline."
+                                          : ""}});
     }
 
     if (name == "api_impact") {
-        if (!ctx.db_ready())
-            return db_unavailable_result(ctx);
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         std::string route_path = args.value("route_path", "");
         if (route_path.empty())
-            return make_tool_result({{"error","route_path is required"}}, true);
+            return make_tool_result({{"error", "route_path is required"}}, true);
 
         // Find route in DB
-        auto rr = ctx.db->conn().Query(
-            "SELECT method, path, handler_file, framework, file_id "
-            "FROM routes WHERE path = '" + sql_escape(route_path) + "' LIMIT 1");
+        auto rr = ctx.db->conn().Query("SELECT method, path, handler_file, framework, file_id "
+                                       "FROM routes WHERE path = '" +
+                                       sql_escape(route_path) + "' LIMIT 1");
         if (rr->HasError() || rr->RowCount() == 0)
-            return make_tool_result({
-                {"error", "Route not found: " + route_path},
-                {"hint", "Run route_map to list available routes, or enable index_routes in config."}
-            }, true);
+            return make_tool_result(
+                {{"error", "Route not found: " + route_path},
+                 {"hint",
+                  "Run route_map to list available routes, or enable index_routes in config."}},
+                true);
 
         std::string handler_file = rr->GetValue(2, 0).ToString();
         int64_t file_id = rr->GetValue<int64_t>(4, 0);
@@ -1046,46 +1659,175 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         std::queue<int64_t> q;
         q.push(file_id);
         while (!q.empty()) {
-            int64_t fid = q.front(); q.pop();
+            int64_t fid = q.front();
+            q.pop();
             if (!visited.insert(fid).second) continue;
             auto it = ctx.graph.incoming.find(fid);
             if (it != ctx.graph.incoming.end())
-                for (int64_t src : it->second) q.push(src);
+                for (int64_t src : it->second)
+                    q.push(src);
         }
-        visited.erase(file_id);  // exclude the handler itself
+        visited.erase(file_id); // exclude the handler itself
         for (int64_t fid : visited) {
             auto pit = ctx.graph.id_to_path.find(fid);
-            if (pit != ctx.graph.id_to_path.end())
-                impacted.push_back(pit->second);
+            if (pit != ctx.graph.id_to_path.end()) impacted.push_back(pit->second);
         }
 
-        return make_tool_result({
-            {"route",        {{"method", rr->GetValue(0,0).ToString()},
-                              {"path",   route_path},
-                              {"framework", rr->GetValue(3,0).ToString()}}},
-            {"handler_file", handler_file},
-            {"impacted_files", impacted},
-            {"impacted_count", (int)impacted.size()}
-        });
+        return make_tool_result({{"route",
+                                  {{"method", rr->GetValue(0, 0).ToString()},
+                                   {"path", route_path},
+                                   {"framework", rr->GetValue(3, 0).ToString()}}},
+                                 {"handler_file", handler_file},
+                                 {"impacted_files", impacted},
+                                 {"impacted_count", (int)impacted.size()}});
+    }
+
+    if (name == "portfolio_status" || name == "portfolio_sync" || name == "capability_list" ||
+        name == "capability_search" || name == "capability_duplicates" ||
+        name == "capability_compare" || name == "capability_consumers" ||
+        name == "capability_drift") {
+        try {
+            portfolio::PortfolioCapabilityCatalog catalog;
+            if (name == "portfolio_status") {
+                const auto status = catalog.status();
+                json repos = json::array();
+                for (const auto& item : status.repositories)
+                    repos.push_back({{"repository_id", item.repository_id},
+                                     {"index_stream_id", item.index_stream_id},
+                                     {"status", item.status},
+                                     {"detail", item.detail}});
+                return make_tool_result({{"catalog_path", catalog.path().string()},
+                                         {"capabilities", catalog.list({}, 10000).size()},
+                                         {"degraded", status.degraded},
+                                         {"repositories", repos}});
+            }
+            if (name == "portfolio_sync") {
+                if (args.contains("group") && !args["group"].is_string())
+                    return make_tool_result({{"error", "group must be a string"}}, true);
+                if (args.contains("rebuild") && !args["rebuild"].is_boolean())
+                    return make_tool_result({{"error", "rebuild must be a boolean"}}, true);
+                const auto group = args.contains("group")
+                                       ? std::optional<std::string>{args["group"]}
+                                       : std::nullopt;
+                const auto report = catalog.sync(group, args.value("rebuild", false));
+                json repositories = json::array();
+                for (const auto& item : report.repositories)
+                    repositories.push_back({{"repository_id", item.repository_id},
+                                            {"index_stream_id", item.index_stream_id},
+                                            {"status", item.status},
+                                            {"detail", item.detail},
+                                            {"signatures", item.signatures}});
+                return make_tool_result(
+                    {{"degraded", report.degraded}, {"repositories", repositories}});
+            }
+            if (name == "capability_list" || name == "capability_search") {
+                if (args.contains("limit") && !args["limit"].is_number_integer())
+                    return make_tool_result({{"error", "limit must be an integer"}}, true);
+                const auto limit = args.value("limit", 50);
+                if (limit < 1 || limit > 10000)
+                    return make_tool_result({{"error", "limit must be 1..10000"}}, true);
+                std::vector<portfolio::CapabilitySignature> signatures;
+                if (name == "capability_list") {
+                    std::optional<std::string> repo;
+                    if (args.contains("repository_id")) {
+                        if (!args["repository_id"].is_string())
+                            return make_tool_result({{"error", "repository_id must be a string"}},
+                                                    true);
+                        repo = args["repository_id"];
+                    }
+                    signatures = catalog.list(repo, limit);
+                } else {
+                    const auto query = args.value("query", "");
+                    if (query.empty())
+                        return make_tool_result({{"error", "query is required"}}, true);
+                    signatures = catalog.search(query, limit);
+                }
+                json output = json::array();
+                for (const auto& s : signatures)
+                    output.push_back({{"id", s.signature_id},
+                                      {"repository_id", s.stream.repository_id},
+                                      {"name", s.normalized_name},
+                                      {"path", s.path.value_or("")},
+                                      {"epoch", s.index_epoch}});
+                return make_tool_result({{"capabilities", output}});
+            }
+            if (name == "capability_duplicates" || name == "capability_compare") {
+                const auto candidates = catalog.duplicates(args.value("threshold", 0.0), 10000);
+                const auto wanted = args.value("candidate_id", "");
+                json output = json::array();
+                for (const auto& c : candidates)
+                    if (wanted.empty() || c.candidate_id == wanted)
+                        output.push_back(
+                            {{"id", c.candidate_id},
+                             {"left", c.left_capability_id},
+                             {"right", c.right_capability_id},
+                             {"score", c.final_score},
+                             {"classification", portfolio::to_string(c.classification)},
+                             {"differences", c.differences},
+                             {"invalidators", c.invalidators}});
+                if (!wanted.empty() && output.empty())
+                    return make_tool_result({{"error", "candidate not found"}}, true);
+                return make_tool_result({{"candidates", output}});
+            }
+            if (name == "capability_consumers") {
+                const auto id = args.value("capability_id", "");
+                if (id.empty())
+                    return make_tool_result({{"error", "capability_id is required"}}, true);
+                for (const auto& s : catalog.list({}, 10000))
+                    if (s.signature_id == id)
+                        return make_tool_result(
+                            {{"capability_id", id},
+                             {"repositories", json::array({s.stream.repository_id})},
+                             {"evidence", s.path ? json::array({*s.path}) : json::array()}});
+                return make_tool_result({{"error", "capability not found"}}, true);
+            }
+            const auto root = args.value("graph_root", "");
+            const auto fragment = args.value("fragment", "");
+            if (root.empty() || fragment.empty())
+                return make_tool_result({{"error", "graph_root and fragment are required"}}, true);
+            const auto result = catalog.drift(root, fragment);
+            return make_tool_result(
+                {{"matches", result.matches.size()}, {"drift", result.drift.size()}});
+        } catch (const std::exception& error) {
+            return make_tool_result({{"error", error.what()}}, true);
+        }
     }
 
     if (name == "group_list") {
         auto reg = axon::load_registry();
         json repos_arr = json::array();
         for (auto& r : reg.repos) {
-            repos_arr.push_back({{"name", r.name}, {"root", r.root}, {"db_path", r.db_path}});
+            json repo = {{"name", r.name}, {"root", r.root}, {"db_path", r.db_path}};
+            if (!r.repository_id.empty()) repo["repository_id"] = r.repository_id;
+            if (!r.index_stream_id.empty()) repo["index_stream_id"] = r.index_stream_id;
+            if (!r.default_for_profiles.empty())
+                repo["default_for_profiles"] = r.default_for_profiles;
+            repos_arr.push_back(std::move(repo));
         }
         json groups_arr = json::array();
         for (auto& [gname, members] : reg.groups) {
             groups_arr.push_back({{"name", gname}, {"repos", members}});
         }
-        return make_tool_result({{"repos", repos_arr}, {"groups", groups_arr}});
+        json profiles = json::array();
+        for (const auto& p : reg.storage_profiles)
+            profiles.push_back({{"name", p.name},
+                                {"role", p.role},
+                                {"transport", p.transport},
+                                {"default", p.is_default},
+                                {"portfolio_store", p.portfolio_store.provider}});
+        json validation = json::array();
+        for (const auto& issue : axon::validate_registry(reg))
+            validation.push_back(
+                {{"code", issue.code}, {"path", issue.path}, {"message", issue.message}});
+        return make_tool_result({{"repos", repos_arr},
+                                 {"groups", groups_arr},
+                                 {"storage_profiles", profiles},
+                                 {"validation_errors", validation}});
     }
 
     if (name == "group_impact") {
         std::string file_arg = args.value("file", "");
-        if (file_arg.empty())
-            return make_tool_result({{"error","file is required"}}, true);
+        if (file_arg.empty()) return make_tool_result({{"error", "file is required"}}, true);
 
         std::string group_filter = args.value("group", "");
         auto reg = axon::load_registry();
@@ -1095,54 +1837,62 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         std::string stem = file_path.stem().string();
 
         // Determine repos to scan
-        std::vector<axon::RepoEntry> repos_to_scan;
-        if (!group_filter.empty()) {
-            repos_to_scan = axon::get_group_repos(reg, group_filter);
-        } else {
-            repos_to_scan = axon::get_repos(reg);
-        }
+        auto selection = axon::aggregation_repos(
+            reg, group_filter.empty() ? std::optional<std::string>{}
+                                      : std::optional<std::string>{group_filter});
+        std::vector<axon::RepoEntry> repos_to_scan = std::move(selection.repos);
 
         // Exclude the current repo
         std::string current_root = ctx.cfg.project_root.string();
         json cross_impact = json::array();
+        json failures = json::array();
+        for (const auto& issue : selection.issues)
+            failures.push_back({{"repo", nullptr},
+                                {"repo_root", nullptr},
+                                {"code", issue.code},
+                                {"path", issue.path},
+                                {"message", issue.message}});
 
         for (const auto& r : repos_to_scan) {
             if (r.root == current_root) continue;
-            if (!std::filesystem::exists(r.db_path)) continue;
-
-            try {
-                duckdb::DuckDB other_db(r.db_path);
-                duckdb::Connection other_conn(other_db);
-
-                std::string sql =
-                    "SELECT DISTINCT f.path FROM files f "
-                    "JOIN edges e ON e.from_id = f.id "
-                    "JOIN files f2 ON e.to_id = f2.id "
-                    "WHERE f2.path LIKE '%" + sql_escape(stem) + "%' LIMIT 50";
-
-                auto res = other_conn.Query(sql);
-                if (res->HasError()) continue;
-
-                json impacted = json::array();
-                for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
-                    impacted.push_back(res->GetValue(0, i).ToString());
-                }
-                cross_impact.push_back({
-                    {"repo",           r.name},
-                    {"repo_root",      r.root},
-                    {"impacted_files", impacted}
-                });
-            } catch (...) {
-                // Skip repos with inaccessible/corrupt DBs
+            auto secondary = axon::open_secondary_read_only(r);
+            if (!secondary) {
+                failures.push_back({{"repo", r.name},
+                                    {"repo_root", r.root},
+                                    {"code", secondary.error_code},
+                                    {"message", secondary.error}});
+                continue;
             }
+
+            duckdb::Connection other_conn(*secondary.db);
+            std::string sql = "SELECT DISTINCT f.path FROM files f "
+                              "JOIN edges e ON e.from_file = f.id "
+                              "JOIN files f2 ON e.to_file = f2.id "
+                              "WHERE f2.path LIKE '%" +
+                              sql_escape(stem) + "%' LIMIT 50";
+
+            auto res = other_conn.Query(sql);
+            if (res->HasError()) {
+                failures.push_back({{"repo", r.name},
+                                    {"repo_root", r.root},
+                                    {"code", "query_failed"},
+                                    {"message", res->GetError()}});
+                continue;
+            }
+
+            json impacted = json::array();
+            for (duckdb::idx_t i = 0; i < res->RowCount(); i++) {
+                impacted.push_back(res->GetValue(0, i).ToString());
+            }
+            cross_impact.push_back(
+                {{"repo", r.name}, {"repo_root", r.root}, {"impacted_files", impacted}});
         }
 
-        return make_tool_result({
-            {"file",         file_arg},
-            {"stem",         stem},
-            {"group_filter", group_filter},
-            {"cross_repo_impact", cross_impact}
-        });
+        return make_tool_result({{"file", file_arg},
+                                 {"stem", stem},
+                                 {"group_filter", group_filter},
+                                 {"cross_repo_impact", cross_impact},
+                                 {"failures", failures}});
     }
 
     // ── Dialogue Layer tools ──────────────────────────────────────────────────
@@ -1150,9 +1900,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "thread_create") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         std::string tname = args.value("name", "");
-        std::string kind  = args.value("kind", "project");
-        if (tname.empty())
-            return make_tool_result({{"error","name is required"}}, true);
+        std::string kind = args.value("kind", "project");
+        if (tname.empty()) return make_tool_result({{"error", "name is required"}}, true);
         int64_t id = thread_create(*ctx.db, tname, kind);
         return make_tool_result({{"id", id}, {"name", tname}, {"kind", kind}});
     }
@@ -1162,114 +1911,129 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         auto threads = thread_list(*ctx.db);
         json result = json::array();
         for (const auto& t : threads)
-            result.push_back({{"id",t.id},{"name",t.name},{"kind",t.kind},{"created_at",t.created_at}});
+            result.push_back(
+                {{"id", t.id}, {"name", t.name}, {"kind", t.kind}, {"created_at", t.created_at}});
         return make_tool_result(result);
     }
 
     if (name == "session_start") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
-        std::string label = args.value("label", "");
-        if (thread_id < 0)
-            return make_tool_result({{"error","thread_id is required"}}, true);
-        int64_t id = session_start(*ctx.db, thread_id, label);
-        return make_tool_result({{"session_id", id}, {"thread_id", thread_id}, {"label", label}});
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
+        std::string label = arg_str(args, "label", "");
+        std::string idempotency_key = bounded_string_arg(args, "idempotency_key", 256);
+        if (thread_id < 0) return make_tool_result({{"error", "thread_id is required"}}, true);
+        int64_t id = session_start(*ctx.db, thread_id, label, idempotency_key);
+        return make_tool_result({{"session_id", id},
+                                 {"thread_id", thread_id},
+                                 {"label", label},
+                                 {"idempotency_key", idempotency_key}});
     }
 
     if (name == "session_end") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t session_id = args.value("session_id", int64_t(-1));
+        int64_t session_id = arg_int64(args, "session_id", -1);
         bool compute_digest = args.value("compute_digest", true);
-        if (session_id < 0)
-            return make_tool_result({{"error","session_id is required"}}, true);
-        session_end(*ctx.db, session_id, ctx.model_ready() ? ctx.model.get() : nullptr, compute_digest);
+        if (session_id < 0) return make_tool_result({{"error", "session_id is required"}}, true);
+        session_end(*ctx.db, session_id, ctx.model_ready() ? ctx.model.get() : nullptr,
+                    compute_digest);
         return make_tool_result({{"session_id", session_id}, {"ended", true}});
     }
 
     if (name == "turn_add") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t session_id = args.value("session_id", int64_t(-1));
-        std::string role    = args.value("role", "user");
-        std::string content = args.value("content", "");
+        int64_t session_id = arg_int64(args, "session_id", -1);
+        std::string role = arg_str(args, "role", "user");
+        std::string content = arg_str(args, "content", "");
         if (session_id < 0 || content.empty())
-            return make_tool_result({{"error","session_id and content are required"}}, true);
-        int64_t id = turn_add(*ctx.db, ctx.model_ready() ? ctx.model.get() : nullptr,
-                              session_id, role, content);
+            return make_tool_result({{"error", "session_id and content are required"}}, true);
+        int64_t id = turn_add(*ctx.db, ctx.model_ready() ? ctx.model.get() : nullptr, session_id,
+                              role, content);
         return make_tool_result({{"turn_id", id}, {"session_id", session_id}, {"role", role}});
     }
 
     if (name == "turn_search") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
+                                    true);
         std::string query = args.value("query", "");
-        int limit         = args.value("limit", 5);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        int limit = args.value("limit", 5);
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
         auto hits = turn_search(*ctx.db, *ctx.model, query, limit, thread_id);
         json result = json::array();
         for (const auto& h : hits)
-            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
-                              {"content",h.turn.content},{"ts",h.turn.ts},
-                              {"session",h.session_label},{"thread",h.thread_name},
-                              {"score",h.score}});
+            result.push_back({{"turn_id", h.turn.id},
+                              {"role", h.turn.role},
+                              {"content", h.turn.content},
+                              {"ts", h.turn.ts},
+                              {"session", h.session_label},
+                              {"thread", h.thread_name},
+                              {"score", h.score}});
         return make_tool_result(result);
     }
 
     if (name == "session_get") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t session_id = args.value("session_id", int64_t(-1));
-        int limit          = args.value("limit", 500);
-        if (session_id < 0)
-            return make_tool_result({{"error","session_id is required"}}, true);
+        int64_t session_id = arg_int64(args, "session_id", -1);
+        int limit = args.value("limit", 500);
+        if (session_id < 0) return make_tool_result({{"error", "session_id is required"}}, true);
         auto turns = session_get(*ctx.db, session_id, limit);
         json result = json::array();
         for (const auto& t : turns)
-            result.push_back({{"id",t.id},{"role",t.role},{"content",t.content},{"ts",t.ts}});
+            result.push_back(
+                {{"id", t.id}, {"role", t.role}, {"content", t.content}, {"ts", t.ts}});
         return make_tool_result(result);
     }
 
     if (name == "thread_get") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
-        if (thread_id < 0)
-            return make_tool_result({{"error","thread_id is required"}}, true);
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
+        if (thread_id < 0) return make_tool_result({{"error", "thread_id is required"}}, true);
         auto sessions = thread_get_sessions(*ctx.db, thread_id);
         json result = json::array();
         for (const auto& s : sessions)
-            result.push_back({{"id",s.id},{"label",s.label},
-                              {"started_at",s.started_at},{"ended_at",s.ended_at},
-                              {"digest",s.digest}});
+            result.push_back({{"id", s.id},
+                              {"label", s.label},
+                              {"started_at", s.started_at},
+                              {"ended_at", s.ended_at},
+                              {"digest", s.digest}});
         return make_tool_result(result);
     }
 
     if (name == "anchor_link") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
-        int64_t turn_id   = args.value("turn_id",   int64_t(-1));
-        int64_t file_id   = args.value("file_id",   int64_t(-1));
-        int64_t symbol_id = args.value("symbol_id", int64_t(-1));
-        std::string kind  = args.value("kind", "mentions");
-        if (turn_id < 0)
-            return make_tool_result({{"error","turn_id is required"}}, true);
+        int64_t turn_id = arg_int64(args, "turn_id", -1);
+        int64_t file_id = arg_int64(args, "file_id", -1);
+        int64_t symbol_id = arg_int64(args, "symbol_id", -1);
+        std::string kind = arg_str(args, "kind", "mentions");
+        if (turn_id < 0) return make_tool_result({{"error", "turn_id is required"}}, true);
+        if (file_id < 0 && symbol_id < 0)
+            return make_tool_result(
+                {{"error", "file_id or symbol_id is required (an anchor needs a target)"}}, true);
         int64_t id = anchor_link(*ctx.db, turn_id, file_id, symbol_id, kind);
-        return make_tool_result({{"anchor_id",id},{"turn_id",turn_id},
-                                 {"file_id",file_id},{"symbol_id",symbol_id},{"kind",kind}});
+        return make_tool_result({{"anchor_id", id},
+                                 {"turn_id", turn_id},
+                                 {"file_id", file_id},
+                                 {"symbol_id", symbol_id},
+                                 {"kind", kind}});
     }
 
     if (name == "dialogue_context") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error","Embedding model not loaded; run_pipeline first"}}, true);
+            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
+                                    true);
         std::string query = args.value("query", "");
-        int limit         = args.value("limit", 5);
-        int64_t thread_id = args.value("thread_id", int64_t(-1));
+        int limit = args.value("limit", 5);
+        int64_t thread_id = arg_int64(args, "thread_id", -1);
 
         // Resolve optional file_paths to file_ids
         std::vector<int64_t> file_ids;
         if (args.contains("file_paths")) {
             for (const auto& fp : args["file_paths"]) {
                 std::string path = fp.get<std::string>();
-                auto res = ctx.db->conn().Query(
-                    "SELECT id FROM files WHERE path LIKE '%" + sql_escape(path) + "' LIMIT 1");
+                auto res = ctx.db->conn().Query("SELECT id FROM files WHERE path LIKE '%" +
+                                                sql_escape(path) + "' LIMIT 1");
                 if (!res->HasError() && res->RowCount() > 0)
                     file_ids.push_back(res->GetValue<int64_t>(0, 0));
             }
@@ -1284,11 +2048,104 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         json result = json::array();
         for (const auto& h : hits)
-            result.push_back({{"turn_id",h.turn.id},{"role",h.turn.role},
-                              {"content",h.turn.content},{"ts",h.turn.ts},
-                              {"session",h.session_label},{"thread",h.thread_name},
-                              {"score",h.score}});
+            result.push_back({{"turn_id", h.turn.id},
+                              {"role", h.turn.role},
+                              {"content", h.turn.content},
+                              {"ts", h.turn.ts},
+                              {"session", h.session_label},
+                              {"thread", h.thread_name},
+                              {"score", h.score}});
         return make_tool_result(result);
+    }
+
+    if (name == "handoff_create") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t source_session_id = arg_int64(args, "source_session_id", -1);
+        const auto target_agent = bounded_string_arg(args, "target_agent", 128, true);
+        const auto objective = bounded_string_arg(args, "objective", 8192, true);
+        const auto context = bounded_string_arg(args, "context", 65536);
+        const auto idempotency_key = bounded_string_arg(args, "idempotency_key", 256);
+        const auto requested_directory = bounded_string_arg(args, "working_directory", 4096);
+        const auto working_directory = validated_working_directory(ctx.cfg, requested_directory);
+        std::error_code ec;
+        const auto project_root = std::filesystem::weakly_canonical(ctx.cfg.project_root, ec);
+        if (ec) throw std::invalid_argument("project_root cannot be canonicalized");
+
+        const int64_t id =
+            handoff_create(*ctx.db, source_session_id, target_agent, project_root.string(),
+                           working_directory.string(), objective, context, idempotency_key);
+        return make_tool_result(handoff_json(handoff_get(*ctx.db, id)));
+    }
+
+    if (name == "handoff_get") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(handoff_json(handoff_get(*ctx.db, handoff_id)));
+    }
+
+    if (name == "handoff_list") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const auto status = bounded_string_arg(args, "status", 16);
+        const auto target_agent = bounded_string_arg(args, "target_agent", 128);
+        if (!status.empty() && status != "pending" && status != "claimed" &&
+            status != "completed" && status != "cancelled") {
+            return make_tool_result({{"error", "invalid handoff status"}}, true);
+        }
+        const int limit = args.value("limit", 100);
+        json result = json::array();
+        for (const auto& handoff : handoff_list(*ctx.db, status, target_agent, limit))
+            result.push_back(handoff_json(handoff));
+        return make_tool_result(result);
+    }
+
+    if (name == "handoff_claim") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        const auto claimed_by = bounded_string_arg(args, "claimed_by", 128, true);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(handoff_json(handoff_claim(*ctx.db, handoff_id, claimed_by)));
+    }
+
+    if (name == "handoff_complete") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        const auto claimed_by = bounded_string_arg(args, "claimed_by", 128, true);
+        const auto result = bounded_string_arg(args, "result", 65536);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(
+            handoff_json(handoff_complete(*ctx.db, handoff_id, claimed_by, result)));
+    }
+
+    if (name == "handoff_cancel") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const int64_t handoff_id = arg_int64(args, "handoff_id", -1);
+        if (handoff_id < 0) return make_tool_result({{"error", "handoff_id is required"}}, true);
+        return make_tool_result(handoff_json(handoff_cancel(*ctx.db, handoff_id)));
+    }
+
+    if (name == "artifact_retrieve") {
+        std::string artifact_id = args.value("artifact_id", "");
+        if (artifact_id.empty())
+            return make_tool_result({{"error", "artifact_id is required"}}, true);
+
+        std::optional<CcrArtifact> artifact;
+        if (ctx.db_ready()) artifact = ccr_retrieve_artifact(*ctx.db, artifact_id);
+        // `axon filter` stores artifacts in the file sidecar when this
+        // process holds the DB lock, so check it after a DB miss — and even
+        // with no DB at all, sidecar artifacts remain retrievable.
+        if (!artifact) artifact = ccr_retrieve_artifact_file(ctx.cfg.axon_dir / "ccr", artifact_id);
+        if (!artifact) {
+            if (!ctx.db_ready()) return db_unavailable_result(ctx);
+            return make_tool_result({{"error", "artifact not found"}, {"artifact_id", artifact_id}},
+                                    true);
+        }
+
+        return make_tool_result({{"artifact_id", artifact->artifact_id},
+                                 {"kind", artifact->kind},
+                                 {"source_ref", artifact->source_ref},
+                                 {"content", artifact->content},
+                                 {"token_estimate", artifact->token_estimate}});
     }
 
     return make_tool_result({{"error", "Unknown tool: " + name}}, true);
@@ -1308,8 +2165,10 @@ static std::string strip_cr(std::string s) {
 
 static std::string trim_ascii(std::string s) {
     auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
-    while (!s.empty() && is_space(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
-    while (!s.empty() && is_space(static_cast<unsigned char>(s.back()))) s.pop_back();
+    while (!s.empty() && is_space(static_cast<unsigned char>(s.front())))
+        s.erase(s.begin());
+    while (!s.empty() && is_space(static_cast<unsigned char>(s.back())))
+        s.pop_back();
     return s;
 }
 
@@ -1404,7 +2263,75 @@ static void write_stdio_response(const json& response, bool framed) {
     std::cout.flush();
 }
 
+json call_tool(const std::string& name, const json& args, ServerContext& ctx) {
+    std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
+    auto result = handle_tool(name, args, ctx);
+    ctx.last_tool_activity = std::chrono::steady_clock::now();
+    if (ctx.last_tool_activity - ctx.last_owner_heartbeat >= std::chrono::seconds(60)) {
+        heartbeat_self_as_owner(ctx);
+        ctx.last_owner_heartbeat = ctx.last_tool_activity;
+    }
+    return result;
+}
+
+static int db_idle_seconds() {
+    constexpr int fallback = 300;
+    const char* raw = std::getenv("AXON_DB_IDLE_SECONDS");
+    if (!raw || !*raw) return fallback;
+    try {
+        int value = std::stoi(raw);
+        return std::max(0, std::min(value, 86400));
+    } catch (...) {
+        return fallback;
+    }
+}
+
 void run_stdio(ServerContext& ctx) {
+    // Peer listener first, so ctx.peer_port is set before any owner
+    // registration. If the DB was already opened at startup we own the lock
+    // now; otherwise ensure_db_open registers us when it later succeeds.
+    if (start_peer_listener(ctx) && ctx.db_ready()) register_self_as_owner(ctx, ctx.peer_port);
+    if (!ctx.db_ready() && !ctx.db_error.empty())
+        std::cerr << "[axon] serve started without the index database (" << ctx.db_error
+                  << "); will retry on the first tool call\n";
+
+    // A client process can survive an SSH/network disconnect and keep our
+    // stdin pipe open indefinitely. Release only the DuckDB/graph lease after
+    // a bounded idle period; the MCP process and model remain warm, and the
+    // next tool call reacquires the database through ensure_db_open().
+    const int idle_limit = db_idle_seconds();
+    std::atomic<bool> reaper_running{idle_limit > 0};
+    std::mutex reaper_wait_mutex;
+    std::condition_variable reaper_wakeup;
+    std::thread reaper;
+    if (idle_limit > 0) {
+        reaper = std::thread([&ctx, &reaper_running, &reaper_wait_mutex, &reaper_wakeup,
+                              idle_limit]() {
+            while (reaper_running.load()) {
+                std::unique_lock<std::mutex> wait_lock(reaper_wait_mutex);
+                if (reaper_wakeup.wait_for(wait_lock, std::chrono::seconds(1),
+                                           [&reaper_running]() { return !reaper_running.load(); }))
+                    break;
+                wait_lock.unlock();
+                std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
+                if (!ctx.db_ready()) continue;
+                auto idle = std::chrono::duration_cast<std::chrono::seconds>(
+                                std::chrono::steady_clock::now() - ctx.last_tool_activity)
+                                .count();
+                if (idle < idle_limit) {
+                    continue;
+                }
+                ctx.db.reset();
+                ctx.graph = DependencyGraph{};
+                ctx.db_error.clear();
+                unregister_self_as_owner(ctx);
+                std::cerr << "[axon] service=axon environment=local correlationId=session-lifecycle"
+                             " event=db_lock_released reason=idle idle_seconds="
+                          << idle << "\n";
+            }
+        });
+    }
+
     StdioEnvelope env;
     while (read_stdio_envelope(std::cin, env)) {
         if (!env.ok) {
@@ -1422,11 +2349,10 @@ void run_stdio(ServerContext& ctx) {
         json response;
 
         if (method == "initialize") {
-            response = make_response(id, {
-                {"protocolVersion", "2024-11-05"},
-                {"capabilities", {{"tools", {{"listChanged", false}}}}},
-                {"serverInfo", {{"name", "axon"}, {"version", axon::VERSION}}}
-            });
+            response =
+                make_response(id, {{"protocolVersion", "2024-11-05"},
+                                   {"capabilities", {{"tools", {{"listChanged", false}}}}},
+                                   {"serverInfo", {{"name", "axon"}, {"version", axon::VERSION}}}});
         } else if (method == "notifications/initialized") {
             continue;
         } else if (method == "tools/list") {
@@ -1435,11 +2361,30 @@ void run_stdio(ServerContext& ctx) {
             auto params = req.value("params", json::object());
             std::string tool_name = params.value("name", "");
             json targs = params.value("arguments", json::object());
+            auto start = std::chrono::steady_clock::now();
+            // One lock scope for the tool call AND its telemetry write, so
+            // the peer listener thread never touches ctx.db concurrently.
+            std::lock_guard<std::mutex> lock(*ctx.tool_mutex);
             try {
                 response = make_response(id, handle_tool(tool_name, targs, ctx));
             } catch (const std::exception& e) {
-                response = make_response(id, make_tool_result(
-                    {{"error", std::string(e.what())}}, true));
+                response =
+                    make_response(id, make_tool_result({{"error", std::string(e.what())}}, true));
+            }
+            int64_t latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now() - start)
+                                     .count();
+            std::string body = response.dump();
+            int64_t tokens = static_cast<int64_t>(body.size() / 4);
+            bool cache_hit = body.find("\\\"cache\\\": \\\"hit\\\"") != std::string::npos ||
+                             body.find("\"cache\":\"hit\"") != std::string::npos;
+            axon::record_telemetry(
+                ctx.cfg, ctx.db.get(),
+                {tool_name, "mcp", latency_ms, tokens, tokens * 4, tokens * 3, cache_hit, ""});
+            ctx.last_tool_activity = std::chrono::steady_clock::now();
+            if (ctx.last_tool_activity - ctx.last_owner_heartbeat >= std::chrono::seconds(60)) {
+                heartbeat_self_as_owner(ctx);
+                ctx.last_owner_heartbeat = ctx.last_tool_activity;
             }
         } else {
             response = make_error(id, METHOD_NOT_FOUND, "Method not found: " + method);
@@ -1447,6 +2392,12 @@ void run_stdio(ServerContext& ctx) {
 
         write_stdio_response(response, env.framed);
     }
+
+    reaper_running = false;
+    reaper_wakeup.notify_all();
+    if (reaper.joinable()) reaper.join();
+    unregister_self_as_owner(ctx);
+    stop_peer_listener();
 }
 
 } // namespace axon::mcp

@@ -33,7 +33,7 @@ jobs:
     env:
       AXON_DUCKDB_VERSION: 1.2.2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           ref: ${{ github.event.inputs.tag || github.ref }}
@@ -42,11 +42,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build
+          sudo apt-get install -y cmake build-essential ninja-build patchelf jq ripgrep
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake ninja
+        run: brew install cmake ninja ripgrep
 
       - name: Stage libduckdb.dylib (macOS)
         if: runner.os == 'macOS'
@@ -78,6 +78,21 @@ jobs:
       - name: Build
         run: cmake --build build --target axon -j 2
 
+      - name: Build release verification tests
+        if: runner.os == 'Linux'
+        run: cmake --build build -j 2
+
+      - name: Run context optimization release gate
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Build VS Code extension
+        if: runner.os == 'Linux'
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run package
+
       - name: Resolve version
         id: ver
         shell: bash   # explicit bash — runner default is pwsh on windows-2022
@@ -88,6 +103,28 @@ jobs:
           echo "tag=${tag}"     >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      - name: Validate release version surfaces
+        shell: bash
+        run: |
+          version="${{ steps.ver.outputs.version }}"
+          cmake_version="$(sed -nE 's/^project\(axon VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
+          extension_version="$(node -p 'require("./editors/vscode/package.json").version')"
+          test -n "${version}"
+          test "${cmake_version}" = "${version}"
+          test "${extension_version}" = "${version}"
+          grep -F "## [${version}]" CHANGELOG.md >/dev/null
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # The raw build output cannot run until duckdb.dll and the llama/ggml
+            # runtime DLLs are staged beside it. Execution and version are checked
+            # below from the isolated, self-contained package tree.
+            test -f ./build/axon.exe
+          else
+            ./build/axon --version | grep -F "axon ${version} " >/dev/null
+          fi
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            test -f "editors/vscode/axon-vscode-${version}.vsix"
+          fi
+
       - name: Stage release tree (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -95,9 +132,14 @@ jobs:
           mkdir -p "${stage}/bin" "${stage}/lib"
           cp build/axon "${stage}/bin/axon"
           # Bundle llama.cpp shared libs (libllama, libggml*) from build output
-          find build/bin -name "lib*.so*" -o -name "lib*.dylib" 2>/dev/null | xargs -I{} cp {} "${stage}/lib/" || true
+          find build/bin \( -name "lib*.so*" -o -name "lib*.dylib" \) 2>/dev/null | xargs -I{} cp {} "${stage}/lib/" || true
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp third_party/duckdb/lib/libduckdb.so "${stage}/lib/"
+            # llama.cpp bakes the CI build path into RUNPATH; rewrite to $ORIGIN
+            # so the libs resolve their siblings on any host that extracts the tarball.
+            for lib in "${stage}/lib/"lib*.so*; do
+              [ -f "$lib" ] && [ ! -L "$lib" ] && patchelf --set-rpath '$ORIGIN' "$lib" || true
+            done
           else
             cp third_party/duckdb/lib/libduckdb.dylib "${stage}/lib/"
             install_name_tool -id @rpath/libduckdb.dylib "${stage}/lib/libduckdb.dylib" || true
@@ -105,12 +147,37 @@ jobs:
               "$(pwd)/third_party/duckdb/lib/libduckdb.dylib" \
               "@rpath/libduckdb.dylib" \
               "${stage}/bin/axon" || true
+            # Rewrite each llama/ggml dylib to use @rpath identity and rewrite any
+            # absolute CI-host load paths into @rpath references so the package
+            # resolves siblings on any extraction target.
+            for dylib in "${stage}/lib/"lib*.dylib; do
+              [ -f "$dylib" ] && [ ! -L "$dylib" ] || continue
+              base="$(basename "$dylib")"
+              install_name_tool -id "@rpath/${base}" "$dylib" || true
+              otool -L "$dylib" | awk 'NR>1 {print $1}' | while read -r dep; do
+                case "$dep" in
+                  /home/runner/*|"$(pwd)"/*)
+                    install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$dylib" || true ;;
+                esac
+              done
+            done
           fi
-          cp README.md LICENSE CHANGELOG.md "${stage}/"
+          cp scripts/README.package.md "${stage}/README.md"
+          cp LICENSE CHANGELOG.md "${stage}/"
           cp scripts/install.sh "${stage}/install.sh"
           cp -r scripts/hooks "${stage}/hooks"
           cp -r scripts/templates "${stage}/templates"
           echo "${stage}" > .stage-name
+
+      - name: Validate extracted package runs (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          stage="$(cat .stage-name)"
+          "${stage}/bin/axon" --version
+          test -x "${stage}/install.sh"
+          test -f "${stage}/hooks/axon-post-edit.sh"
+          test -f "${stage}/hooks/axon-queue-drain.sh"
+          test -f "${stage}/templates/CLAUDE.md"
 
       - name: Stage release tree (Windows)
         if: runner.os == 'Windows'
@@ -121,9 +188,55 @@ jobs:
           New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
           Copy-Item "build\axon.exe"                      "$stage\bin\axon.exe"
           Copy-Item "third_party\duckdb\lib\duckdb.dll"  "$stage\bin\duckdb.dll"
-          Copy-Item "README.md","LICENSE","CHANGELOG.md"  "$stage\"
+          # Copy any runtime DLL emitted by llama.cpp / ggml / tree-sitter into bin
+          Get-ChildItem -Path "build" -Filter "*.dll" -Recurse |
+              Where-Object { $_.FullName -notmatch '\\CMakeFiles\\' } |
+              ForEach-Object {
+                  Copy-Item $_.FullName "$stage\bin\" -Force
+              }
+          Copy-Item "scripts\README.package.md" "$stage\README.md"
+          Copy-Item "LICENSE","CHANGELOG.md"  "$stage\"
           Copy-Item "scripts\install.ps1"                 "$stage\install.ps1"
+          Copy-Item "scripts\hooks"                       "$stage\hooks" -Recurse
+          Copy-Item "scripts\templates"                   "$stage\templates" -Recurse
           $stage | Out-File -Encoding ascii .stage-name
+
+      - name: Validate staged package is self-contained (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $expectedVersion = "${{ steps.ver.outputs.version }}"
+          $stage = (Get-Content .stage-name -Raw).Trim()
+          @(
+            "$stage\install.ps1",
+            "$stage\hooks\axon-post-edit.ps1",
+            "$stage\hooks\axon-queue-drain.ps1",
+            "$stage\templates\CLAUDE.md"
+          ) | ForEach-Object {
+            if (-not (Test-Path $_ -PathType Leaf)) {
+              throw "[release] staged package is missing required file: $_"
+            }
+          }
+          # Run axon.exe from an isolated copy of bin\ with a minimal PATH so its
+          # DLLs can only resolve from bin\ itself. A package missing any runtime
+          # DLL (including the transitive llama -> ggml chain) fails here instead
+          # of shipping broken. System32 stays reachable so the VC++ runtime
+          # (a documented user prerequisite, not bundled) still resolves.
+          $probe = Join-Path $env:RUNNER_TEMP "axon-probe"
+          if (Test-Path $probe) { Remove-Item $probe -Recurse -Force }
+          New-Item -ItemType Directory -Force $probe | Out-Null
+          Copy-Item "$stage\bin\*" $probe -Recurse -Force
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $versionOutput = & "$probe\axon.exe" --version
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "[release] axon.exe is not self-contained (exit $LASTEXITCODE) -- a runtime DLL is missing from the staged bin folder"
+              exit 1
+          }
+          if ($versionOutput -notlike "axon $expectedVersion *") {
+              Write-Error "[release] staged axon.exe reported an unexpected version: $versionOutput"
+              exit 1
+          }
+          Write-Output $versionOutput
 
       - name: Archive + checksum (Unix)
         if: runner.os != 'Windows'
@@ -131,6 +244,12 @@ jobs:
           stage="$(cat .stage-name)"
           tar czf "${stage}.tar.gz" "${stage}"
           shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+          cp "${stage}.tar.gz" "axon-${{ matrix.target }}.tar.gz"
+          shasum -a 256 "axon-${{ matrix.target }}.tar.gz" > "axon-${{ matrix.target }}.tar.gz.sha256"
+          if [ -f editors/vscode/*.vsix ]; then
+            cp editors/vscode/*.vsix .
+            shasum -a 256 *.vsix > axon-vscode.vsix.sha256
+          fi
 
       - name: Archive + checksum (Windows)
         if: runner.os == 'Windows'
@@ -140,28 +259,38 @@ jobs:
           Compress-Archive -Path "$stage" -DestinationPath "$stage.zip"
           $hash = (Get-FileHash "$stage.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $stage.zip" | Out-File -Encoding ascii "$stage.zip.sha256"
+          $alias = "axon-${{ matrix.target }}.zip"
+          Copy-Item "$stage.zip" $alias
+          $aliasHash = (Get-FileHash $alias -Algorithm SHA256).Hash.ToLower()
+          "$aliasHash  $alias" | Out-File -Encoding ascii "$alias.sha256"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: |
             axon-*-${{ matrix.target }}.tar.gz
             axon-*-${{ matrix.target }}.tar.gz.sha256
+            axon-${{ matrix.target }}.tar.gz
+            axon-${{ matrix.target }}.tar.gz.sha256
             axon-*-${{ matrix.target }}.zip
             axon-*-${{ matrix.target }}.zip.sha256
+            axon-${{ matrix.target }}.zip
+            axon-${{ matrix.target }}.zip.sha256
+            *.vsix
+            *.vsix.sha256
 
   publish:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
 
@@ -197,7 +326,7 @@ jobs:
           } >> release-notes.md
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: HideakiSolutions/axon-releases
           token: ${{ secrets.RELEASES_PAT }}
@@ -209,5 +338,68 @@ jobs:
             dist/**/*.tar.gz.sha256
             dist/**/*.zip
             dist/**/*.zip.sha256
+            dist/**/*.vsix
+            dist/**/*.vsix.sha256
           fail_on_unmatched_files: true
           generate_release_notes: false
+
+  # Post-publish convenience, never a release gate: rewrites the Homebrew
+  # formula in HideakiSolutions/homebrew-axon to the just-published version.
+  # continue-on-error because a failed bump must not redden a good release —
+  # the formula can always be bumped by hand (docs/packaging/homebrew/).
+  bump-homebrew-formula:
+    name: Bump Homebrew formula
+    needs: publish
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - name: Resolve tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: HideakiSolutions/homebrew-axon
+          token: ${{ secrets.RELEASES_PAT }}
+
+      - name: Rewrite formula (version, urls, sha256 per platform)
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          TAG="${{ steps.ver.outputs.tag }}"
+          BASE="https://github.com/HideakiSolutions/axon-releases/releases/download/${TAG}"
+          MAC_SHA=$(curl -fsSL "${BASE}/axon-${VERSION}-macos-arm64.tar.gz.sha256" | cut -d' ' -f1)
+          LIN_SHA=$(curl -fsSL "${BASE}/axon-${VERSION}-linux-x64.tar.gz.sha256" | cut -d' ' -f1)
+          python3 - "$VERSION" "$MAC_SHA" "$LIN_SHA" << 'PY'
+          import re, sys
+          version, mac_sha, lin_sha = sys.argv[1:4]
+          path = "Formula/axon.rb"
+          s = open(path).read()
+          s = re.sub(r'^(  version ")[^"]+(")', rf'\g<1>{version}\g<2>', s, flags=re.M)
+          s = re.sub(r'download/v[^/]+/axon-[^-]+(-[a-z0-9-]+\.tar\.gz)',
+                     rf'download/v{version}/axon-{version}\g<1>', s)
+          def set_sha(s, platform, sha):
+              pat = re.compile(
+                  r'(axon-[^"]*' + platform + r'\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}(")')
+              new, n = pat.subn(rf'\g<1>{sha}\g<2>', s)
+              assert n == 1, f"expected one sha256 for {platform}, replaced {n}"
+              return new
+          s = set_sha(s, "macos-arm64", mac_sha)
+          s = set_sha(s, "linux-x64", lin_sha)
+          open(path, "w").write(s)
+          print(open(path).read())
+          PY
+
+      - name: Commit and push
+        run: |
+          git config user.name "axon-release-bot"
+          git config user.email "noreply@hideakisolutions.com"
+          git add Formula/axon.rb
+          git diff --cached --quiet && { echo "formula already current"; exit 0; }
+          git commit -m "axon ${{ steps.ver.outputs.version }}"
+          git push

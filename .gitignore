@@ -1,7 +1,12 @@
 build/
 models/*.gguf
 .axon/
+.worktrees/
 *.o
 *.a
 .DS_Store
 .dev-squad/
+
+# Python bytecode cache
+__pycache__/
+*.pyc

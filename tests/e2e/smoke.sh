@@ -14,8 +14,16 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AXON="${AXON:-${REPO_ROOT}/build/axon}"
+if [[ "$AXON" != /* ]]; then
+  AXON="${REPO_ROOT}/${AXON#./}"
+fi
 TMP_BASE="${TMPDIR:-/tmp}/axon-e2e-$$"
 mkdir -p "${TMP_BASE}"
+
+# Hermetic registry: every `axon index`/`serve` below registers repos; without
+# this the runs permanently pollute the user's real ~/.axon/registry.json
+# (observed: 140 dead /tmp entries accumulated from past runs).
+export AXON_REGISTRY_DIR="${TMP_BASE}/axon-home"
 
 # Tracking
 PASS_COUNT=0
@@ -53,10 +61,20 @@ log "axon binary: $AXON"
 [ -x "$AXON" ] || { echo "axon binary missing: $AXON" >&2; exit 1; }
 
 VERSION_OUTPUT=$("$AXON" --version)
-assert_contains "axon 1\." "$VERSION_OUTPUT" "--version prints a 1.x line"
+EXPECTED_VERSION=$(sed -nE 's/^project\(axon VERSION ([0-9.]+).*/\1/p' "${REPO_ROOT}/CMakeLists.txt")
+[ -n "$EXPECTED_VERSION" ] || fail "could not resolve the expected version from CMakeLists.txt"
+assert_contains "axon ${EXPECTED_VERSION} " "$VERSION_OUTPUT" \
+  "--version matches CMakeLists.txt (${EXPECTED_VERSION})"
 
 HELP_OUTPUT=$("$AXON" help 2>&1)
 assert_contains "axon capsule" "$HELP_OUTPUT" "help mentions capsule subcommand"
+assert_contains "axon web" "$HELP_OUTPUT" "help mentions web subcommand"
+assert_contains "axon lsp" "$HELP_OUTPUT" "help mentions lsp subcommand"
+assert_contains "axon watch" "$HELP_OUTPUT" "help mentions watch subcommand"
+
+LSP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+LSP_OUTPUT=$(printf 'Content-Length: %s\r\n\r\n%s' "${#LSP_INIT}" "$LSP_INIT" | "$AXON" lsp)
+assert_contains "axon-lsp" "$LSP_OUTPUT" "lsp initialize returns axon-lsp serverInfo"
 
 # ── Examples: ts-mini ──────────────────────────────────────────────────────
 # axon walks up looking for project markers (.git, Cargo.toml, etc.) — drop
@@ -73,18 +91,114 @@ assert_contains "Files:" "$TS_STATUS" "ts-mini status reports Files line"
 TS_FILES=$(printf '%s' "$TS_STATUS" | awk '/^Files:/ {print $2}')
 [ "$TS_FILES" -ge 4 ] && pass "ts-mini indexed >= 4 files (got $TS_FILES)" || fail "ts-mini indexed too few files: $TS_FILES"
 
+if command -v curl >/dev/null 2>&1; then
+  WEB_PORT=$((17070 + ($$ % 1000)))
+  WEB_LOG="${TMP_BASE}/axon-web.log"
+  ( cd "$TS_DIR" && exec "$AXON" web --port="${WEB_PORT}" >"$WEB_LOG" 2>&1 ) &
+  WEB_PID=$!
+  sleep 1
+  WEB_HTML=$(curl -fsS "http://127.0.0.1:${WEB_PORT}/" || true)
+  WEB_METRICS=$(curl -fsS "http://127.0.0.1:${WEB_PORT}/api/metrics" || true)
+  kill "$WEB_PID" >/dev/null 2>&1 || true
+  wait "$WEB_PID" >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
+    if ( cd "$TS_DIR" && "$AXON" status >/dev/null 2>&1 ); then
+      break
+    fi
+    sleep 0.1
+  done
+  assert_contains "Axon Web" "$WEB_HTML" "web serves browser UI at /"
+  assert_contains "telemetry_enabled" "$WEB_METRICS" "web serves /api/metrics"
+else
+  log "curl unavailable — skipping web HTTP smoke"
+fi
+
+# ── Watch mode: modified file reindexes; deleted file prunes ──────────────
+WATCH_DIR="${TMP_BASE}/watchtest"
+cp -r "${REPO_ROOT}/examples/ts-mini" "$WATCH_DIR"
+mkdir -p "$WATCH_DIR/.git" && echo "ref: refs/heads/main" > "$WATCH_DIR/.git/HEAD"
+( cd "$WATCH_DIR" && "$AXON" init >/dev/null && "$AXON" index >/dev/null 2>&1 || true )
+WATCH_LOG="${TMP_BASE}/axon-watch.log"
+"$AXON" watch "$WATCH_DIR" --interval-ms=200 --debounce-ms=100 >"$WATCH_LOG" 2>&1 &
+WATCH_PID=$!
+sleep 0.5
+printf '\nexport function watchedSymbol() { return 1; }\n' >> "$WATCH_DIR/src/util.ts"
+sleep 1
+rm -f "$WATCH_DIR/src/util.ts"
+sleep 1
+kill "$WATCH_PID" >/dev/null 2>&1 || true
+wait "$WATCH_PID" >/dev/null 2>&1 || true
+WATCH_STATUS=$( cd "$WATCH_DIR" && "$AXON" status )
+assert_contains "Files:" "$WATCH_STATUS" "watch leaves index readable after modify/delete"
+assert_contains "pruned" "$(cat "$WATCH_LOG" 2>/dev/null || true)" "watch prunes deleted file"
+
+# Native backend selected on auto (this is what the three CI platforms prove).
+case "$(uname)" in
+  Linux)  NATIVE_BACKEND="inotify" ;;
+  Darwin) NATIVE_BACKEND="fsevents" ;;
+  MINGW*|MSYS*|CYGWIN*) NATIVE_BACKEND="win32" ;;
+  *)      NATIVE_BACKEND="poll" ;;
+esac
+assert_contains "backend ${NATIVE_BACKEND}" "$(cat "$WATCH_LOG" 2>/dev/null || true)" \
+  "watch auto-selects the ${NATIVE_BACKEND} backend"
+
+# ── Watch parity: --backend=poll must behave identically ──────────────────
+POLL_DIR="${TMP_BASE}/watchtest-poll"
+cp -r "${REPO_ROOT}/examples/ts-mini" "$POLL_DIR"
+mkdir -p "$POLL_DIR/.git" && echo "ref: refs/heads/main" > "$POLL_DIR/.git/HEAD"
+( cd "$POLL_DIR" && "$AXON" init >/dev/null && "$AXON" index >/dev/null 2>&1 || true )
+POLL_LOG="${TMP_BASE}/axon-watch-poll.log"
+"$AXON" watch "$POLL_DIR" --interval-ms=200 --debounce-ms=100 --backend=poll >"$POLL_LOG" 2>&1 &
+POLL_PID=$!
+sleep 0.5
+printf '\nexport function watchedSymbolPoll() { return 1; }\n' >> "$POLL_DIR/src/util.ts"
+sleep 1
+rm -f "$POLL_DIR/src/util.ts"
+sleep 1
+kill "$POLL_PID" >/dev/null 2>&1 || true
+wait "$POLL_PID" >/dev/null 2>&1 || true
+assert_contains "backend poll" "$(cat "$POLL_LOG" 2>/dev/null || true)" "watch honors --backend=poll"
+assert_contains "indexed" "$(cat "$POLL_LOG" 2>/dev/null || true)" "poll backend reindexes on modify"
+assert_contains "pruned" "$(cat "$POLL_LOG" 2>/dev/null || true)" "poll backend prunes deleted file"
+
+# ── Watch overflow path: forced seam triggers a full rescan ───────────────
+OVERFLOW_LOG="${TMP_BASE}/axon-watch-overflow.log"
+AXON_WATCH_FORCE_OVERFLOW=1 "$AXON" watch "$POLL_DIR" --interval-ms=200 --debounce-ms=100 \
+  --backend=poll >"$OVERFLOW_LOG" 2>&1 &
+OVERFLOW_PID=$!
+sleep 0.5
+printf 'export function overflowProbe() { return 1; }\n' > "$POLL_DIR/src/overflow.ts"
+sleep 1.5
+kill "$OVERFLOW_PID" >/dev/null 2>&1 || true
+wait "$OVERFLOW_PID" >/dev/null 2>&1 || true
+assert_contains "full rescan" "$(cat "$OVERFLOW_LOG" 2>/dev/null || true)" \
+  "overflow falls back to a full rescan"
+OVERFLOW_STATUS=$( cd "$POLL_DIR" && "$AXON" status )
+assert_contains "Files:" "$OVERFLOW_STATUS" "index readable after overflow rescan"
+
 # ── Capsule cache: miss → hit → no-cache ──────────────────────────────────
 # `axon capsule` needs an embedding model on the miss path. In CI we may
 # not have one staged, so detect absence (via a dry-run that is allowed
 # to fail) and skip the cache section gracefully — the structural tests
 # above still validate the binary.
 HAS_MODEL=1
-if ! ( cd "$TS_DIR" && "$AXON" capsule "_probe_" >/dev/null 2>&1 ); then
-  if [ "${AXON_REQUIRE_MODEL:-0}" = "1" ]; then
-    fail "capsule probe failed and AXON_REQUIRE_MODEL=1 is set"
+set +e
+CAPSULE_PROBE_OUTPUT=$( cd "$TS_DIR" && "$AXON" capsule "_probe_" 2>&1 )
+CAPSULE_PROBE_STATUS=$?
+set -e
+if [ "$CAPSULE_PROBE_STATUS" -ne 0 ]; then
+  if [ "$CAPSULE_PROBE_STATUS" -eq 134 ] ||
+     printf '%s' "$CAPSULE_PROBE_OUTPUT" | grep -Eiq 'aborted|core dumped|trace/breakpoint trap|segmentation fault'; then
+    fail "capsule probe aborted instead of returning a controlled error:\n${CAPSULE_PROBE_OUTPUT}"
+  elif printf '%s' "$CAPSULE_PROBE_OUTPUT" | grep -qi 'embedding model'; then
+    if [ "${AXON_REQUIRE_MODEL:-0}" = "1" ]; then
+      fail "capsule probe failed because the embedding model is missing and AXON_REQUIRE_MODEL=1 is set"
+    else
+      log "embedding model unavailable — skipping capsule cache section"
+      HAS_MODEL=0
+    fi
   else
-    log "embedding model unavailable — skipping capsule cache section"
-    HAS_MODEL=0
+    fail "capsule probe failed for a non-model reason:\n${CAPSULE_PROBE_OUTPUT}"
   fi
 fi
 

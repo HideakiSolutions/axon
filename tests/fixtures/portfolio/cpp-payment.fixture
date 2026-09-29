@@ -1,0 +1,13 @@
+entity_key=cpp:PaymentService
+name=PaymentService
+language=cpp
+path=src/payments/payment_service.cpp
+content_digest=cccccccccccccccccccccccccccccccc
+ast_digest=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+symbol=PaymentService::charge
+public_symbols=PaymentService::charge,PaymentService::refund
+routes=POST /payments
+contracts=PaymentRequest
+events=payment.charged
+external_dependencies=ledger,merchant
+tests=tests/payment_service_test.cpp

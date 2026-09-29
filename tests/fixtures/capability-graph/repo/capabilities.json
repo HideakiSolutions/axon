@@ -1,0 +1,1 @@
+{"schema_version":"axon/capability-graph/v1","capabilities":[{"id":"payments.authorize","name":"payment authorize","bounded_context":"billing","contracts":["AuthorizeRequest"]},{"id":"identity.orphan","name":"identity provision","bounded_context":"identity","contracts":["ProvisionRequest"]}]}

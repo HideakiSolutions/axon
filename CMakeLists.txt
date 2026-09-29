@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(axon VERSION 1.1.1 LANGUAGES C CXX ASM)
+project(axon VERSION 1.4.0 LANGUAGES C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
+add_executable(portfolio_eval evals/portfolio/portfolio_eval.cpp src/portfolio/domain/capability_signature.cpp src/portfolio/application/candidates/capability_candidates.cpp)
+target_include_directories(portfolio_eval PRIVATE src third_party/blake3/c third_party/nlohmann-json/single_include)
+target_link_libraries(portfolio_eval PRIVATE blake3_lib)
 
 # ── Version + git SHA ────────────────────────────────────────────────────────
 execute_process(
@@ -48,6 +51,7 @@ endif()
 # be placed next to the executable.
 if(NOT WIN32)
     set(CMAKE_BUILD_RPATH ${CMAKE_SOURCE_DIR}/third_party/duckdb/lib)
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 endif()
 
 # ── tree-sitter core ─────────────────────────────────────────────────────────
@@ -151,6 +155,48 @@ add_library(ts_vue STATIC
 target_include_directories(ts_vue PUBLIC ${TS_INCLUDE}
     third_party/tree-sitter-vue/src)
 
+add_library(ts_lua STATIC
+    third_party/tree-sitter-lua/src/parser.c
+    third_party/tree-sitter-lua/src/scanner.c
+)
+target_include_directories(ts_lua PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-lua/src)
+
+add_library(ts_nix STATIC
+    third_party/tree-sitter-nix/src/parser.c
+    third_party/tree-sitter-nix/src/scanner.c
+)
+target_include_directories(ts_nix PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-nix/src)
+
+add_library(ts_ruby STATIC
+    third_party/tree-sitter-ruby/src/parser.c
+    third_party/tree-sitter-ruby/src/scanner.c
+)
+target_include_directories(ts_ruby PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-ruby/src)
+
+add_library(ts_swift STATIC
+    third_party/tree-sitter-swift-generated/src/parser.c
+    third_party/tree-sitter-swift-generated/src/scanner.c
+)
+target_include_directories(ts_swift PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-swift-generated/src)
+
+add_library(ts_scala STATIC
+    third_party/tree-sitter-scala/src/parser.c
+    third_party/tree-sitter-scala/src/scanner.c
+)
+target_include_directories(ts_scala PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-scala/src)
+
+add_library(ts_gdscript STATIC
+    third_party/tree-sitter-gdscript/src/parser.c
+    third_party/tree-sitter-gdscript/src/scanner.c
+)
+target_include_directories(ts_gdscript PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-gdscript/src)
+
 # ── llama.cpp ────────────────────────────────────────────────────────────────
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -213,6 +259,28 @@ endif()
 # ── axon executable ──────────────────────────────────────────────────────────
 file(GLOB_RECURSE AXON_SOURCES src/*.cpp)
 
+# Optional shared-server adapters must never make the local-first binary unbuildable. They are
+# compiled into the executable whenever their system dependency is present; provider conformance
+# targets select the same sources explicitly. A missing dependency leaves only that additive role
+# unavailable and does not change the authoritative local DuckDB behavior.
+find_package(PostgreSQL QUIET)
+find_package(OpenSSL QUIET)
+find_package(CURL QUIET)
+find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h)
+find_library(HIREDIS_LIBRARY NAMES hiredis)
+if(NOT PostgreSQL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/postgresql/.*\\.cpp$")
+endif()
+if(NOT OpenSSL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/http/.*\\.cpp$")
+endif()
+if(NOT CURL_FOUND)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/qdrant/.*\\.cpp$")
+endif()
+if(NOT HIREDIS_INCLUDE_DIR OR NOT HIREDIS_LIBRARY)
+    list(FILTER AXON_SOURCES EXCLUDE REGEX ".*/portfolio/infrastructure/falkordb/.*\\.cpp$")
+endif()
+
 add_executable(axon ${AXON_SOURCES})
 
 target_include_directories(axon PRIVATE
@@ -223,6 +291,10 @@ target_include_directories(axon PRIVATE
     third_party/llama.cpp/include
     third_party/nlohmann-json/single_include
 )
+if(HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
+    target_include_directories(axon PRIVATE ${HIREDIS_INCLUDE_DIR})
+    target_link_libraries(axon PRIVATE ${HIREDIS_LIBRARY})
+endif()
 
 target_link_libraries(axon PRIVATE
     duckdb_lib
@@ -240,10 +312,39 @@ target_link_libraries(axon PRIVATE
     ts_cpp
     ts_kotlin
     ts_vue
+    ts_lua
+    ts_nix
+    ts_ruby
+    ts_swift
+    ts_scala
+    ts_gdscript
     llama
     ggml
     blake3_lib
 )
+if(PostgreSQL_FOUND)
+    target_link_libraries(axon PRIVATE PostgreSQL::PostgreSQL)
+endif()
+if(OpenSSL_FOUND)
+    target_link_libraries(axon PRIVATE OpenSSL::Crypto)
+endif()
+if(CURL_FOUND)
+    target_link_libraries(axon PRIVATE CURL::libcurl)
+endif()
+
+if(APPLE)
+    set_target_properties(axon PROPERTIES
+        BUILD_RPATH "@executable_path/../lib;${CMAKE_SOURCE_DIR}/third_party/duckdb/lib"
+        INSTALL_RPATH "@executable_path/../lib"
+    )
+    # FSEvents (native watch backend) — part of the base macOS SDK.
+    target_link_libraries(axon PRIVATE "-framework CoreServices")
+elseif(NOT WIN32)
+    set_target_properties(axon PROPERTIES
+        BUILD_RPATH "$ORIGIN/../lib;${CMAKE_SOURCE_DIR}/third_party/duckdb/lib"
+        INSTALL_RPATH "$ORIGIN/../lib"
+    )
+endif()
 
 if(WIN32)
     target_link_libraries(axon PRIVATE ws2_32)

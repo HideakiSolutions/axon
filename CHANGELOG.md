@@ -5,9 +5,275 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] — 2026-09-29
+
+### Added
+- GDScript support for Godot `.gd` files across indexing, symbols, imports, call
+  extraction, skeletons, context capsules, MCP discovery, and shell guards.
+- A small Godot example project and real-project token-reduction evidence.
+
+### Fixed
+- Indexing an unnamed GDScript enum no longer crashes the parser.
+
+### CI
+- Lint and release publishing run on GitHub-hosted runners after the internal
+  runner image was rejected for its deprecated Actions Runner version.
+
+## [1.3.1] — 2026-08-29
+
+### Added
+- `axon doctor locks [--json]` reports registered DuckDB owner health, identity, heartbeat age,
+  and idle time without exposing peer authentication tokens or mutating processes.
+- Registry owner records now include additive start and heartbeat timestamps.
+
+### Fixed
+- Detached stdio sessions release their DuckDB lock after five minutes without a tool call while
+  keeping the MCP process and embedding model warm; the next call reacquires transparently.
+- A live but frozen peer now fails after a bounded 15-second default instead of holding a new
+  session for five minutes. Queue-drain attempts also enforce an independent 30-second deadline.
+
+## [1.3.0] — 2026-08-29
+
+### Added
+- Native at-least-once pending-write spool with atomic claims, crash replay, path deduplication,
+  bounded retry, poison-batch quarantine, and structured recovery telemetry.
+- Typed project-scoped handoffs with create, get, list, claim, complete, and cancel MCP tools;
+  session and handoff creation now support optional idempotency keys for transport retries.
+- Explainable hybrid memory retrieval: semantic and lexical candidates are fused with deterministic
+  Reciprocal Rank Fusion, then adjusted by bounded observation authority. Results expose channel
+  ranks, RRF score, authority, and final score.
+- Versioned retrieval evaluation comparing semantic-only and hybrid Recall@K, MRR, and latency,
+  plus legacy-schema, state-machine, queue-recovery, and MCP smoke coverage.
+- `search_memory` accepts an optional `tags` array and returns only observations containing every requested tag. `save_observation` now persists its advertised tags, and search results expose them.
+- Symbol call edges now disambiguate overloaded callees with receiver/enclosing-owner type and argument-arity signals, retaining deterministic same-file fallback when semantic hints are unavailable.
+
+### Fixed
+- Pending-write claims now remain durable when embedding fails, replay embedding work after an
+  idempotent file-index pass, and explicitly report recovered attempts before acknowledgment.
+- Windows release validation now checks the executable version from the fully staged package, after its runtime DLLs are colocated, instead of trying to launch the raw build output prematurely.
+
+### Compatibility
+- DuckDB migrations and MCP contracts are additive: existing observations default to authority
+  `1.0`, existing session callers remain valid, and canonical external memory still requires human
+  approval rather than being mutated automatically.
+
+### CI
+- The end-to-end version smoke now derives its expected version from `CMakeLists.txt`, so minor
+  releases validate the exact binary version without a stale series-specific assertion.
+
+## [1.2.16] — 2026-08-28
+
+### Added
+- Bounded queue draining for idle clients: post-edit hooks now trigger a project-scoped worker when the pending queue reaches its age or size threshold, while the synchronous MCP drain remains the source of truth.
+- Native PowerShell post-edit and queue-drain hooks for Windows, installed alongside the existing Claude Code hooks and included in Windows release packages.
+
+### Fixed
+- macOS and Git Bash/Windows queue routing no longer depend on Linux-only `flock`, GNU `touch -d`, or POSIX-form registry paths. Bash queue writers recover dead owners without evicting a live worker, preserve edits through `sync-requested` on lock timeout, and reject paths outside the indexed project.
+- Queue-drain packaging now includes the hook and template directories in the Windows stage.
+- VS Code packages derive the VSIX filename from the manifest version instead of emitting the stale `axon-vscode-1.2.5.vsix` name.
+
+### Security
+- VS Code extension runtime upgraded to `vscode-languageclient` 10.1.0 and vulnerable transitive dependencies refreshed. Both full `npm audit` and production-only `npm audit --omit=dev` report zero vulnerabilities.
+
+### CI
+- Added portable queue concurrency, dead-owner recovery, project-boundary, Unicode/space path, timeout, registry-scope, and Windows PowerShell smoke coverage.
+
+## [1.2.15] — 2026-07-09
+
+### Added
+- `axon metrics [--json]`: the per-layer telemetry aggregate (retrieval/cache/ccr/compression/shell_filtering — requests, tokens sent/saved, average latency) that `serve --http` exposes at `/api/metrics`, now available straight from the CLI without standing up the HTTP server. The savings pipeline had no CLI consumer; this gives it one. Human table by default, raw JSON with `--json`.
+
+### Performance
+- Capsule assembly fetches support-file skeletons in a single batched query instead of one `SELECT … WHERE id = ?` per file. Profiling the residual after the index-skeleton change showed those N single-row round-trips — not the BFS or string work — were the whole augment cost (196 support files = 196 queries ≈ 100 ms on a 6.6k-symbol repo). One `WHERE id IN (…)` collapses them to ~5 ms; capsule-miss assembly on that repo drops from ~246 ms to ~95 ms. Same rows, same fallback semantics — purely fewer round-trips.
+
+### Fixed
+- Heap-buffer-overflow indexing Swift files: the vendored Swift tree-sitter scanner allocated its state with `calloc(0, …)` (a zero-element buffer), so every access to the scanner's hash-count state ran past the allocation. Harmless-looking in release builds (it landed in allocator padding) but a latent heap-corruption/crash risk, and the reason the ASAN/UBSAN nightly was red. Now `calloc(1, …)`.
+
+### CI
+- The sanitizer nightly built only one test target yet ran the whole ctest suite, so every axon-binary smoke failed with "No such file or directory" independent of any sanitizer result. It now builds the full suite and runs the deterministic gtest units under ASAN/UBSAN (`ctest -LE smoke`), excluding the subprocess bash smokes already covered on three platforms by `build.yml`.
+
+## [1.2.14] — 2026-07-09
+
+### Performance
+- Capsule assembly no longer re-parses support files with tree-sitter at query time: the file-level augment/support loops now serve the skeleton precomputed at index time (`files.skeleton`, the same source the `get_skeleton` tool already reads), falling back to the live parse only when the index holds none. Measured on a capsule miss (K=25 per repo): assembly median 680ms → 246ms (−64%) on a 6.6k-symbol repo and 198ms → 81ms (−59%) on this repo; the re-parse stage itself dropped 543ms → 102ms and 92ms → 8ms. Contract note: capsule skeletons now reflect the index (like every other capsule ingredient and every cache hit already did); full pivot bodies keep reading the disk.
+
+### Added
+- `capsule_cache_prune`: entries stranded on an old index epoch are now reaped after every (re)index that moved the epoch (full index, incremental `index-paths`, watch-driven sync). They were unreachable by construction — lookups require an exact epoch match — but accumulated in the table forever; the schema comment even promised a prune that never existed.
+
+### Security
+- VS Code extension dev toolchain: cleared all 9 open Dependabot alerts (undici ×6 incl. SOCKS5 TLS-bypass and cross-origin routing, form-data CRLF injection, tmp path traversal, markdown-it quadratic DoS) by refreshing the lockfile and bumping `@vscode/vsce` 2.32 → 3.9.2. All were `development`-scope transitive dependencies of the packaging tool — nothing vulnerable ships inside the published `.vsix` (its only production dependency, `vscode-languageclient`, is unchanged). `npm audit`: 0 vulnerabilities; packaging re-validated end-to-end.
+
+## [1.2.13] — 2026-07-09
+
+### Added
+- `axon registry prune` also zeroes stale owner bookkeeping: a live repo whose registered owner process died without running `clear_repo_owner` (crash, SIGKILL) kept pointing peers at a gone endpoint. `axon serve`/`web` startup now prints a one-line advisory when the registry holds prunable dead entries — cleaning stays an explicit user action, because auto-pruning at startup could drop the registration (and group memberships) of a temporarily unmounted root.
+
+### CI
+- clang-format gate extended to `tests/` (back-catalog normalized with clang-format 15, 337 drifted lines across 7 files).
+
+## [1.2.12] — 2026-07-09
+
+### Added
+- Native filesystem watcher for Windows: `axon watch --backend=auto` now uses ReadDirectoryChangesW (recursive, overlapped, dedicated producer thread) instead of falling back to polling. Overflow (`ERROR_NOTIFY_ENUM_DIR` or a zero-byte completion) triggers the same full-rescan path as `IN_Q_OVERFLOW`/`MustScanSubDirs`; skip-dirs are pruned with the shared predicate; the poll fallback and the `AXON_WATCH_FORCE_*` seams behave identically. The parameterized watcher suite runs the Native instantiation for real on the Windows CI job — including the detection-latency guarantee.
+
+## [1.2.11] — 2026-07-09
+
+### Fixed
+- Windows: stdio now opens in binary mode. The MSVC CRT's text mode rewrote every `\n` as `\r\n` on write, so `artifact-retrieve` returned CCR artifacts that no longer matched the stored bytes; `filter` pipes and the MCP/LSP framing are protected by the same fix.
+- Windows: the parser stored native backslash-separated relative paths while the files table stores `/`-separated ones, so the second-pass edge resolution never found the parsed file and silently dropped every import edge — `get_callers`, `get_tests_for` and the impact graph all returned empty on Windows. Route discovery had the same native-path bug.
+- Dialogue: `session_get` and the session-digest key-turn scan now break timestamp ties by the append-monotonic turn id — five rapid `turn_add` calls could come back reordered (surfaced as a macOS CI flake in `ObjTest.TurnsReturnedInChronologicalOrder`).
+
+### CI
+- `build.yml` now builds and tests on `windows-2022` (MSVC + Ninja, same runner image and toolset as `release.yml`) alongside ubuntu-22.04 and macos-14: full ctest suite plus the bash smokes under Git Bash, with the staged `duckdb.dll` and every build-emitted DLL copied beside the test executables (Windows has no RUNPATH, and GITHUB_PATH prepends are clobbered by the exported MSVC environment). Windows product code was previously release-built but never test-covered — the FSEvents lesson (PR #69/#70) applied to the remaining platform. The `windows-2022 (msvc)` check is required on `main`. Smokes that depend on FIFO-backed serve stdin skip declaratively on Windows; a 60s-bounded probe step and job/ctest timeouts convert exe-cannot-start hangs into named failures.
+
+## [1.2.10] — 2026-07-08
+
+### Added
+- Native filesystem watcher for `axon watch`: inotify on Linux and FSEvents on macOS replace polling as the default backend (`--backend=auto`), with automatic fallback to the portable poller when native init fails (`AXON_WATCH_FORCE_POLL=1` forces it; `--backend=native` fails hard for diagnostics; Windows stays on polling). The watch-set is pruned by the indexer's hard skip-list, so `node_modules`/`.git` churn no longer wakes the watcher; kernel event-queue overflow (`IN_Q_OVERFLOW`, `kFSEventStreamEventFlagMustScanSubDirs`) triggers a full `sync_project` rescan. Debounce, incremental reindex, prune and telemetry are shared with the poll path, keeping fallback behavior identical by construction. Covered by a hermetic unit suite (both backends parameterized, fallback and overflow seams) and e2e smoke runs on both CI platforms.
+
+### Changed
+- The registry-directory override introduced in 1.2.9 is renamed `AXON_HOME` → `AXON_REGISTRY_DIR` before any adoption: the install wrappers generated by `install.sh` already use `AXON_HOME` to relocate the package root (`exec "$AXON_HOME/bin/axon"`), so setting it to redirect the registry would break every installed CLI. `AXON_HOME` keeps its original wrapper meaning only.
+- `axon filter --metrics=json` now reports the specialized filter that actually ran in `kind` (`grep`, `tsc`, `test`, `package`, `lint`) instead of lumping them all into `plain_text`; `command` is unchanged.
+- The capsule cache key now includes the binary version, so entries assembled by an older release are never served after an upgrade (observed: a budget-violating capsule cached by 1.2.8 was still served by 1.2.9 until the index epoch changed).
+- CI ShellCheck is a single gate (`ShellCheck` in `lint.yml`; the duplicate job in `ci.yml` was removed) and now also covers `tests/**.sh` (smoke + e2e harnesses) at warning severity.
+
+### Fixed
+- `install.ps1`: native calls (`axon.exe index`, `claude mcp ...` with `2>$null`) are isolated from `$ErrorActionPreference = 'Stop'` — in Windows PowerShell 5.1 a stderr line would terminate the script before `$LASTEXITCODE` was checked, hiding the STATUS_DLL_NOT_FOUND guidance.
+
+## [1.2.9] — 2026-07-08
+
+### Fixed
+- Capsule token budget could be exceeded by up to ~46% at scale: in symbol mode with no symbol-level edges, the file-level support augmentation appended each support skeleton without checking it fit the remaining budget, so one signature-heavy file (e.g. a 44 KB generated `types.ts` whose skeleton barely compresses) blew straight through the cap (observed live: `budget=8000` → 11,693-token capsule on a 6,613-symbol repo). Oversized skeletons are now skipped and smaller candidates keep filling the gap; regression-tested with a fixture whose support skeleton alone exceeds the whole budget.
+- The HTTP API answered `200 OK` for every `/api/capsule` failure with an ambiguous `{"error": "q parameter required and DB must be ready"}` body, so clients could not tell success from failure without parsing the body. Now: `400` for a missing `q`, `503` for DB-not-ready and model-not-loaded (with distinct messages), `404`/`503` for `/api/artifact/<id>` unknown-artifact/DB-not-ready.
+
+### Added
+- `AXON_HOME` environment variable: overrides the `~/.axon` directory that holds the multi-repo `registry.json`. Test suites and sandboxes point it at a scratch dir — previously every e2e run permanently registered its `/tmp` fixtures in the user's real registry (observed: 140 dead entries out of 174 accumulated on a dev machine). The e2e and MCP smoke suites now run hermetically under it.
+- `axon registry prune`: removes registry entries whose repo root no longer exists (entries whose registered owner process is still alive are kept), and drops group memberships of pruned repos.
+
+## [1.2.8] — 2026-07-08
+
+### Changed
+- `test_docs_freshness` and `test_shell_filter_aggregate_benchmark` now skip (ctest `SKIP_RETURN_CODE 77`) with an explicit message when optional dev tooling (`ripgrep`, `jq`) is absent, instead of failing with "command not found"; CONTRIBUTING documents the test-suite tooling.
+- The "embedding model not found" error now points at locations actually on the search path (`~/.axon/models/` for any install, `<package>/models/` next to the binary) — the old hint suggested `./models/`, which installed binaries never search; troubleshooting documents that `axon filter`/`artifact-retrieve` keep working under a DB lock via the `.axon/ccr/` sidecar.
+
+## [1.2.7] — 2026-07-08
+
+### Fixed
+- Telemetry was permanently dead on any database created before the `layer` column: the schema migration used `ALTER TABLE … ADD COLUMN layer VARCHAR NOT NULL DEFAULT 'unknown'`, which DuckDB rejects ("Adding columns with constraints not yet supported"), the error was swallowed, and every subsequent telemetry INSERT (which names `layer`) failed silently — `/api/metrics` reported zeros forever on upgraded installs. The migration is now nullable (fresh DBs keep NOT NULL via CREATE TABLE), with a regression test that upgrades a pre-`layer` schema and asserts events are recorded.
+
+## [1.2.6] — 2026-07-08
+
+### Added
+- Peer-proxy for concurrent serves: the `axon serve` process holding the DuckDB write lock now runs a localhost peer listener (ephemeral port, token-gated `POST /rpc/tool`) and registers itself as the repo owner in `~/.axon/registry.json`; latecomer serves transparently forward DB-backed tool calls to it instead of returning lock errors, and promote themselves to owner when it exits.
+- `axon web` / `serve --http` participates in the same mechanism, so a long-running web server no longer locks MCP sessions out of the same repo.
+- CCR file sidecar store (`.axon/ccr/`, one JSON file per artifact, atomic write-to-temp + rename): `axon filter` keeps producing recoverable compressed output when another process holds the DuckDB write lock, instead of silently passing input through with `tokens_saved: 0`. `axon artifact-retrieve` resolves artifacts through a DB → sidecar → peer-proxy chain, and the MCP `artifact_retrieve` tool plus `GET /api/artifact/<id>` fall back to the sidecar after a DB miss.
+
+### Changed
+- Registry writes are now atomic (write-to-temp + rename) so concurrent serves never read a half-written `registry.json`.
+
+### Fixed
+- `get_callers` and `get_tests_for` now see through C/C++ declaration/definition splits: a symbol defined in `foo.cpp` also counts importers of same-stem peers connected by an import edge (`foo.hpp`), instead of returning an empty caller/test list.
+- `GET /api/capsule` now uses the capsule cache (same eligibility rules as the MCP tool) and reports `"cache": "hit"`; HTTP telemetry records cache hits so `/api/metrics` attributes them to the cache layer.
+- `meta.files` in `GET /api/graph?mode=symbol` counted symbol nodes instead of distinct files.
+- Dialogue-layer tools no longer leak raw `[json.exception.type_error.302]` messages when an argument is present but `null`; `anchor_link` now requires `file_id` or `symbol_id` (an anchor needs a target).
+
+## [1.2.5] — 2026-07-01
+
+### Added
+- Native `axon filter` command for diff, grep/rg, JSON, TypeScript diagnostics, tests, package manager output, lint output, logs, and generic text, with token budgets, JSON metrics, safe passthrough, and CCR recovery markers.
+- CCR artifact storage and retrieval through CLI, MCP, and HTTP so lossy capsule and shell summaries can recover exact originals.
+- Type-aware compression for large outputs and capsule bodies, including token-savings validation before accepting compressed output.
+- Per-layer telemetry for retrieval, shell filtering, compression, cache, CCR, and unknown savings.
+- Capsule traceability metadata with `source_ref`, `expand_command`, explicit budgets, and MCP schema smoke coverage.
+- Claude Code shell guard hook that routes noisy raw Bash output through Axon filters or explicit fallback.
+- Aggregate shell-filter benchmark runner comparing native Axon filters with RTK when available.
+
+### Changed
+- Build and release workflows now build every configured test target before CTest and run the context-optimization gate in Linux release jobs.
+- Documentation now positions Axon as the primary local-first context and shell-output optimization layer, with RTK as optional compatibility fallback.
+- Generated `axon init` config now includes documented token budget and capsule compression keys.
+
+## [1.2.4] — 2026-06-04
+
+### Fixed
+- `axon index <path>` / `axon init <path>` now anchor to the directory you pass instead of walking up to an ancestor that happens to contain a project marker (`.git`, `package.json`, `CMakeLists.txt`, ...). Previously, indexing a non-git folder under such an ancestor indexed the ancestor.
+- Silence llama.cpp/ggml INFO/WARN log chatter on stderr during embedding (the repeated "cannot decode batches with this context" note); real errors still print.
+
+### Changed
+- Installer prompts/README now state the embedding model is ~80 MB (was mislabeled ~150 MiB).
+
+## [1.2.3] — 2026-06-03
+
+### Added
+- `install.sh`/`install.ps1` register the `axon` MCP server with Claude Code automatically (`claude mcp add-json ... --scope user`), with a copy-paste fallback when the Claude CLI is not on PATH.
+
+### Changed
+- The embedding model is downloaded by default during install (opt out with `AXON_DOWNLOAD_MODEL=0`), so semantic search (`get_context_capsule`) works out of the box.
+- Release packages bundle a user-facing `README.md` (extract -> run installer) instead of the developer README.
+- Release publishes version-less asset aliases (`axon-<os>-x64.<ext>`) so `releases/latest/download/...` always resolves to the newest build.
+
+## [1.2.2] — 2026-06-03
+
+### Fixed
+
+- Windows `install.ps1` now parses under Windows PowerShell 5.1: the script is ASCII-only, so the host no longer corrupts em-dash/box-drawing characters by reading it as Windows-1252 and breaking the parser.
+- Removed an unused `jq` dependency check from the Windows installer; the PowerShell hooks use the native `ConvertFrom-Json`.
+- `install.ps1` resolves `axon.exe` with a layout-aware root (release-tarball vs source-tree) plus a PATH fallback, and honors `CLAUDE_CONFIG_DIR` when installing the global hooks.
+- `settings.json` hook paths are no longer double-escaped, and every hook is invoked with `-NoProfile`.
+- Generated PowerShell hooks emit the modern `hookSpecificOutput` envelope, matching the Unix hooks.
+- The Windows installer checks `$LASTEXITCODE` after indexing and fails loudly instead of printing a false `Indexed` when `axon.exe` cannot start (for example when the Visual C++ 2015-2022 Redistributable is missing), with a guided, CI-safe prompt to install it.
+
+### Changed
+
+- Release CI validates the Windows package from an isolated copy of `bin\` with a minimal PATH, so a package missing any bundled runtime DLL (`llama`/`ggml*`/`duckdb`) fails the build instead of shipping broken.
+
+## [1.2.1] — 2026-05-24
+
+### Fixed
+
+- Linux tarballs now ship `libllama.so.*` and `libggml*.so.*` with `RUNPATH=$ORIGIN`, so the bundled libs resolve their siblings on any extraction target. Previously the CI build path (`/home/runner/work/axon/...`) was baked into the libraries' runpath, which made `axon --version` fail with `libggml.so.0: cannot open shared object file` on every host except the runner.
+- macOS tarballs rewrite each `libllama`/`libggml` dylib to use `@rpath` as identity and load name, mirroring the existing `libduckdb.dylib` handling. Without this the same class of broken paths affected `.dylib` siblings.
+- `release.yml` Unix staging step fixes a precedence bug in `find -name X -o -name Y` (POSIX `-o` requires `\( ... \)` grouping) that quietly dropped the `*.so*` half of the glob.
+
+## [1.2.0] — 2026-05-24
+
+### Added
+
+- `axon watch [path] [--interval-ms=N] [--debounce-ms=N]` portable polling watcher for external editor changes, generated files, git checkouts, and deletions.
+- Local opt-in telemetry stored in DuckDB via `AXON_TELEMETRY=1` or `telemetry = true`, with optional best-effort remote POST through `AXON_TELEMETRY_ENDPOINT`.
+- `GET /api/metrics` plus Axon Web metric cards. With telemetry off, the endpoint returns graph/cache summary; with telemetry on, it returns request, token, latency, cache, reduction, and cost aggregates.
+- VS Code extension under `editors/vscode`, including `axon lsp` client, restart/index/web commands, settings, TypeScript compile, and VSIX packaging.
+- Ruby, Swift, and Scala parser support. Supported language count is now 18.
+
+### Changed
+
+- Release packages are relocatable: Linux RUNPATH includes `$ORIGIN/../lib`, macOS uses `@executable_path/../lib`, and Windows keeps DLLs next to the executable.
+- `axon lsp` definition now resolves the word under cursor first; references use symbol-level call edges when available and fall back by name.
+- LSP notifications `initialized`, `didOpen`, `didChange`, `didSave`, and `didClose` are accepted; `didSave` reindexes the saved file when the DB is ready.
+- Release/build workflows compile the VS Code extension and attach `.vsix` artifacts; release smoke validates staged binaries run without `LD_LIBRARY_PATH`.
+
+### Fixed
+
+- Documentation now reflects 18 languages, `AXON_EMBEDDING_MODEL`, telemetry, `/api/metrics`, watch mode, VSIX installation, and package RPATH behavior.
+
+## [1.1.2] — 2026-05-24
+
+### Added
+
+- `axon web` command: starts the native browser graph explorer at `/` and exposes the existing HTTP REST API, including `--all` and `--group=<name>` graph aggregation.
+- `axon lsp` command: starts a stdio Language Server Protocol server backed by the DuckDB index, with workspace symbols, document symbols, definitions, and references.
+
+### Fixed
+
+- `test_objectives` now links the Lua and Nix tree-sitter grammars required by `skeleton.cpp`, keeping the native CTest suite green after the language expansion.
 
 ## [1.1.1] — 2026-05-22
+
+### Added
+
+- Lua grammar via `tree-sitter-grammars/tree-sitter-lua` submodule — parses `.lua` files, surfaces `function`/`method` symbols (including `function tbl.foo`, `function tbl:foo`, `local function`) and `require("mod")` calls as import edges.
+- Nix language support — 15th tree-sitter grammar. `.nix` files now produce symbols for top-level `binding` (kind `function` / `attrset` / `binding` based on RHS), per-attr `variable` symbols from `inherit` / `inherit_from` clauses, import edges from `import <path>` / `import ./foo.nix` / `inherit (src) …`, and call sites via `apply_expression`.
+- `capsule.cpp::lang_from_string()` and `mcp/server.cpp` skeleton dispatch now recognize `bash`, `cpp`, `kotlin`, `vue`, `lua`, `nix`. Count of supported languages: 13 → 15.
 
 ### Fixed
 
@@ -47,7 +313,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Remove legacy local runtimes em `.hseos/` — agentes/skills/workflows do projeto agora delegam ao runtime global `enterprise-hseos`. Sem impacto em comportamento do binário; release cut para alinhar tag com working tree e disparar pipeline multi-OS (linux-x64, macos-arm64, windows-x64).
-
 ## [0.5.11] — 2026-05-09
 
 ### Fixed

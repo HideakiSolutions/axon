@@ -3,8 +3,8 @@
 #include <sstream>
 #include <regex>
 #ifdef _WIN32
-#  define popen  _popen
-#  define pclose _pclose
+#define popen _popen
+#define pclose _pclose
 #endif
 #include <filesystem>
 
@@ -23,7 +23,8 @@ std::vector<FileDiff> get_git_diffs(const std::string& project_root, const std::
 
     std::string output;
     char buf[4096];
-    while (fgets(buf, sizeof(buf), pipe)) output += buf;
+    while (fgets(buf, sizeof(buf), pipe))
+        output += buf;
     pclose(pipe);
 
     if (output.empty()) {
@@ -31,7 +32,8 @@ std::vector<FileDiff> get_git_diffs(const std::string& project_root, const std::
         cmd = "git -C '" + project_root + "' diff -U0 --cached " + ref + " 2>/dev/null";
         pipe = popen(cmd.c_str(), "r");
         if (pipe) {
-            while (fgets(buf, sizeof(buf), pipe)) output += buf;
+            while (fgets(buf, sizeof(buf), pipe))
+                output += buf;
             pclose(pipe);
         }
     }

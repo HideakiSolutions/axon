@@ -8,11 +8,11 @@
 namespace axon {
 
 struct RouteInfo {
-    std::string method;      // GET, POST, PUT, DELETE, ANY
-    std::string path;        // /api/users/:id
-    std::string handler_file;// relative path from project root
-    std::string framework;   // nextjs|express|fastapi|django|flask|unknown
-    int64_t     file_id = 0;
+    std::string method;       // GET, POST, PUT, DELETE, ANY
+    std::string path;         // /api/users/:id
+    std::string handler_file; // relative path from project root
+    std::string framework;    // nextjs|express|fastapi|django|flask|unknown
+    int64_t file_id = 0;
 };
 
 // Scan project for HTTP routes. Detects:
