@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Indexing an unnamed GDScript enum no longer crashes the parser.
 
+### CI
+- Lint and release publishing run on GitHub-hosted runners after the internal
+  runner image was rejected for its deprecated Actions Runner version.
+
 ## [1.3.1] — 2026-08-29
 
 ### Added

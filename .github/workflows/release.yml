@@ -283,7 +283,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: build
-    runs-on: hideaki-k3s
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
         with:
