@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint and release publishing run on GitHub-hosted runners after the internal
   runner image was rejected for its deprecated Actions Runner version.
 - Sanitizer jobs use hosted runners for the same reason.
+- Windows release packages include runtime DLLs discovered outside the build
+  directory, with transitively imported dependencies checked before publishing.
 
 ## [1.3.1] — 2026-08-29
 
