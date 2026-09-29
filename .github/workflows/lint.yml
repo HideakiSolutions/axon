@@ -16,7 +16,7 @@ jobs:
     # Single ShellCheck gate (the duplicate job in ci.yml was removed; this
     # name matches the required status check on main).
     name: ShellCheck
-    runs-on: hideaki-k3s
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - name: Run ShellCheck
@@ -28,7 +28,7 @@ jobs:
 
   clang-format:
     name: clang-format
-    runs-on: hideaki-k3s
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - name: Install clang-format

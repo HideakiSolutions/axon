@@ -365,6 +365,28 @@ static int64_t resolve_specifier_to_file(duckdb::Connection& conn, const std::st
         s.erase(0, 1);
     while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
         s.pop_back();
+    // Godot resource URLs are project-root-relative paths. Resolve them
+    // exactly: a loose basename match can connect to the wrong scene script.
+    if (s.rfind("res://", 0) == 0) {
+        fs::path resource_path = s.substr(6);
+        if (resource_path.empty() || resource_path.is_absolute()) return 0;
+        for (const auto& part : resource_path)
+            if (part == "..") return 0;
+
+        auto source = conn.Query("SELECT path FROM files WHERE id = " + std::to_string(from_id));
+        require_ok(source, "resolve Godot resource source");
+        if (source->RowCount() == 0) return 0;
+        fs::path base = fs::path(source->GetValue(0, 0).ToString()).parent_path();
+        while (true) {
+            std::error_code ec;
+            if (fs::exists(g_project_root / base / "project.godot", ec)) break;
+            if (base.empty()) return 0;
+            base = base.parent_path();
+        }
+        std::string path = (base / resource_path).generic_string();
+        return run("SELECT id FROM files WHERE path = '" + sq(path) +
+                   "' AND id != " + std::to_string(from_id) + " LIMIT 1");
+    }
     while (s.size() >= 2 && s[0] == '.' && (s[1] == '/' || s[1] == '.')) {
         size_t cut = s.find('/');
         if (cut == std::string::npos) break;

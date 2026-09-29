@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(axon VERSION 1.3.1 LANGUAGES C CXX ASM)
+project(axon VERSION 1.4.0 LANGUAGES C CXX ASM)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -190,6 +190,13 @@ add_library(ts_scala STATIC
 target_include_directories(ts_scala PUBLIC ${TS_INCLUDE}
     third_party/tree-sitter-scala/src)
 
+add_library(ts_gdscript STATIC
+    third_party/tree-sitter-gdscript/src/parser.c
+    third_party/tree-sitter-gdscript/src/scanner.c
+)
+target_include_directories(ts_gdscript PUBLIC ${TS_INCLUDE}
+    third_party/tree-sitter-gdscript/src)
+
 # ── llama.cpp ────────────────────────────────────────────────────────────────
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -310,6 +317,7 @@ target_link_libraries(axon PRIVATE
     ts_ruby
     ts_swift
     ts_scala
+    ts_gdscript
     llama
     ggml
     blake3_lib

@@ -109,7 +109,7 @@ axon index /path/to/project --verbose
 **Common causes:**
 - Project root is a subdirectory — axon detects root via `.git` walk-up. Ensure you're indexing the git root.
 - All files match an exclude pattern in `.axon/config.toml`.
-- Only languages not in the 13 supported are present.
+- Only languages not in the 19 supported are present.
 
 ---
 

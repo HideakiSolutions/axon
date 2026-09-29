@@ -354,7 +354,7 @@ Registry format (`~/.axon/registry.json`):
 
 ---
 
-## Supported languages (18)
+## Supported languages (19)
 
 | Language | Extensions |
 |----------|-----------|
@@ -376,6 +376,7 @@ Registry format (`~/.axon/registry.json`):
 | Ruby | `.rb` |
 | Swift | `.swift` |
 | Scala | `.scala`, `.sc` |
+| GDScript (Godot) | `.gd` |
 
 ---
 
@@ -608,7 +609,7 @@ third_party/
 ├── duckdb/               # Pre-built shared library v1.2.2
 ├── llama.cpp/            # Submodule — inference engine for embeddings
 ├── tree-sitter/          # Core C API
-├── tree-sitter-{lang}/   # 18 language grammar submodules
+├── tree-sitter-{lang}/   # 19 language grammar submodules
 ├── blake3/               # Fast file hashing (incremental reindex)
 └── nlohmann-json/        # Header-only JSON
 ```
@@ -625,7 +626,7 @@ graph TD
     CLI[main.cpp CLI] --> IDX[Indexer]
     CLI --> MCP[MCP Server\nstdio JSON-RPC]
     CLI --> HTTP[HTTP Server\nREST API]
-    IDX --> PARSER[Parser\n18 languages via tree-sitter]
+    IDX --> PARSER[Parser\n19 languages via tree-sitter]
     IDX --> DB[(DuckDB\nfiles/symbols/edges/observations\nthreads/sessions/turns/anchors)]
     IDX --> EMB[Embeddings\nllama.cpp + nomic-embed]
     MCP --> CAPS[Capsule\nBFS + skeletonize]
@@ -681,7 +682,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 | MCP protocol | ✅ | ❌ | ❌ | ❌ |
 | Multi-repo registry | ✅ | ❌ | ❌ | ❌ |
 | Graph visualization | ✅ (`axon web`) | ❌ | ❌ | ❌ |
-| 18 languages | ✅ | ✅ | ✅ | ✅ |
+| 19 languages | ✅ | ✅ | ✅ | ✅ |
 | Zero cloud dependency | ✅ | ❌ | ❌ | ❌ |
 
 ---

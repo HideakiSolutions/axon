@@ -7,6 +7,7 @@
 // exists yet (a smaller refactor for a future wave).
 
 #include "parser/parser.hpp"
+#include "core/skeleton.hpp"
 
 #include <gtest/gtest.h>
 
@@ -42,6 +43,68 @@ const axon::Symbol* find_named(const std::vector<axon::Symbol>& syms, const std:
 }
 
 } // namespace
+
+TEST(ParserGDScript, GodotDeclarationsImportsAndSkeleton) {
+    auto p = write_temp("gd", R"GD(@tool
+class_name Actor
+extends "res://scripts/base_actor.gd"
+
+signal health_changed(value: int)
+enum State { IDLE, MOVING }
+enum { ANONYMOUS }
+const Helper = preload("res://scripts/helper.gd")
+@export var speed: float = 120.0
+
+func _ready() -> void:
+    move_actor(1)
+    helper.run(2)
+
+func move_actor(distance: int) -> void:
+    print(distance)
+
+class Inner:
+    func greet() -> void:
+        print("hello")
+)GD");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+    EXPECT_EQ(pf->language, axon::Language::GDScript);
+    EXPECT_EQ(axon::language_name(pf->language), "gdscript");
+    EXPECT_NE(find_named(pf->symbols, "Actor"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "Inner"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "_ready"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "move_actor"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "health_changed"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "State"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "Helper"), nullptr);
+    EXPECT_NE(find_named(pf->symbols, "speed"), nullptr);
+    auto* actor = find_named(pf->symbols, "Actor");
+    ASSERT_NE(actor, nullptr);
+    ASSERT_TRUE(actor->docstring.has_value());
+    EXPECT_NE(actor->docstring->find("@tool"), std::string::npos);
+    EXPECT_TRUE(std::any_of(pf->imports.begin(), pf->imports.end(), [](const auto& edge) {
+        return edge.to_specifier == "res://scripts/base_actor.gd" && edge.kind == "extends";
+    }));
+    EXPECT_TRUE(std::any_of(pf->imports.begin(), pf->imports.end(), [](const auto& edge) {
+        return edge.to_specifier == "res://scripts/helper.gd" && edge.kind == "imports";
+    }));
+    EXPECT_TRUE(std::any_of(pf->calls.begin(), pf->calls.end(), [](const auto& call) {
+        return call.caller_name == "_ready" && call.callee_name == "move_actor";
+    }));
+    EXPECT_TRUE(std::any_of(pf->calls.begin(), pf->calls.end(), [](const auto& call) {
+        return call.caller_name == "_ready" && call.callee_name == "run" &&
+               call.qualifier == "helper" && call.argument_count == 1;
+    }));
+
+    const std::string skeleton = axon::skeletonize(
+        "@tool\nclass_name Actor\nextends Node2D\nfunc _ready():\n    print(42)\n",
+        axon::Language::GDScript);
+    EXPECT_NE(skeleton.find("@tool"), std::string::npos);
+    EXPECT_NE(skeleton.find("class_name Actor"), std::string::npos);
+    EXPECT_NE(skeleton.find("func _ready()"), std::string::npos);
+    EXPECT_EQ(skeleton.find("print(42)"), std::string::npos);
+}
 
 // ── Rust (W1.T03) ──────────────────────────────────────────────────────────
 TEST(ParserRust, TraitsEnumsModulesMacrosImpl) {

@@ -76,7 +76,7 @@ if matches "${token}(rg|grep|ack|ag)${end}"; then
 fi
 
 if matches "${token}(cat|sed|awk|nl)${end}" &&
-   matches '\.(c|cc|cpp|cxx|h|hh|hpp|ts|tsx|js|jsx|py|rs|go|java|cs|php|dart|kt|kts|vue|lua|nix|rb|swift|scala|sh|bash|json|md)([[:space:];&|`)]|$)'; then
+   matches '\.(c|cc|cpp|cxx|h|hh|hpp|ts|tsx|js|jsx|py|rs|go|java|cs|php|dart|kt|kts|vue|lua|nix|rb|swift|scala|gd|sh|bash|json|md)([[:space:];&|`)]|$)'; then
   deny "raw-file-read" "get_skeleton(files=[...]) or get_context_capsule(query=..., pivot_files=[...]) before raw reads"
 fi
 

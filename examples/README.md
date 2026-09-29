@@ -9,6 +9,7 @@ verify your install matches the documented behavior.
 | [ts-mini/](ts-mini/)             | TypeScript  | decorators, async, namespaces, enums, cross-file imports |
 | [python-mini/](python-mini/)     | Python      | `@router.get`, `@dataclass`, `@cached`, async, `__all__` |
 | [rust-mini/](rust-mini/)         | Rust        | traits, trait impls, modules, enums, `macro_rules!`   |
+| [godot-mini/](godot-mini/)       | GDScript   | Godot 4 scene, classes, signals, enums, `preload` edges |
 
 ## Common workflow
 
