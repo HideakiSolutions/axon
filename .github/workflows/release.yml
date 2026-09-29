@@ -194,6 +194,52 @@ jobs:
               ForEach-Object {
                   Copy-Item $_.FullName "$stage\bin\" -Force
               }
+          # Resolve imported DLLs from the build runner before testing with an
+          # isolated PATH. Optional libraries found by CMake may live outside
+          # build\, and their dependencies need to travel with the package.
+          $stageBin = (Resolve-Path "$stage\bin").Path
+          $searchDirs = @($env:PATH -split ';' | Where-Object {
+              $_ -and (Test-Path $_ -PathType Container)
+          })
+          $queue = [System.Collections.Generic.Queue[string]]::new()
+          Get-ChildItem $stageBin -File | Where-Object {
+              $_.Extension -in '.exe', '.dll'
+          } | ForEach-Object { $queue.Enqueue($_.FullName) }
+          $scanned = [System.Collections.Generic.HashSet[string]]::new(
+              [System.StringComparer]::OrdinalIgnoreCase
+          )
+          while ($queue.Count -gt 0) {
+              $binary = $queue.Dequeue()
+              if (-not $scanned.Add($binary)) { continue }
+              # /IMPORTS also lists delay-loaded libraries that /DEPENDENTS
+              # can miss; the isolated --version probe covers startup imports.
+              $imports = & dumpbin /IMPORTS $binary
+              if ($LASTEXITCODE -ne 0) {
+                  throw "[release] dumpbin failed for $binary"
+              }
+              foreach ($line in $imports) {
+                  if ($line -notmatch '^\s*([A-Za-z0-9_.-]+\.dll)\s*$') { continue }
+                  $dll = $Matches[1]
+                  if ($dll -match '^(api-ms-win-|ext-ms-)') { continue }
+                  if (Test-Path (Join-Path $stageBin $dll)) { continue }
+                  if (Test-Path (Join-Path "$env:SystemRoot\System32" $dll)) { continue }
+                  $source = $null
+                  foreach ($dir in $searchDirs) {
+                      $candidate = Join-Path $dir $dll
+                      if (Test-Path $candidate -PathType Leaf) {
+                          $source = $candidate
+                          break
+                      }
+                  }
+                  if (-not $source) {
+                      throw "[release] missing runtime DLL $dll imported by $binary"
+                  }
+                  $destination = Join-Path $stageBin $dll
+                  Copy-Item $source $destination
+                  Write-Host "[release] bundled $dll from $source"
+                  $queue.Enqueue($destination)
+              }
+          }
           Copy-Item "scripts\README.package.md" "$stage\README.md"
           Copy-Item "LICENSE","CHANGELOG.md"  "$stage\"
           Copy-Item "scripts\install.ps1"                 "$stage\install.ps1"
