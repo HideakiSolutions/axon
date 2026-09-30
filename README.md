@@ -48,7 +48,7 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 39 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 43 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
@@ -66,7 +66,7 @@ For agent setups that previously used RTK for shell-output reduction, see [Axon-
 
 **Use case 4 — Cross-session memory:** Found something important? `save_observation` persists it to DuckDB with a vector embedding. Future sessions retrieve it with `search_memory`.
 
-**Use case 5 — Multi-repo blast radius:** Changed a shared library? `group_impact` cross-references all registered repos in `~/.axon/registry.json` and returns which files in other projects depend on the same module path.
+**Use case 5 — Multi-repo impact:** `group_impact` reports experimental typed HTTP, OpenAPI, RPC, and topic links across registered repositories, with observed or declared evidence. Filename matches remain separate heuristic candidates; an empty confirmed-link list does not prove there are no consumers.
 
 **Use case 6 — Structured conversation memory:** Use `thread_create` + `session_start` + `turn_add` to persist every relevant exchange. Axon automatically detects file paths and symbol names in turn content and links them to the dependency graph (`auto-anchor`). Later, `turn_search` retrieves past discussions by semantic similarity. Pass `dialogue_budget` to `get_context_capsule` and receive code + conversations in one unified response.
 
@@ -133,7 +133,7 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `dialogue_budget?`, `no_cache?`, `compression?` | Token-efficient context capsule: pivots complete + support skeletonized + optional past turns; `compression="body"` enables type-aware lossy body compression |
+| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `retrieval_mode?`, `dialogue_budget?`, `no_cache?`, `compression?` | Token-efficient context capsule; `hybrid` is the default after the Godot retrieval gate and reports BM25/vector selection ranks; `semantic` remains available |
 | `get_overview` | `limit?` | Top files by coupling + top symbols — ideal for onboarding |
 | `get_impact_graph` | `files[]` | Which files depend on the given files (bidirectional BFS) |
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
@@ -149,6 +149,10 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 | `detect_changes` | `ref?` | Symbols and files affected by recent git changes (default ref: `HEAD`) |
 | `group_list` | — | List all repos registered in `~/.axon/registry.json` |
 | `group_impact` | `file`, `group?` | Cross-repo blast radius for a file path, optionally scoped to a group |
+| `symbol_communities` | none | Deterministic groups from indexed calls and imports |
+| `execution_flow` | `max_depth?`, `max_paths?` | Bounded HTTP, RPC and event paths with uncertainty on each edge |
+| `api_shape` | `identity?` | Static response-field findings for confirmed HTTP links |
+| `trace_data_flow` | `file`, `symbol?` | Explicit experimental TS/JS request-to-sink trace; no persistent index |
 | `thread_create` | `name`, `kind?` | Create a named conversation scope (project \| person \| topic) |
 | `thread_list` | — | List all threads |
 | `session_start` | `thread_id`, `label?`, `idempotency_key?` | Open or replay an idempotent working session within a thread |
@@ -294,7 +298,7 @@ axon web --port=7070 --group=backend
 | `GET` | `/api/symbol/:id` | Symbol detail with callers |
 | `GET` | `/api/search?q=` | Full-text + semantic search |
 | `GET` | `/api/observations?q=&limit=` | List or semantic-search saved observations |
-| `GET` | `/api/capsule?q=&budget=&pivots=` | Assemble token-budget context capsule |
+| `GET` | `/api/capsule?q=&budget=&retrieval_mode=&no_cache=&pivots=` | Assemble token-budget context capsule |
 | `GET` | `/api/artifact/:id` | Retrieve original content for a CCR artifact |
 | `GET` | `/api/metrics` | Telemetry aggregates when enabled; graph/cache metrics otherwise |
 | `GET` | `/api/threads` | List all conversation threads |
@@ -602,7 +606,7 @@ src/
 ├── parser/
 │   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (18 langs)
 └── mcp/
-    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 41 MCP tool handlers
+    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 45 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
@@ -691,7 +695,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| 41 MCP tools | ✅ Done | Code context, dialogue/handoff, CCR artifact retrieval, and portfolio capability tools |
+| 45 MCP tools | ✅ Done | Code context, dialogue/handoff, CCR artifact retrieval, and portfolio capability tools |
 | HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
 | Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |

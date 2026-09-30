@@ -127,6 +127,19 @@ std::string canonical_manifest_rows(duckdb::Connection& connection) {
         }
         canonical += '\n';
     }
+    auto contracts = connection.Query(
+        "SELECT repository,file_path,symbol,surface,role,identity,origin,ambiguity,detail "
+        "FROM contract_evidence ORDER BY repository,file_path,symbol,surface,role,identity,"
+        "origin,ambiguity,detail");
+    require_ok(contracts, "compute contract evidence manifest");
+    for (duckdb::idx_t row = 0; row < contracts->RowCount(); ++row) {
+        canonical += "contract_evidence\0";
+        for (duckdb::idx_t column = 0; column < 9; ++column) {
+            canonical += contracts->GetValue(column, row).ToString();
+            canonical += '\0';
+        }
+        canonical += '\n';
+    }
     return canonical;
 }
 

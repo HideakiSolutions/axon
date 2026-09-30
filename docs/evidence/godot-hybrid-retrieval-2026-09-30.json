@@ -1,0 +1,815 @@
+{
+  "evaluation": "evals/godot/retrieval-v1.json",
+  "device": "cpu",
+  "gate": {
+    "original_3_of_4": true,
+    "full_80_percent": true,
+    "exact_no_regression": true,
+    "budget_8000": true,
+    "p95_at_most_1_5x": true
+  },
+  "modes": {
+    "semantic": {
+      "support_rate": 0.25,
+      "original_support": 0,
+      "exact_support": 6,
+      "latency_p95_ms": 134.05,
+      "max_tokens": 2276,
+      "cases": [
+        {
+          "id": "movement_pt",
+          "kind": "original",
+          "supported_proxy": false,
+          "token_estimate": 499,
+          "latency_ms": 132.3,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/notebook/notebook_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/screens/sources/sources_screen.gd"
+          ]
+        },
+        {
+          "id": "camera_pt",
+          "kind": "original",
+          "supported_proxy": false,
+          "token_estimate": 691,
+          "latency_ms": 124.06,
+          "pivot_paths": [
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/sources/sources_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "dialogue/dialogue_bust.gd"
+          ]
+        },
+        {
+          "id": "dialogue_pt",
+          "kind": "original",
+          "supported_proxy": false,
+          "token_estimate": 495,
+          "latency_ms": 134.05,
+          "pivot_paths": [
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/notebook/notebook_screen.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/people/people_screen.gd"
+          ]
+        },
+        {
+          "id": "save_pt",
+          "kind": "original",
+          "supported_proxy": false,
+          "token_estimate": 331,
+          "latency_ms": 121.97,
+          "pivot_paths": [
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/help/help_screen.gd",
+            "ui/notebook/notebook_screen.gd"
+          ]
+        },
+        {
+          "id": "movement_gravity",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 503,
+          "latency_ms": 128.74,
+          "pivot_paths": [
+            "ui/screens/settings/settings_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/screens/sources/sources_screen.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/help/help_screen.gd"
+          ]
+        },
+        {
+          "id": "movement_route",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 489,
+          "latency_ms": 124.48,
+          "pivot_paths": [
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/screens/people/people_screen.gd"
+          ]
+        },
+        {
+          "id": "movement_facing",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 469,
+          "latency_ms": 122.05,
+          "pivot_paths": [
+            "world/zone_transfer_button.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "world/avatar.gd",
+            "src/entities/player/player.gd"
+          ]
+        },
+        {
+          "id": "camera_follow",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 1068,
+          "latency_ms": 129.75,
+          "pivot_paths": [
+            "ui/screens/sources/sources_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "world/character/persona_catalog.gd",
+            "ui/screens/help/help_screen.gd"
+          ]
+        },
+        {
+          "id": "camera_manual",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 459,
+          "latency_ms": 127.12,
+          "pivot_paths": [
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/help/help_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/notebook/notebook_screen.gd",
+            "world/zone_transfer_button.gd"
+          ]
+        },
+        {
+          "id": "camera_zoom",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 797,
+          "latency_ms": 131.14,
+          "pivot_paths": [
+            "dialogue/dialogue_bust.gd",
+            "ui/screens/sources/sources_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/notebook/notebook_screen.gd",
+            "ui/screens/settings/settings_screen.gd"
+          ]
+        },
+        {
+          "id": "camera_occlusion",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 481,
+          "latency_ms": 134.29,
+          "pivot_paths": [
+            "ui/screens/sources/sources_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/people/people_screen.gd",
+            "ui/screens/settings/settings_screen.gd"
+          ]
+        },
+        {
+          "id": "dialogue_open",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 506,
+          "latency_ms": 128.62,
+          "pivot_paths": [
+            "world/zone_transfer_button.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/people/people_screen.gd",
+            "ui/screens/help/help_screen.gd"
+          ]
+        },
+        {
+          "id": "dialogue_menu",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 497,
+          "latency_ms": 126.79,
+          "pivot_paths": [
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/people/people_screen.gd"
+          ]
+        },
+        {
+          "id": "dialogue_commit",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 406,
+          "latency_ms": 128.54,
+          "pivot_paths": [
+            "world/zone_transfer_button.gd",
+            "ui/screens/help/help_screen.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/notebook/notebook_screen.gd"
+          ]
+        },
+        {
+          "id": "dialogue_resume",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 391,
+          "latency_ms": 121.43,
+          "pivot_paths": [
+            "world/zone_transfer_button.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/help/help_screen.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/notebook/notebook_screen.gd"
+          ]
+        },
+        {
+          "id": "save_validation",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 442,
+          "latency_ms": 128.79,
+          "pivot_paths": [
+            "ui/screens/settings/settings_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/help/help_screen.gd",
+            "ui/screens/proposal/proposal_screen.gd"
+          ]
+        },
+        {
+          "id": "save_lock",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 548,
+          "latency_ms": 124.4,
+          "pivot_paths": [
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/settings/settings_screen.gd",
+            "ui/screens/sources/sources_screen.gd",
+            "ui/screens/help/help_screen.gd",
+            "ui/screens/people/people_screen.gd"
+          ]
+        },
+        {
+          "id": "save_export",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 320,
+          "latency_ms": 116.4,
+          "pivot_paths": [
+            "persistence/save_local.gd",
+            "ui/notebook/notebook_screen.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "domain/mission_definition_loader.gd",
+            "ui/screens/settings/settings_screen.gd"
+          ]
+        },
+        {
+          "id": "save_write",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 352,
+          "latency_ms": 125.47,
+          "pivot_paths": [
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/help/help_screen.gd",
+            "ui/notebook/notebook_screen.gd",
+            "ui/screens/settings/settings_screen.gd"
+          ]
+        },
+        {
+          "id": "dialogue_persist",
+          "kind": "broad",
+          "supported_proxy": false,
+          "token_estimate": 402,
+          "latency_ms": 131.64,
+          "pivot_paths": [
+            "ui/screens/settings/settings_screen.gd",
+            "world/zone_transfer_button.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/onboarding/onboarding_screen.gd",
+            "ui/screens/help/help_screen.gd"
+          ]
+        },
+        {
+          "id": "exact_velocity",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 580,
+          "latency_ms": 106.54,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "src/entities/player/camera_rig.gd",
+            "world/zone_data.gd",
+            "persistence/preferences.gd",
+            "ui/panel_host.gd"
+          ]
+        },
+        {
+          "id": "exact_follow",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2276,
+          "latency_ms": 112.87,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/screens/people/people_screen.gd",
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        {
+          "id": "exact_zoom",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 1406,
+          "latency_ms": 117.06,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "world/zone.gd",
+            "src/systems/world_input_controller.gd",
+            "dialogue/dialogue_panel.gd",
+            "ui/components/modal_screen.gd"
+          ]
+        },
+        {
+          "id": "exact_choose",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 1131,
+          "latency_ms": 106.8,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_panel.gd",
+            "dialogue/dialogue_content.gd",
+            "ui/notebook/notebook_screen.gd",
+            "ui/hud/screens_hud.gd"
+          ]
+        },
+        {
+          "id": "exact_effect",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 1121,
+          "latency_ms": 111.2,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "ui/notebook/notebook_hud_button.gd",
+            "dialogue/dialogue_panel.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "src/systems/world_input_controller.gd"
+          ]
+        },
+        {
+          "id": "exact_save",
+          "kind": "exact",
+          "supported_proxy": false,
+          "token_estimate": 543,
+          "latency_ms": 108.35,
+          "pivot_paths": [
+            "ui/screens/proposal/proposal_screen.gd",
+            "dialogue/dialogue_session.gd",
+            "persistence/save_local.gd",
+            "persistence/preferences.gd",
+            "persistence/save_system.gd"
+          ]
+        },
+        {
+          "id": "exact_load",
+          "kind": "exact",
+          "supported_proxy": false,
+          "token_estimate": 572,
+          "latency_ms": 106.98,
+          "pivot_paths": [
+            "ui/screens/proposal/proposal_screen.gd",
+            "dialogue/dialogue_session.gd",
+            "persistence/save_local.gd",
+            "persistence/preferences.gd",
+            "ui/notebook/notebook_hud_button.gd"
+          ]
+        },
+        {
+          "id": "exact_route",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 913,
+          "latency_ms": 139.61,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "src/entities/player/camera_rig.gd",
+            "src/systems/world_input_controller.gd",
+            "content/content_repository.gd",
+            "persistence/notebook_rules.gd"
+          ]
+        }
+      ]
+    },
+    "hybrid": {
+      "support_rate": 1.0,
+      "original_support": 4,
+      "exact_support": 8,
+      "latency_p95_ms": 141.37,
+      "max_tokens": 3447,
+      "cases": [
+        {
+          "id": "movement_pt",
+          "kind": "original",
+          "supported_proxy": true,
+          "token_estimate": 2435,
+          "latency_ms": 139.17,
+          "pivot_paths": [
+            "dialogue/dialogue_panel.gd",
+            "src/entities/player/player.gd",
+            "src/systems/world_input_controller.gd",
+            "src/systems/input_bridge.gd",
+            "ui/notebook/notebook_screen.gd"
+          ]
+        },
+        {
+          "id": "camera_pt",
+          "kind": "original",
+          "supported_proxy": true,
+          "token_estimate": 3027,
+          "latency_ms": 130.1,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "world/zone.gd",
+            "src/systems/world_input_controller.gd",
+            "ui/hud/npc_indicators.gd",
+            "dialogue/dialogue_panel.gd"
+          ]
+        },
+        {
+          "id": "dialogue_pt",
+          "kind": "original",
+          "supported_proxy": true,
+          "token_estimate": 2615,
+          "latency_ms": 144.59,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "content/content_repository.gd",
+            "dialogue/dialogue_bust.gd",
+            "dialogue/dialogue_state.gd",
+            "ui/hud/npc_indicators.gd"
+          ]
+        },
+        {
+          "id": "save_pt",
+          "kind": "original",
+          "supported_proxy": true,
+          "token_estimate": 2658,
+          "latency_ms": 129.52,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "persistence/save_local.gd",
+            "persistence/preferences.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/notebook/notebook_hud_button.gd"
+          ]
+        },
+        {
+          "id": "movement_gravity",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 3323,
+          "latency_ms": 137.33,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "dialogue/dialogue_panel.gd",
+            "ui/notebook/notebook_screen.gd",
+            "src/systems/world_input_controller.gd",
+            "ui/hud/npc_indicators.gd"
+          ]
+        },
+        {
+          "id": "movement_route",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2741,
+          "latency_ms": 128.05,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "src/systems/world_input_controller.gd",
+            "src/entities/player/camera_rig.gd",
+            "dialogue/dialogue_panel.gd",
+            "world/zone.gd"
+          ]
+        },
+        {
+          "id": "movement_facing",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2176,
+          "latency_ms": 129.02,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "dialogue/dialogue_panel.gd",
+            "src/systems/input_bridge.gd",
+            "world/npc.gd",
+            "ui/notebook/notebook_screen.gd"
+          ]
+        },
+        {
+          "id": "camera_follow",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2444,
+          "latency_ms": 141.37,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "world/zone.gd",
+            "ui/hud/npc_indicators.gd",
+            "src/systems/world_input_controller.gd",
+            "src/entities/player/player.gd"
+          ]
+        },
+        {
+          "id": "camera_manual",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2213,
+          "latency_ms": 129.04,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "src/systems/world_input_controller.gd",
+            "world/zone.gd",
+            "world/zone_data.gd",
+            "ui/hud/npc_indicators.gd"
+          ]
+        },
+        {
+          "id": "camera_zoom",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 1557,
+          "latency_ms": 131.25,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "src/systems/world_input_controller.gd",
+            "world/zone.gd",
+            "ui/hud/npc_indicators.gd",
+            "world/zone_data.gd"
+          ]
+        },
+        {
+          "id": "camera_occlusion",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 1621,
+          "latency_ms": 130.66,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "world/zone.gd",
+            "ui/hud/npc_indicators.gd",
+            "src/systems/world_input_controller.gd",
+            "world/zone_data.gd"
+          ]
+        },
+        {
+          "id": "dialogue_open",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2521,
+          "latency_ms": 128.78,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_bust.gd",
+            "ui/notebook/notebook_screen.gd",
+            "src/systems/debug_bridge.gd",
+            "ui/screens/onboarding/onboarding_screen.gd"
+          ]
+        },
+        {
+          "id": "dialogue_menu",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2832,
+          "latency_ms": 133.04,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_panel.gd",
+            "src/systems/debug_bridge.gd",
+            "dialogue/dialogue_content.gd",
+            "dialogue/dialogue_bust.gd"
+          ]
+        },
+        {
+          "id": "dialogue_commit",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 3447,
+          "latency_ms": 138.77,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_state.gd",
+            "content/content_repository.gd",
+            "dialogue/dialogue_panel.gd",
+            "src/systems/debug_bridge.gd"
+          ]
+        },
+        {
+          "id": "dialogue_resume",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2378,
+          "latency_ms": 135.89,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "src/systems/debug_bridge.gd",
+            "dialogue/dialogue_bust.gd",
+            "persistence/preferences.gd",
+            "world/zone_transfer_button.gd"
+          ]
+        },
+        {
+          "id": "save_validation",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 1773,
+          "latency_ms": 138.57,
+          "pivot_paths": [
+            "ui/notebook/notebook_screen.gd",
+            "persistence/save_local.gd",
+            "persistence/preferences.gd",
+            "content/content_repository.gd",
+            "domain/mission_definition_loader.gd"
+          ]
+        },
+        {
+          "id": "save_lock",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2537,
+          "latency_ms": 127.68,
+          "pivot_paths": [
+            "persistence/save_system.gd",
+            "persistence/save_local.gd",
+            "src/ui/virtual_joystick.gd",
+            "world/character/kit_meshes.gd",
+            "ui/hud/save_status_label.gd"
+          ]
+        },
+        {
+          "id": "save_export",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2087,
+          "latency_ms": 125.06,
+          "pivot_paths": [
+            "persistence/save_local.gd",
+            "dialogue/dialogue_session.gd",
+            "ui/notebook/notebook_hud_button.gd",
+            "world/zone_data.gd",
+            "domain/mission_definition_loader.gd"
+          ]
+        },
+        {
+          "id": "save_write",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2488,
+          "latency_ms": 149.95,
+          "pivot_paths": [
+            "persistence/save_system.gd",
+            "ui/notebook/notebook_hud_button.gd",
+            "world/character/kit_meshes.gd",
+            "src/ui/virtual_joystick.gd",
+            "persistence/save_local.gd"
+          ]
+        },
+        {
+          "id": "dialogue_persist",
+          "kind": "broad",
+          "supported_proxy": true,
+          "token_estimate": 2982,
+          "latency_ms": 137.63,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_bust.gd",
+            "src/systems/debug_bridge.gd",
+            "dialogue/dialogue_panel.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        {
+          "id": "exact_velocity",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2917,
+          "latency_ms": 110.82,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "src/ui/virtual_joystick.gd",
+            "ui/hud/npc_indicators.gd",
+            "ui/hud/save_status_label.gd",
+            "ui/notebook/notebook_screen.gd"
+          ]
+        },
+        {
+          "id": "exact_follow",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2322,
+          "latency_ms": 116.61,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "src/entities/player/player.gd",
+            "dialogue/dialogue_session.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "ui/hud/screens_hud.gd"
+          ]
+        },
+        {
+          "id": "exact_zoom",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 1681,
+          "latency_ms": 120.33,
+          "pivot_paths": [
+            "src/entities/player/camera_rig.gd",
+            "world/zone.gd",
+            "src/systems/world_input_controller.gd",
+            "world/zone_data.gd",
+            "ui/screens/sources/sources_screen.gd"
+          ]
+        },
+        {
+          "id": "exact_choose",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2009,
+          "latency_ms": 110.9,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_content.gd",
+            "dialogue/dialogue_panel.gd",
+            "ui/notebook/notebook_screen.gd",
+            "ui/hud/screens_hud.gd"
+          ]
+        },
+        {
+          "id": "exact_effect",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2434,
+          "latency_ms": 115.79,
+          "pivot_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_panel.gd",
+            "src/systems/world_input_controller.gd",
+            "world/look/render_look_system.gd",
+            "content/content_repository.gd"
+          ]
+        },
+        {
+          "id": "exact_save",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2007,
+          "latency_ms": 114.09,
+          "pivot_paths": [
+            "persistence/save_system.gd",
+            "src/ui/virtual_joystick.gd",
+            "persistence/save_local.gd",
+            "ui/hud/save_status_label.gd",
+            "dialogue/dialogue_panel.gd"
+          ]
+        },
+        {
+          "id": "exact_load",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2201,
+          "latency_ms": 112.58,
+          "pivot_paths": [
+            "persistence/save_local.gd",
+            "persistence/preferences.gd",
+            "persistence/save_system.gd",
+            "ui/screens/proposal/proposal_screen.gd",
+            "dialogue/dialogue_session.gd"
+          ]
+        },
+        {
+          "id": "exact_route",
+          "kind": "exact",
+          "supported_proxy": true,
+          "token_estimate": 2244,
+          "latency_ms": 112.02,
+          "pivot_paths": [
+            "src/entities/player/player.gd",
+            "src/entities/player/camera_rig.gd",
+            "src/systems/world_input_controller.gd",
+            "content/content_repository.gd",
+            "persistence/notebook_rules.gd"
+          ]
+        }
+      ]
+    }
+  }
+}

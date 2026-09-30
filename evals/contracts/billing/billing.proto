@@ -1,0 +1,16 @@
+syntax = "proto3";
+package commerce.billing;
+service BillingService {
+  rpc Charge (ChargeRequest) returns (ChargeReply);
+  rpc Refund (ChargeRequest) returns (ChargeReply);
+  rpc Capture (ChargeRequest) returns (ChargeReply);
+  rpc Cancel (ChargeRequest) returns (ChargeReply);
+}
+service LedgerService {
+  rpc Snapshot (ChargeRequest) returns (ChargeReply);
+}
+service ShippingService {
+  rpc Charge (ChargeRequest) returns (ChargeReply);
+}
+message ChargeRequest { string order_id = 1; }
+message ChargeReply { bool accepted = 1; }

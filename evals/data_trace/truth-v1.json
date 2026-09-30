@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "scope": "TS/JS intra-function static request-to-sink pilot",
+  "labels": [
+    {
+      "file": "corpus.ts",
+      "function": "saveName",
+      "status": "confirmed",
+      "sink": "persistence"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "postEmail",
+      "status": "confirmed",
+      "sink": "http"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "saveConstant",
+      "status": "none"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "unrelatedRequest",
+      "status": "none"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "saveAfterBranch",
+      "status": "unknown",
+      "sink": "persistence"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "saveDynamic",
+      "status": "unknown",
+      "sink": "persistence"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "saveHelper",
+      "status": "unknown",
+      "sink": "persistence"
+    },
+    {
+      "file": "corpus.js",
+      "function": "saveQuery",
+      "status": "confirmed",
+      "sink": "persistence"
+    },
+    {
+      "file": "corpus.js",
+      "function": "noFlow",
+      "status": "none"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "saveInsideBranch",
+      "status": "unknown",
+      "sink": "persistence"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "saveInsideElse",
+      "status": "unknown",
+      "sink": "persistence"
+    },
+    {
+      "file": "corpus.ts",
+      "function": "overwrittenBothBranches",
+      "status": "none"
+    }
+  ]
+}

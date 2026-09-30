@@ -1,13 +1,17 @@
 #include "indexer.hpp"
 #include "call_resolver.hpp"
 #include "skeleton.hpp"
+#include "lexical.hpp"
+#include "contracts.hpp"
 #include "portfolio/domain/index_journal.hpp"
 #include "../parser/parser.hpp"
 #include <blake3.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <set>
 #include <vector>
 #include <sstream>
 
@@ -195,6 +199,10 @@ static int64_t upsert_file(duckdb::Connection& conn, const std::string& rel_path
         require_success(conn.Query("DELETE FROM external_dependencies WHERE from_file = " +
                                    std::to_string(fid)),
                         "replace external dependencies");
+        require_success(conn.Query("DELETE FROM symbol_terms WHERE symbol_id IN "
+                                   "(SELECT id FROM symbols WHERE file_id = " +
+                                   std::to_string(fid) + ")"),
+                        "replace lexical postings");
         require_success(conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(fid)),
                         "replace file symbols");
         require_success(
@@ -222,18 +230,49 @@ static int64_t upsert_file(duckdb::Connection& conn, const std::string& rel_path
     return mat2.GetValue<int64_t>(0, 0);
 }
 
-static void insert_symbols(duckdb::Connection& conn, int64_t file_id,
-                           const std::vector<Symbol>& symbols) {
+static void insert_symbols(duckdb::Connection& conn, int64_t file_id, const std::string& path,
+                           const std::string& source, const std::vector<Symbol>& symbols) {
+    const auto extension = fs::path(path).extension().string();
+    const bool hash_comments = extension == ".py" || extension == ".gd" || extension == ".sh" ||
+                               extension == ".bash" || extension == ".rb" || extension == ".nix";
+    std::vector<size_t> line_offsets{0};
+    for (size_t i = 0; i < source.size(); ++i)
+        if (source[i] == '\n') line_offsets.push_back(i + 1);
     for (const auto& sym : symbols) {
+        std::string evidence = path + " " + sym.name + " " + sym.signature.value_or("") + " " +
+                               sym.docstring.value_or("").substr(0, 256);
+        if (sym.start_line > 0 && static_cast<size_t>(sym.start_line) <= line_offsets.size()) {
+            size_t begin = line_offsets[sym.start_line - 1];
+            size_t end = static_cast<size_t>(sym.end_line) < line_offsets.size()
+                             ? line_offsets[sym.end_line]
+                             : source.size();
+            // Index executable lines, not historical comments: prose in a
+            // large method can otherwise outrank its actual identifiers.
+            if (end > begin) {
+                evidence += " " + code_without_comments(
+                                      source.substr(begin, std::min(end - begin, size_t(8192))),
+                                      hash_comments);
+            }
+        }
+        std::string terms = lexical_document(evidence);
         std::string sql = "INSERT INTO symbols (id, file_id, name, kind, start_line, end_line, "
-                          "signature, docstring) "
+                          "signature, docstring, search_terms, search_length) "
                           "VALUES (nextval('seq_id'), " +
                           std::to_string(file_id) + ", '" + sq(sym.name) + "', '" + sq(sym.kind) +
                           "', " + std::to_string(sym.start_line) + ", " +
                           std::to_string(sym.end_line) + ", '" + sq(sym.signature.value_or("")) +
-                          "', '" + sq(sym.docstring.value_or("")) + "')";
+                          "', '" + sq(sym.docstring.value_or("")) + "', '" + sq(terms) + "', " +
+                          std::to_string(lexical_terms(terms).size()) + ")";
         require_success(conn.Query(sql), "insert indexed symbol");
     }
+    require_success(conn.Query("INSERT INTO symbol_terms SELECT s.id,t.term,COUNT(*)::INTEGER "
+                               "FROM symbols s CROSS JOIN "
+                               "UNNEST(string_split(trim(s.search_terms),' ')) AS t(term) "
+                               "WHERE s.file_id = " +
+                               std::to_string(file_id) +
+                               " AND t.term <> '' "
+                               "GROUP BY s.id,t.term"),
+                    "insert lexical postings");
 }
 
 static std::optional<std::string> inferred_bounded_context(const std::string& relative_path) {
@@ -585,6 +624,10 @@ static int sweep_deleted(duckdb::Connection& conn, const fs::path& project_root,
         require_success(conn.Query("DELETE FROM external_dependencies WHERE from_file = " +
                                    std::to_string(v.id)),
                         "delete external dependencies");
+        require_success(conn.Query("DELETE FROM symbol_terms WHERE symbol_id IN "
+                                   "(SELECT id FROM symbols WHERE file_id = " +
+                                   std::to_string(v.id) + ")"),
+                        "delete lexical postings");
         require_success(conn.Query("DELETE FROM symbols WHERE file_id = " + std::to_string(v.id)),
                         "delete file symbols");
         require_success(
@@ -604,6 +647,7 @@ static void append_journal(portfolio::Transaction& transaction, duckdb::Connecti
                            const std::vector<portfolio::AffectedEntity>& updated_files,
                            const std::vector<portfolio::AffectedEntity>& updated_symbols,
                            const std::vector<portfolio::AffectedEntity>& deleted_files,
+                           const std::vector<portfolio::AffectedEntity>& contract_changes,
                            bool snapshot) {
     portfolio::trigger_journal_failpoint_for_testing("after_mutation");
     const std::string manifest = portfolio::compute_manifest_hash(conn);
@@ -623,13 +667,25 @@ static void append_journal(portfolio::Transaction& transaction, duckdb::Connecti
         for (const auto& deleted : deleted_files)
             portfolio::upsert_tombstone(conn, deleted, sequence, epoch);
     }
+    if (!contract_changes.empty()) {
+        const uint64_t sequence = portfolio::append_index_event(
+            transaction, conn, "IndexContractsUpdated", contract_changes, manifest);
+        const std::string epoch = portfolio::index_identity(conn).current_epoch;
+        for (const auto& change : contract_changes) {
+            if (change.operation == "delete")
+                portfolio::upsert_tombstone(conn, change, sequence, epoch);
+            else
+                portfolio::clear_tombstone(conn, change);
+        }
+    }
     if (snapshot) {
         std::vector<portfolio::AffectedEntity> affected = {
             {"repository", portfolio::index_identity(conn).repository_id, "snapshot", manifest}};
         portfolio::append_index_event(transaction, conn, "IndexSnapshotCompleted", affected,
                                       manifest);
     }
-    if (!updated_files.empty() || !updated_symbols.empty() || !deleted_files.empty())
+    if (!updated_files.empty() || !updated_symbols.empty() || !deleted_files.empty() ||
+        !contract_changes.empty())
         require_success(conn.Query("DELETE FROM capsule_cache"), "invalidate capsule cache");
 }
 
@@ -667,6 +723,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     std::vector<portfolio::AffectedEntity> updated_files;
     std::vector<portfolio::AffectedEntity> updated_symbols;
     std::vector<portfolio::AffectedEntity> deleted_files;
+    std::vector<portfolio::AffectedEntity> contract_changes;
 
     portfolio::Transaction transaction(conn);
     const auto backfilled = backfill_capability_evidence(conn);
@@ -685,13 +742,14 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
         int64_t byte_size = (int64_t)fs::file_size(abs_path);
 
         // Pre-compute skeleton and store in DB for fast retrieval
-        std::string skeleton;
+        std::string skeleton, source;
         try {
             std::ifstream sf(abs_path, std::ios::binary);
             if (sf) {
                 std::ostringstream ss;
                 ss << sf.rdbuf();
-                skeleton = skeletonize(ss.str(), parsed->language);
+                source = ss.str();
+                skeleton = skeletonize(source, parsed->language);
             }
         } catch (...) {
         }
@@ -703,7 +761,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
             continue;
         } // unchanged
 
-        insert_symbols(conn, fid, parsed->symbols);
+        insert_symbols(conn, fid, parsed->path, source, parsed->symbols);
         replace_capability_evidence(conn, fid, parsed->path, skeleton);
         stats.symbols_found += (int)parsed->symbols.size();
         stats.edges_found += (int)parsed->imports.size();
@@ -734,7 +792,28 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
     // Prune deleted and newly-ignored files
     stats.files_pruned = sweep_deleted(conn, cfg.project_root, deleted_files);
     if (stats.files_pruned > 0) transaction.mark_index_mutation();
-    append_journal(transaction, conn, updated_files, updated_symbols, deleted_files, true);
+    std::set<std::string> prior_contract_files;
+    {
+        auto prior = conn.Query("SELECT DISTINCT file_path FROM contract_evidence");
+        require_ok(prior, "load prior contract paths");
+        for (duckdb::idx_t row = 0; row < prior->RowCount(); ++row)
+            prior_contract_files.insert(prior->GetValue(0, row).ToString());
+    }
+    const auto current_contracts =
+        extract_contracts(cfg.project_root, cfg.project_root.filename().string());
+    if (replace_contract_evidence(conn, current_contracts)) {
+        transaction.mark_index_mutation();
+        std::set<std::string> current_contract_files;
+        for (const auto& contract : current_contracts)
+            current_contract_files.insert(contract.file);
+        for (const auto& path : current_contract_files)
+            contract_changes.push_back({"contract", path, "upsert", std::nullopt});
+        for (const auto& path : prior_contract_files)
+            if (!current_contract_files.count(path))
+                contract_changes.push_back({"contract", path, "delete", std::nullopt});
+    }
+    append_journal(transaction, conn, updated_files, updated_symbols, deleted_files,
+                   contract_changes, true);
     transaction.commit();
     return stats;
 }
@@ -749,12 +828,13 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
     // Filter paths: must exist on disk, be regular files, under project_root,
     // and have a supported language extension. Absolute or relative both accepted.
     std::vector<fs::path> abs_paths;
+    std::vector<std::string> contract_paths;
     abs_paths.reserve(paths.size());
     for (const auto& p : paths) {
         fs::path abs = p.is_absolute() ? p : (cfg.project_root / p);
         std::error_code ec;
         abs = fs::weakly_canonical(abs, ec);
-        if (ec || !fs::exists(abs) || !fs::is_regular_file(abs)) continue;
+        if (ec) continue;
 
         // Must be inside project_root
         auto rel = fs::relative(abs, cfg.project_root, ec);
@@ -762,6 +842,11 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
 
         auto ext = abs.extension().string();
         if (!ext.empty() && ext[0] == '.') ext = ext.substr(1);
+        if (ext == "yaml" || ext == "yml" || ext == "proto") {
+            contract_paths.push_back(rel.generic_string());
+            continue; // contract files are extracted below, not parsed as code
+        }
+        if (!fs::exists(abs) || !fs::is_regular_file(abs)) continue;
         if (!language_from_extension(ext)) continue;
 
         abs_paths.push_back(abs);
@@ -777,6 +862,7 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
     std::vector<portfolio::AffectedEntity> updated_files;
     std::vector<portfolio::AffectedEntity> updated_symbols;
     std::vector<portfolio::AffectedEntity> deleted_files;
+    std::vector<portfolio::AffectedEntity> contract_changes;
 
     portfolio::Transaction transaction(conn);
     const auto backfilled = backfill_capability_evidence(conn);
@@ -795,13 +881,14 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
 
             int64_t byte_size = (int64_t)fs::file_size(abs_path);
 
-            std::string skeleton;
+            std::string skeleton, source;
             try {
                 std::ifstream sf(abs_path, std::ios::binary);
                 if (sf) {
                     std::ostringstream ss;
                     ss << sf.rdbuf();
-                    skeleton = skeletonize(ss.str(), parsed->language);
+                    source = ss.str();
+                    skeleton = skeletonize(source, parsed->language);
                 }
             } catch (...) {
             }
@@ -813,7 +900,7 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
                 continue;
             } // unchanged
 
-            insert_symbols(conn, fid, parsed->symbols);
+            insert_symbols(conn, fid, parsed->path, source, parsed->symbols);
             replace_capability_evidence(conn, fid, parsed->path, skeleton);
             stats.symbols_found += (int)parsed->symbols.size();
             stats.edges_found += (int)parsed->imports.size();
@@ -838,8 +925,21 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
 
     if (prune) stats.files_pruned = sweep_deleted(conn, cfg.project_root, deleted_files);
     if (stats.files_pruned > 0) transaction.mark_index_mutation();
-    if (!updated_files.empty() || !updated_symbols.empty() || !deleted_files.empty())
-        append_journal(transaction, conn, updated_files, updated_symbols, deleted_files, false);
+    if (replace_contract_evidence(
+            conn, extract_contracts(cfg.project_root, cfg.project_root.filename().string()))) {
+        transaction.mark_index_mutation();
+        if (contract_paths.empty())
+            contract_changes.push_back({"contract", ".", "snapshot", std::nullopt});
+        else
+            for (const auto& path : contract_paths)
+                contract_changes.push_back(
+                    {"contract", path, fs::exists(cfg.project_root / path) ? "upsert" : "delete",
+                     std::nullopt});
+    }
+    if (!updated_files.empty() || !updated_symbols.empty() || !deleted_files.empty() ||
+        !contract_changes.empty())
+        append_journal(transaction, conn, updated_files, updated_symbols, deleted_files,
+                       contract_changes, false);
     transaction.commit();
     return stats;
 }
