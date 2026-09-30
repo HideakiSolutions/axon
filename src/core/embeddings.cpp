@@ -1,7 +1,11 @@
 #include "embeddings.hpp"
 #include "portfolio/domain/index_journal.hpp"
 #include "db.hpp"
+#include <ggml-backend.h>
 #include <llama.h>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <stdexcept>
 #include <cmath>
 #include <cstring>
@@ -12,6 +16,14 @@
 namespace axon {
 
 EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
+    std::string preference =
+        std::getenv("AXON_EMBEDDING_DEVICE") ? std::getenv("AXON_EMBEDDING_DEVICE") : "auto";
+    std::transform(preference.begin(), preference.end(), preference.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (preference != "auto" && preference != "cpu" && preference != "gpu") {
+        throw std::invalid_argument("AXON_EMBEDDING_DEVICE must be auto, cpu, or gpu");
+    }
+
     llama_backend_init();
 
     // Silence llama.cpp/ggml INFO/WARN chatter on stderr (e.g. the repeated
@@ -24,20 +36,68 @@ EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
         nullptr);
 
     llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;
+    ggml_backend_dev_t selected_gpu = nullptr;
+    if (preference != "cpu") {
+        size_t best_free = 0;
+        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+            auto* device = ggml_backend_dev_get(i);
+            const auto type = ggml_backend_dev_type(device);
+            if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU)
+                continue;
+            size_t free_bytes = 0;
+            size_t total_bytes = 0;
+            ggml_backend_dev_memory(device, &free_bytes, &total_bytes);
+            if (!selected_gpu ||
+                (type == GGML_BACKEND_DEVICE_TYPE_GPU &&
+                 ggml_backend_dev_type(selected_gpu) != GGML_BACKEND_DEVICE_TYPE_GPU) ||
+                (type == ggml_backend_dev_type(selected_gpu) && free_bytes > best_free)) {
+                selected_gpu = device;
+                best_free = free_bytes;
+            }
+        }
+    }
+    if (preference == "gpu" && !selected_gpu) {
+        llama_backend_free();
+        throw std::runtime_error(
+            "AXON_EMBEDDING_DEVICE=gpu requested, but no GPU backend/device is available");
+    }
 
-    model_ = llama_model_load_from_file(model_path.string().c_str(), mparams);
-    if (!model_) throw std::runtime_error("Failed to load embedding model: " + model_path.string());
+    ggml_backend_dev_t gpu_devices[] = {selected_gpu, nullptr};
+    mparams.n_gpu_layers = selected_gpu ? -1 : 0;
+    if (selected_gpu) mparams.devices = gpu_devices;
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = 512;
     cparams.n_batch = cparams.n_ctx;
     cparams.embeddings = true;
 
-    ctx_ = llama_init_from_model(model_, cparams);
-    if (!ctx_) throw std::runtime_error("Failed to create llama context");
+    auto load_model = [&]() {
+        model_ = llama_model_load_from_file(model_path.string().c_str(), mparams);
+        if (!model_) return false;
+        ctx_ = llama_init_from_model(model_, cparams);
+        if (ctx_) return true;
+        llama_model_free(model_);
+        model_ = nullptr;
+        return false;
+    };
+    if (!load_model()) {
+        if (preference != "auto" || !selected_gpu) {
+            throw std::runtime_error("Failed to initialize embedding model on requested device: " +
+                                     model_path.string());
+        }
+        std::cerr << "[axon] GPU embedding initialization failed; retrying on CPU\n";
+        mparams.devices = nullptr;
+        mparams.n_gpu_layers = 0;
+        if (!load_model()) {
+            throw std::runtime_error("Failed to initialize embedding model on GPU or CPU: " +
+                                     model_path.string());
+        }
+        selected_gpu = nullptr;
+    }
 
     dims_ = llama_model_n_embd(model_);
+    std::cerr << "[axon] embedding device: "
+              << (selected_gpu ? ggml_backend_dev_name(selected_gpu) : "CPU") << "\n";
     std::cerr << "[axon] embedding model loaded, dims=" << dims_ << "\n";
 }
 

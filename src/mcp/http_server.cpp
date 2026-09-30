@@ -1127,8 +1127,10 @@ static std::string handle_request(const std::string& method, const std::string& 
 
         if (!ctx.model_ready()) {
             http_status = 503;
-            return json{
-                {"error", "Embedding model not loaded. Run axon index with embeddings enabled."}}
+            return json{{"error",
+                         ctx.model_error.empty()
+                             ? "Embedding model not loaded. Run axon index with embeddings enabled."
+                             : ctx.model_error}}
                 .dump();
         }
 

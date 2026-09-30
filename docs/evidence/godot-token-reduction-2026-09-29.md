@@ -101,3 +101,88 @@ axon capsule 'compute_velocity' --no-cache
 
 The model used for this run was the [nomic-ai GGUF Q4_K_M release](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/blob/main/nomic-embed-text-v1.5.Q4_K_M.gguf), SHA-256
 `d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac`.
+
+## Answer support check (2026-09-29)
+
+The same 78-file index was queried through the MCP `get_context_capsule` tool
+with `no_cache=true` and an 8,000-token budget. Each percentage below compares
+the capsule's estimated tokens with `ceil(bytes/4)` for the **union of its
+selected pivot and support files**, not with the whole repository. The assessment
+asks whether the returned text alone supports a correct answer; the source files
+were then read to establish the reference behavior. It is a retrieval quality
+check, not an end-to-end language-model or billing measurement.
+
+| Question or search | Capsule / selected raw | Reduction | Answer support |
+| --- | ---: | ---: | --- |
+| Portuguese: how movement velocity is computed | 425 / 20,455 | 97.92% | Insufficient: `player.gd` contributes only an unrelated constant. |
+| Exact `compute_velocity` | 581 / 23,224 | 97.50% | Sufficient: the function body exposes camera-relative direction, diagonal normalization, acceleration, gravity, and floor handling. |
+| Portuguese: camera following and zoom | 695 / 19,130 | 96.37% | Insufficient: `camera_rig.gd` is absent. |
+| English: camera rig follow/zoom | 1,678 / 49,995 | 96.64% | Partial: `camera_rig.gd` is selected, but only `_zoom_progress` is shown. |
+| Exact `_advance_follow_state` | 2,029 / 50,778 | 96.00% | Partial: follow and anticipation appear, but the body is truncated before the manual-return behavior. |
+| Exact `_apply_zoom_and_overview` | 1,296 / 50,522 | 97.43% | Partial: distance and elevation appear, but the body is truncated. |
+| Portuguese: dialogue choices and consequences | 443 / 13,705 | 96.77% | Insufficient: no dialogue session or state logic is returned. |
+| English: dialogue choice/state/consequence | 2,511 / 47,232 | 94.68% | Partial: related files appear, but the commit/effect implementation does not. |
+| Exact `_apply_pending_option` | 1,124 / 52,677 | 97.87% | Sufficient for the effect: `collect` calls mission rules and persists only on a changed state. |
+| Portuguese: save and restore mission state | 331 / 15,525 | 97.87% | Insufficient: `save_local.gd` is absent. |
+| English: mission state save/load | 1,007 / 22,486 | 95.52% | Partial: the start of `save` appears, truncated before the write; `load` is absent. |
+| Exact `SaveLocal load` | 578 / 26,318 | 97.80% | Insufficient: only the `SaveLocal` class declaration appears. |
+
+The reference source confirms that `SaveLocal.load()` distinguishes empty and
+corrupt records, parses through notebook rules, and updates the last-written
+state only after validation. None of the tested save capsules supports that
+answer. Likewise, a correct dialogue answer needs `choose_option()` and
+`_apply_pending_option()` together; the broad capsules do not provide both.
+Across the four broad Portuguese questions, **zero** capsules contain enough
+code for a complete answer. Exact symbol searches improve movement and
+dialogue-effect coverage, but body truncation and missed symbol selection
+remain material limits. The compact context therefore cannot be treated as an
+equivalent replacement for source reading on these questions.
+
+A guided follow-up with `query="load"` and
+`pivot_files=["persistence/save_local.gd"]` did return the complete 11,428-byte
+file (2,857 estimated tokens), including `load()` and its validation branches.
+This repairs answer support by expanding the source; it provides no reduction
+for that file. A realistic workflow must spend additional tool calls and
+context when the first capsule lacks the needed evidence.
+
+The installed v1.4.0 Linux package was also exercised against this index. Its
+embedding path terminated with `SIGILL` on an Intel i7-8700K (AVX2, no AVX-512)
+before a capsule was returned. The quality check above used a local source
+build on the same host. The release-build compatibility defect is addressed in
+v1.5.0 by disabling ggml's host-native instruction selection for x64 packages;
+the final packaged binary must pass a model-loading smoke on this host before
+installation is considered verified.
+
+### CPU/GPU preference check
+
+The follow-up Vulkan build was exercised on the same i7-8700K host with an
+NVIDIA GeForce RTX 4060. `AXON_EMBEDDING_DEVICE=cpu` logged `CPU`;
+`gpu` and the default `auto` logged `Vulkan0` after the backend identified the
+RTX 4060. All three returned a 581-token capsule for `compute_velocity`.
+An invalid preference failed with an explicit validation error. A separate
+one-file Godot fixture indexed and embedded two symbols on `Vulkan0`.
+With the Vulkan ICD deliberately unavailable, explicit `gpu` returned exit
+code 1 from both `index` and `index-paths`; MCP `run_pipeline` and `index_paths`
+returned `isError=true` with the device error. A subsequent positive MCP
+`index_paths` call on the GPU fixture embedded its three updated symbols on
+`Vulkan0`.
+
+The 13 uncached MCP questions above were then replayed against the same
+CPU-built index using GPU inference. Nine retained the same pivot order and
+token estimate; four changed selected pivots or output size (`camera_en`,
+`dialogue_en`, `save_pt`, `dialogue_choice_exact`). The answer-support verdicts
+for those four did not worsen: the broad camera/dialogue/save questions were
+still partial or insufficient, while the exact dialogue choice still returned
+its function. Backend floating-point differences can therefore change ranking
+near a selection boundary; token reduction and answer quality should be
+evaluated per device rather than assumed bit-identical.
+
+The complete 78-file runtime subset was also re-indexed on `Vulkan0`: 1,498
+symbols and 18 edges, with all 1,498 symbols embedded. Replaying the 13 queries
+against this GPU-built index retained the same pivot order and capsule size
+for five queries; eight differed. The four broad Portuguese questions remained
+insufficient, and the exact movement and dialogue-effect queries remained
+sufficient for their respective questions. Per-query selections and token
+estimates for CPU inference/index, GPU inference on the CPU index, and GPU
+inference/index are recorded in
+[`godot-device-parity-2026-09-29.json`](godot-device-parity-2026-09-29.json).

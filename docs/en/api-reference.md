@@ -439,6 +439,7 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 |----------|---------|-------------|
 | `LD_LIBRARY_PATH` | — | Only needed for source-tree runs if the binary cannot find DuckDB; release packages set RPATH/RUNPATH |
 | `AXON_EMBEDDING_MODEL` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
+| `AXON_EMBEDDING_DEVICE` | `auto` | `auto` uses an available GPU and falls back to CPU; `cpu` forces CPU; `gpu` requires a usable GPU backend/device and fails clearly if unavailable. The Linux release includes Vulkan; macOS uses Metal. The Windows package currently supports CPU only. |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
 | `AXON_REGISTRY_DIR` | `~/.axon` | Directory holding the multi-repo `registry.json`; tests and sandboxes point it at a scratch dir so runs never touch the real registry |
 | `AXON_TELEMETRY` | off | Opt into local telemetry with `1`, `true`, `yes`, or `on` |

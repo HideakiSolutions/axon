@@ -18,6 +18,7 @@ struct ServerContext {
     std::unique_ptr<EmbeddingModel> model;
     DependencyGraph graph;
     std::string db_error;
+    std::string model_error;
 
     // Peer-proxy state. tool_mutex serializes tool execution between the
     // stdio loop and the peer listener thread (unique_ptr keeps the struct
