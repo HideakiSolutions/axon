@@ -5,6 +5,15 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] — 2026-09-29
+
+### Fixed
+- Linux and Windows x64 release builds now disable host-native ggml CPU
+  instructions. This prevents an illegal-instruction crash when inference runs
+  on an AVX2-only host after packaging on a newer runner.
+- The Linux release gate loads the embedding model and runs a context capsule
+  smoke test before publishing.
+
 ## [1.4.0] — 2026-09-29
 
 ### Added
