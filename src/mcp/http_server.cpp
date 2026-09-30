@@ -1060,7 +1060,15 @@ static std::string handle_request(const std::string& method, const std::string& 
     // GET /api/capsule?q=<query>&budget=8000&pivots=file1.ts,file2.ts
     if (method == "GET" && path == "/api/capsule") {
         std::string q = url_decode(get_query_param(query, "q"));
+        std::string retrieval_mode = get_query_param(query, "retrieval_mode");
+        if (retrieval_mode.empty()) retrieval_mode = "hybrid";
+        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid") {
+            http_status = 400;
+            return json{{"error", "retrieval_mode must be semantic or hybrid"}}.dump();
+        }
         std::string budget_str = get_query_param(query, "budget");
+        const std::string no_cache_arg = get_query_param(query, "no_cache");
+        const bool no_cache = no_cache_arg == "true" || no_cache_arg == "1";
         std::string pivots_param = url_decode(get_query_param(query, "pivots"));
         int budget = budget_str.empty() ? 8000 : std::stoi(budget_str);
 
@@ -1100,6 +1108,8 @@ static std::string handle_request(const std::string& method, const std::string& 
                                          {"is_skeleton", f.is_skeleton},
                                          {"token_estimate", f.token_estimate}});
             json cap = {{"query", c.query},
+                        {"retrieval_mode", c.retrieval_mode},
+                        {"selection", [&] { json a = json::array(); for (const auto& s : c.selection) a.push_back({{"symbol_id", s.symbol_id}, {"file_id", s.file_id}, {"semantic_rank", s.semantic_rank}, {"lexical_rank", s.lexical_rank}, {"fused_score", s.fused_score}}); return a; }()},
                         {"pivot_files", pivot_files},
                         {"support_files", support_files},
                         {"token_estimate", c.token_estimate},
@@ -1117,10 +1127,11 @@ static std::string handle_request(const std::string& method, const std::string& 
         // eligible (explicit pivots steer assembly and must not reuse entries
         // generated for the implicit-pivot path). Hits don't need the model.
         const std::string epoch = axon::current_project_epoch(*ctx.db);
-        const bool eligible_for_cache = explicit_pivots.empty();
+        const bool eligible_for_cache = !no_cache && explicit_pivots.empty();
         std::string cache_key;
         if (eligible_for_cache) {
-            cache_key = axon::compute_capsule_cache_key(q, budget, epoch, axon::VERSION);
+            cache_key = axon::compute_capsule_cache_key(q, budget, epoch, axon::VERSION,
+                                                        retrieval_mode);
             if (auto hit = axon::capsule_cache_lookup(*ctx.db, cache_key, epoch))
                 return capsule_to_json(*hit, "hit");
         }
@@ -1135,7 +1146,8 @@ static std::string handle_request(const std::string& method, const std::string& 
         }
 
         auto capsule = axon::assemble_capsule(q, explicit_pivots, *ctx.db, *ctx.model, ctx.graph,
-                                              ctx.cfg.project_root, budget);
+                                              ctx.cfg.project_root, budget, 0,
+                                              axon::CapsuleCompression::Off, retrieval_mode);
         if (eligible_for_cache) axon::capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
 
         return capsule_to_json(capsule, nullptr);

@@ -48,6 +48,33 @@ endfunction()
 add_axon_test(test_parser_smoke unit/test_parser_smoke.cpp
     ${CMAKE_SOURCE_DIR}/src/core/skeleton.cpp)
 
+add_executable(test_impact_queries unit/test_impact_queries.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/impact_queries.cpp)
+target_include_directories(test_impact_queries PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_impact_queries PRIVATE GTest::gtest_main)
+add_test(NAME test_impact_queries COMMAND test_impact_queries)
+
+add_executable(test_impact_query_adapter unit/test_impact_query_adapter.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/impact_queries.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/impact_query_adapter.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
+    ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp)
+target_include_directories(test_impact_query_adapter PRIVATE ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/duckdb
+    ${CMAKE_SOURCE_DIR}/third_party/nlohmann-json/single_include)
+target_link_libraries(test_impact_query_adapter PRIVATE duckdb_lib blake3_lib GTest::gtest_main)
+add_test(NAME test_impact_query_adapter COMMAND test_impact_query_adapter)
+
+add_executable(test_data_trace unit/test_data_trace.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/data_trace.cpp)
+target_include_directories(test_data_trace PRIVATE ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/tree-sitter/lib/include)
+target_compile_definitions(test_data_trace PRIVATE AXON_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_data_trace PRIVATE tree_sitter_lib ts_typescript ts_javascript
+    GTest::gtest_main)
+add_test(NAME test_data_trace COMMAND test_data_trace)
+
 # Watcher tests — filesystem-only (no DuckDB/llama); language_from_extension
 # comes from the shared parser objects, the skip-list from skip_dirs.cpp.
 add_axon_test(test_watcher
@@ -99,6 +126,7 @@ set_tests_properties(test_memory_retrieval_eval PROPERTIES SKIP_RETURN_CODE 77)
 # CCR artifact tests require DuckDB and BLAKE3.
 add_executable(test_ccr unit/test_ccr.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
 )
 target_include_directories(test_ccr PRIVATE
@@ -116,6 +144,7 @@ add_test(NAME test_ccr COMMAND test_ccr)
 
 add_executable(test_call_resolution unit/test_call_resolution.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
@@ -135,6 +164,7 @@ add_test(NAME test_call_resolution COMMAND test_call_resolution)
 # Telemetry aggregation tests require DuckDB, but not llama.cpp.
 add_executable(test_telemetry unit/test_telemetry.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/telemetry.cpp
 )
 target_include_directories(test_telemetry PRIVATE
@@ -156,6 +186,7 @@ add_test(NAME test_telemetry COMMAND test_telemetry)
 # Dialogue Layer tests require DuckDB (cannot use the parser-only axon_parser_objs target).
 add_executable(test_dialogue unit/test_dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
@@ -178,6 +209,7 @@ add_test(NAME test_dialogue COMMAND test_dialogue)
 # Objectives test — token reduction + memory correctness (no model required)
 add_executable(test_objectives unit/test_objectives.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
@@ -226,6 +258,7 @@ add_test(NAME test_registry COMMAND test_registry)
 # Portfolio journal: real DuckDB, real parser, transactional fault injection.
 add_executable(test_portfolio_journal unit/test_portfolio_journal.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/routes.cpp
     ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
@@ -322,6 +355,7 @@ add_test(NAME test_capability_declarations COMMAND test_capability_declarations)
 add_executable(test_portfolio_capability_catalog integration/test_portfolio_capability_catalog.cpp
     ${CMAKE_SOURCE_DIR}/src/core/registry.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/routes.cpp
     ${CMAKE_SOURCE_DIR}/src/core/call_resolver.cpp
@@ -447,6 +481,7 @@ endif()
 # GGUF model (GTEST_SKIP without AXON_EMBEDDING_MODEL, same as test_semantic).
 add_executable(test_capsule_budget unit/test_capsule_budget.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
@@ -481,6 +516,7 @@ add_test(NAME test_capsule_budget COMMAND test_capsule_budget)
 # AXON_EMBEDDING_MODEL points at the model explicitly.
 add_executable(test_semantic unit/test_semantic.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp

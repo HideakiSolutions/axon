@@ -30,6 +30,15 @@ struct DialogueTurn {
 
 struct ContextCapsule {
     std::string query;
+    std::string retrieval_mode = "hybrid";
+    struct SelectionEvidence {
+        int64_t symbol_id = 0;
+        int64_t file_id = 0;
+        int semantic_rank = 0;
+        int lexical_rank = 0;
+        double fused_score = 0;
+    };
+    std::vector<SelectionEvidence> selection;
     std::vector<CapsuleFile> pivot_files;
     std::vector<CapsuleFile> support_files;
     std::vector<DialogueTurn> related_turns; // populated when dialogue_budget > 0
@@ -51,7 +60,8 @@ assemble_capsule(const std::string& query,
                  Database& db, EmbeddingModel& model, const DependencyGraph& graph,
                  const std::filesystem::path& project_root, int token_budget = 8000,
                  int dialogue_budget = 0, // 0 = disabled; >0 = pull anchored turns into capsule
-                 CapsuleCompression compression = CapsuleCompression::Off); // Balde A opt-in
+                 CapsuleCompression compression = CapsuleCompression::Off,
+                 const std::string& retrieval_mode = "hybrid");
 
 // ── Cache primitives (W2.T01) ───────────────────────────────────────────────
 // Cache key = BLAKE3(query + "|" + token_budget + "|" + project_epoch),
@@ -66,7 +76,8 @@ std::string current_project_epoch(Database& db);
 // (axon::VERSION at call sites) keys entries to the binary that assembled
 // them, so an upgrade never serves capsules shaped by old assembly logic.
 std::string compute_capsule_cache_key(const std::string& query, int token_budget,
-                                      const std::string& epoch, const std::string& version);
+                                      const std::string& epoch, const std::string& version,
+                                      const std::string& retrieval_mode = "hybrid");
 
 // Look up a cached capsule. Returns nullopt on miss or epoch mismatch.
 std::optional<ContextCapsule> capsule_cache_lookup(Database& db, const std::string& key,
