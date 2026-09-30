@@ -105,6 +105,7 @@ Choose the embedding device with `AXON_EMBEDDING_DEVICE=auto` (default),
 `cpu`, or `gpu`. The explicit `gpu` setting fails with an error if no usable
 GPU backend/device is available. The Linux release includes Vulkan support;
 the macOS build uses Metal, while the Windows package currently uses CPU.
+An explicit preference also makes indexing fail if the model cannot be loaded.
 The selected device is logged when the model loads.
 
 Add to `~/.claude.json`:

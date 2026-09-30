@@ -90,7 +90,8 @@ Selecione o dispositivo de embeddings com `AXON_EMBEDDING_DEVICE=auto`
 (padrão), `cpu` ou `gpu`. A opção explícita `gpu` retorna erro quando não há
 backend/dispositivo disponível. A release Linux inclui Vulkan; no macOS é
 usado Metal, e o pacote Windows atualmente oferece CPU. O dispositivo
-escolhido aparece no log ao carregar o modelo.
+escolhido aparece no log ao carregar o modelo. Uma preferência explícita
+também faz a indexação falhar se o modelo não puder ser carregado.
 
 Adicionar ao `~/.claude.json`:
 

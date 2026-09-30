@@ -171,3 +171,13 @@ still partial or insufficient, while the exact dialogue choice still returned
 its function. Backend floating-point differences can therefore change ranking
 near a selection boundary; token reduction and answer quality should be
 evaluated per device rather than assumed bit-identical.
+
+The complete 78-file runtime subset was also re-indexed on `Vulkan0`: 1,498
+symbols and 18 edges, with all 1,498 symbols embedded. Replaying the 13 queries
+against this GPU-built index retained the same pivot order and capsule size
+for five queries; eight differed. The four broad Portuguese questions remained
+insufficient, and the exact movement and dialogue-effect queries remained
+sufficient for their respective questions. Per-query selections and token
+estimates for CPU inference/index, GPU inference on the CPU index, and GPU
+inference/index are recorded in
+[`godot-device-parity-2026-09-29.json`](godot-device-parity-2026-09-29.json).

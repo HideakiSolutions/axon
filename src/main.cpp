@@ -252,6 +252,10 @@ int main(int argc, char* argv[]) {
             int n = axon::embed_pending_symbols(*db, model);
             if (n > 0) std::cout << "Embedded " << n << " symbols.\n";
         } catch (const std::exception& e) {
+            if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                std::cerr << "[axon] " << e.what() << "\n";
+                return 1;
+            }
             std::cerr << "[warn] Skipping embeddings: " << e.what() << "\n";
             std::cerr << "       Run `axon index` again after downloading the model.\n";
         }
@@ -291,6 +295,10 @@ int main(int argc, char* argv[]) {
                 axon::EmbeddingModel model(model_path);
                 axon::embed_pending_symbols(*db, model);
             } catch (const std::exception& e) {
+                if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                    std::cerr << "[axon] " << e.what() << "\n";
+                    return 1;
+                }
                 std::cerr << "[warn] Skipping embeddings: " << e.what() << "\n";
             }
         }

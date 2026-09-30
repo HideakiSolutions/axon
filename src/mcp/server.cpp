@@ -752,6 +752,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 auto mp = find_model(ctx.cfg.project_root / "models");
                 ctx.model = std::make_unique<EmbeddingModel>(mp);
             } catch (const std::exception& e) {
+                ctx.model_error = e.what();
+                if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                    return make_tool_result({{"error", e.what()},
+                                             {"files_indexed", stats.files_indexed},
+                                             {"symbols_found", stats.symbols_found}},
+                                            true);
+                }
                 return make_tool_result(
                     {{"warning", std::string("Indexed without embeddings: ") + e.what()},
                      {"files_indexed", stats.files_indexed},

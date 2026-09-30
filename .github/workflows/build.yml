@@ -26,14 +26,20 @@ jobs:
         include:
           - os: ubuntu-22.04
             compiler: gcc
+            ggml_native: 'OFF'
+            ggml_vulkan: 'ON'
           - os: macos-14
             compiler: clang
+            ggml_native: 'ON'
+            ggml_vulkan: 'OFF'
           # windows-2022 deliberately matches release.yml: we test the same
           # runner image + MSVC toolset the released binaries are built with.
           # windows-latest (Server 2025 / VS18 toolset 14.51) hung every test
           # executable at startup on the first attempt (run 28981004802).
           - os: windows-2022
             compiler: msvc
+            ggml_native: 'OFF'
+            ggml_vulkan: 'OFF'
     env:
       AXON_DUCKDB_VERSION: 1.2.2
     steps:
@@ -45,7 +51,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build ccache jq ripgrep libpq-dev
+          sudo apt-get install -y cmake build-essential ninja-build ccache jq ripgrep libpq-dev libvulkan-dev glslc spirv-headers
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
@@ -103,7 +109,7 @@ jobs:
             ${{ matrix.os }}-third-party-
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAXON_BUILD_TESTS=ON -GNinja
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAXON_BUILD_TESTS=ON -GNinja -DGGML_NATIVE=${{ matrix.ggml_native }} -DGGML_VULKAN=${{ matrix.ggml_vulkan }}
 
       - name: Build axon
         # Project policy enforces -j2 (host runs MCP server + embeddings + multiple

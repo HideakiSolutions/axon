@@ -101,12 +101,12 @@ jobs:
         run: cmake --build build -j 2
 
       - name: Stage embedding model for release verification
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         run: |
           model="${RUNNER_TEMP}/nomic-embed-text-v1.5.Q4_K_M.gguf"
           curl --fail --location --retry 3 --output "${model}" \
             'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q4_K_M.gguf'
-          echo "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac  ${model}" | sha256sum --check
+          python3 -c 'import hashlib,sys; assert hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest() == "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac"' "${model}"
 
       - name: Run context optimization release gate
         if: runner.os == 'Linux'
@@ -240,6 +240,24 @@ jobs:
               ubuntu:22.04 /app/bin/axon --version
             AXON_EMBEDDING_MODEL="${RUNNER_TEMP}/nomic-embed-text-v1.5.Q4_K_M.gguf" \
               AXON_EMBEDDING_DEVICE=cpu \
+              bash tests/smoke/test_mcp_capsule_schema.sh "${stage}/bin/axon"
+            AXON_EMBEDDING_MODEL="${RUNNER_TEMP}/nomic-embed-text-v1.5.Q4_K_M.gguf" \
+              AXON_EMBEDDING_DEVICE=auto VK_ICD_FILENAMES=/nonexistent \
+              bash tests/smoke/test_mcp_capsule_schema.sh "${stage}/bin/axon"
+            fixture="$(mktemp -d)"
+            echo '{"name":"axon-gpu-required-smoke","private":true}' > "${fixture}/package.json"
+            echo 'export const answer = 42;' > "${fixture}/answer.ts"
+            if AXON_EMBEDDING_MODEL="${RUNNER_TEMP}/nomic-embed-text-v1.5.Q4_K_M.gguf" \
+              AXON_EMBEDDING_DEVICE=gpu VK_ICD_FILENAMES=/nonexistent \
+              "${stage}/bin/axon" index "${fixture}" > "${fixture}/stdout" 2> "${fixture}/stderr"; then
+              echo '[release] explicit GPU unexpectedly succeeded without a Vulkan ICD' >&2
+              exit 1
+            fi
+            grep -F 'no GPU backend/device is available' "${fixture}/stderr"
+            rm -rf "${fixture}"
+          else
+            AXON_EMBEDDING_MODEL="${RUNNER_TEMP}/nomic-embed-text-v1.5.Q4_K_M.gguf" \
+              AXON_EMBEDDING_DEVICE=auto \
               bash tests/smoke/test_mcp_capsule_schema.sh "${stage}/bin/axon"
           fi
 
