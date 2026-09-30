@@ -161,6 +161,11 @@ NVIDIA GeForce RTX 4060. `AXON_EMBEDDING_DEVICE=cpu` logged `CPU`;
 RTX 4060. All three returned a 581-token capsule for `compute_velocity`.
 An invalid preference failed with an explicit validation error. A separate
 one-file Godot fixture indexed and embedded two symbols on `Vulkan0`.
+With the Vulkan ICD deliberately unavailable, explicit `gpu` returned exit
+code 1 from both `index` and `index-paths`; MCP `run_pipeline` and `index_paths`
+returned `isError=true` with the device error. A subsequent positive MCP
+`index_paths` call on the GPU fixture embedded its three updated symbols on
+`Vulkan0`.
 
 The 13 uncached MCP questions above were then replayed against the same
 CPU-built index using GPU inference. Nine retained the same pivot order and

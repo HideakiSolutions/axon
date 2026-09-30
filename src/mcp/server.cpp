@@ -744,6 +744,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "run_pipeline") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
+        if (std::getenv("AXON_EMBEDDING_DEVICE") && !ctx.model_ready()) {
+            try {
+                auto model_path = find_model(ctx.binary_dir);
+                ctx.model = std::make_unique<EmbeddingModel>(model_path);
+                ctx.model_error.clear();
+            } catch (const std::exception& e) {
+                ctx.model_error = e.what();
+                return make_tool_result({{"error", e.what()}}, true);
+            }
+        }
+
         auto stats = index_project(ctx.cfg, *ctx.db);
         ctx.graph = load_graph(*ctx.db);
 
@@ -770,7 +781,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         try {
             sym_embedded = embed_pending_symbols(*ctx.db, *ctx.model);
             turn_embedded = embed_pending_turns(*ctx.db, *ctx.model);
-        } catch (...) { /* silent — will retry on next drain */
+        } catch (const std::exception& e) {
+            if (std::getenv("AXON_EMBEDDING_DEVICE"))
+                return make_tool_result({{"error", e.what()},
+                                         {"files_indexed", stats.files_indexed},
+                                         {"symbols_found", stats.symbols_found}},
+                                        true);
+            // Optional embedding without a device preference retries on next drain.
         }
 
         return make_tool_result({{"files_indexed", stats.files_indexed},
@@ -782,6 +799,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "index_paths") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
+
+        if (std::getenv("AXON_EMBEDDING_DEVICE") && !ctx.model_ready()) {
+            try {
+                auto model_path = find_model(ctx.binary_dir);
+                ctx.model = std::make_unique<EmbeddingModel>(model_path);
+                ctx.model_error.clear();
+            } catch (const std::exception& e) {
+                ctx.model_error = e.what();
+                return make_tool_result({{"error", e.what()}}, true);
+            }
+        }
 
         std::vector<std::filesystem::path> paths;
         if (args.contains("paths"))
@@ -799,6 +827,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 embedded = embed_pending_symbols(*ctx.db, *ctx.model);
                 turns_embedded = embed_pending_turns(*ctx.db, *ctx.model);
             } catch (const std::exception& e) {
+                if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                    return make_tool_result({{"error", e.what()},
+                                             {"files_indexed", stats.files_indexed},
+                                             {"files_skipped", stats.files_skipped},
+                                             {"files_pruned", stats.files_pruned}},
+                                            true);
+                }
                 return make_tool_result(
                     {{"warning", std::string("Indexed but embedding failed: ") + e.what()},
                      {"files_indexed", stats.files_indexed},
