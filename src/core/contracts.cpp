@@ -1,4 +1,5 @@
 #include "contracts.hpp"
+#include "utf8.hpp"
 #include "db.hpp"
 #include <algorithm>
 #include <array>
@@ -17,7 +18,7 @@ std::string read_text(const fs::path& path) {
     if (!in) return {};
     std::ostringstream out;
     out << in.rdbuf();
-    return out.str();
+    return to_valid_utf8(out.str());
 }
 
 std::string lower(std::string value) {

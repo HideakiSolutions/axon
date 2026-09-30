@@ -1,4 +1,5 @@
 #include "indexer.hpp"
+#include "utf8.hpp"
 #include "call_resolver.hpp"
 #include "skeleton.hpp"
 #include "lexical.hpp"
@@ -16,7 +17,9 @@
 #include <sstream>
 
 // Escape single quotes for inline SQL strings
-static std::string sq(const std::string& s) {
+static std::string sq(const std::string& raw) {
+    // DuckDB rejects invalid UTF-8; legacy sources (Windows-1252) would otherwise abort indexing.
+    const std::string s = axon::to_valid_utf8(raw);
     std::string out;
     out.reserve(s.size() + 4);
     for (char c : s) {
@@ -751,7 +754,7 @@ IndexStats index_project(const Config& cfg, Database& db, ProgressCallback on_pr
             if (sf) {
                 std::ostringstream ss;
                 ss << sf.rdbuf();
-                source = ss.str();
+                source = axon::to_valid_utf8(ss.str());
                 skeleton = skeletonize(source, parsed->language);
             }
         } catch (...) {
@@ -890,7 +893,7 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
                 if (sf) {
                     std::ostringstream ss;
                     ss << sf.rdbuf();
-                    source = ss.str();
+                    source = axon::to_valid_utf8(ss.str());
                     skeleton = skeletonize(source, parsed->language);
                 }
             } catch (...) {

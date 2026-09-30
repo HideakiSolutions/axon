@@ -641,4 +641,23 @@ TEST_F(PortfolioJournalTest, ChunkedAppendKeepsDeleteSemanticsAndSequenceOrder) 
     empty_transaction.commit();
 }
 
+TEST_F(PortfolioJournalTest, LegacyWindows1252SourceDoesNotAbortIndexing) {
+    // "serviços" encoded as Windows-1252 (0xE7) is invalid UTF-8; DuckDB rejects it and one legacy
+    // file used to abort the whole index with an uncaught exception.
+    std::string legacy =
+        "/// Classe que fornece servi\xE7os de serializa\xE7\xE3o\n"
+        "public class Serializador { public string Converter(string x) { return x; } }\n";
+    write_file(root / "src/Serializador.cs", legacy);
+    axon::Database db(cfg.db_path);
+    axon::IndexStats stats;
+    ASSERT_NO_THROW(stats = axon::index_project(cfg, db));
+    EXPECT_GE(stats.files_indexed, 2);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM symbols WHERE name='Serializador'"), 1);
+    // Transcoded, not dropped: the accented text is stored as valid UTF-8.
+    EXPECT_EQ(
+        scalar_i64(db, "SELECT COUNT(*) FROM symbols WHERE docstring LIKE '%servi\xC3\xA7os%'"), 1);
+    // Incremental re-index of the same file must also succeed.
+    ASSERT_NO_THROW(axon::index_files(cfg, db, {root / "src/Serializador.cs"}, false));
+}
+
 } // namespace
