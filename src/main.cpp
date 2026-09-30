@@ -130,7 +130,12 @@ static axon::mcp::ServerContext make_server_context(const char* binary_path,
                 try {
                     auto model_path = axon::find_model(ctx.binary_dir);
                     ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
-                } catch (...) {
+                } catch (const std::exception& e) {
+                    ctx.model_error = e.what();
+                    if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                        std::cerr << "[axon] embedding model unavailable: " << ctx.model_error
+                                  << "\n";
+                    }
                 }
             }
         } catch (const std::exception& e) {
@@ -247,6 +252,10 @@ int main(int argc, char* argv[]) {
             int n = axon::embed_pending_symbols(*db, model);
             if (n > 0) std::cout << "Embedded " << n << " symbols.\n";
         } catch (const std::exception& e) {
+            if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                std::cerr << "[axon] " << e.what() << "\n";
+                return 1;
+            }
             std::cerr << "[warn] Skipping embeddings: " << e.what() << "\n";
             std::cerr << "       Run `axon index` again after downloading the model.\n";
         }
@@ -286,6 +295,10 @@ int main(int argc, char* argv[]) {
                 axon::EmbeddingModel model(model_path);
                 axon::embed_pending_symbols(*db, model);
             } catch (const std::exception& e) {
+                if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                    std::cerr << "[axon] " << e.what() << "\n";
+                    return 1;
+                }
                 std::cerr << "[warn] Skipping embeddings: " << e.what() << "\n";
             }
         }

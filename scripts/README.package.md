@@ -25,6 +25,15 @@ That is all. The installer:
 
 When it finishes, **restart Claude Code** to activate the hooks and the MCP server.
 
+## Embedding device
+
+`AXON_EMBEDDING_DEVICE=auto` (default) uses an available GPU and falls back to
+CPU. Set `cpu` to force CPU, or `gpu` to require a GPU and get an explicit error
+if none is usable. Set the variable in the environment that starts `axon` or
+in the MCP server's `env` configuration. The Linux package uses Vulkan and the
+macOS package uses Metal; the Windows package currently supports CPU only.
+The selected device appears in the model-loading log.
+
 ## Requirements
 
 - **Linux/macOS:** `jq`, `git`, and `curl` or `wget` (e.g. `sudo apt install jq git curl`).
@@ -72,3 +81,9 @@ no Claude Code. Ao terminar, **reinicie o Claude Code**.
 **Requisitos:** Linux/macOS precisa de `jq`, `git` e `curl`/`wget`; Windows precisa
 do VC++ 2015-2022 Redistributable (x64); e o CLI `claude` no PATH para o registro
 automatico do MCP (se ausente, o instalador imprime o bloco para colar no `~/.claude.json`).
+
+**Dispositivo de embeddings:** `AXON_EMBEDDING_DEVICE=auto` (padrao) usa GPU
+disponivel e recorre a CPU; `cpu` forca CPU; `gpu` exige GPU e retorna erro
+claro se ela nao estiver disponivel. Configure a variavel no processo que
+inicia o Axon ou no `env` do servidor MCP. O pacote Linux usa Vulkan, o macOS
+usa Metal e o Windows atualmente oferece CPU.

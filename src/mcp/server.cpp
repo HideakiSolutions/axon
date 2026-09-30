@@ -642,7 +642,9 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
                     ctx.binary_dir.empty() ? ctx.cfg.project_root / "models" : ctx.binary_dir;
                 auto model_path = find_model(binary_dir);
                 ctx.model = std::make_unique<EmbeddingModel>(model_path);
-            } catch (...) {
+                ctx.model_error.clear();
+            } catch (const std::exception& e) {
+                ctx.model_error = e.what();
                 // The model is optional for startup; tools that need embeddings
                 // already return an explicit error when it is unavailable.
             }
@@ -742,6 +744,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "run_pipeline") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
+        if (std::getenv("AXON_EMBEDDING_DEVICE") && !ctx.model_ready()) {
+            try {
+                auto model_path = find_model(ctx.binary_dir);
+                ctx.model = std::make_unique<EmbeddingModel>(model_path);
+                ctx.model_error.clear();
+            } catch (const std::exception& e) {
+                ctx.model_error = e.what();
+                return make_tool_result({{"error", e.what()}}, true);
+            }
+        }
+
         auto stats = index_project(ctx.cfg, *ctx.db);
         ctx.graph = load_graph(*ctx.db);
 
@@ -750,6 +763,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 auto mp = find_model(ctx.cfg.project_root / "models");
                 ctx.model = std::make_unique<EmbeddingModel>(mp);
             } catch (const std::exception& e) {
+                ctx.model_error = e.what();
+                if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                    return make_tool_result({{"error", e.what()},
+                                             {"files_indexed", stats.files_indexed},
+                                             {"symbols_found", stats.symbols_found}},
+                                            true);
+                }
                 return make_tool_result(
                     {{"warning", std::string("Indexed without embeddings: ") + e.what()},
                      {"files_indexed", stats.files_indexed},
@@ -761,7 +781,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         try {
             sym_embedded = embed_pending_symbols(*ctx.db, *ctx.model);
             turn_embedded = embed_pending_turns(*ctx.db, *ctx.model);
-        } catch (...) { /* silent — will retry on next drain */
+        } catch (const std::exception& e) {
+            if (std::getenv("AXON_EMBEDDING_DEVICE"))
+                return make_tool_result({{"error", e.what()},
+                                         {"files_indexed", stats.files_indexed},
+                                         {"symbols_found", stats.symbols_found}},
+                                        true);
+            // Optional embedding without a device preference retries on next drain.
         }
 
         return make_tool_result({{"files_indexed", stats.files_indexed},
@@ -773,6 +799,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
     if (name == "index_paths") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
+
+        if (std::getenv("AXON_EMBEDDING_DEVICE") && !ctx.model_ready()) {
+            try {
+                auto model_path = find_model(ctx.binary_dir);
+                ctx.model = std::make_unique<EmbeddingModel>(model_path);
+                ctx.model_error.clear();
+            } catch (const std::exception& e) {
+                ctx.model_error = e.what();
+                return make_tool_result({{"error", e.what()}}, true);
+            }
+        }
 
         std::vector<std::filesystem::path> paths;
         if (args.contains("paths"))
@@ -790,6 +827,13 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                 embedded = embed_pending_symbols(*ctx.db, *ctx.model);
                 turns_embedded = embed_pending_turns(*ctx.db, *ctx.model);
             } catch (const std::exception& e) {
+                if (std::getenv("AXON_EMBEDDING_DEVICE")) {
+                    return make_tool_result({{"error", e.what()},
+                                             {"files_indexed", stats.files_indexed},
+                                             {"files_skipped", stats.files_skipped},
+                                             {"files_pruned", stats.files_pruned}},
+                                            true);
+                }
                 return make_tool_result(
                     {{"warning", std::string("Indexed but embedding failed: ") + e.what()},
                      {"files_indexed", stats.files_indexed},
@@ -874,8 +918,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         // Miss path needs the embedding model; defer the readiness check until
         // here so cache hits don't require it.
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
 
         auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model, ctx.graph,
                                         ctx.cfg.project_root, budget, dialogue_budget, compression);
@@ -1052,8 +1099,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "search_memory") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
 
         std::string q = args.value("query", "");
         int limit = args.value("limit", 5);
@@ -1954,8 +2004,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "turn_search") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
         std::string query = args.value("query", "");
         int limit = args.value("limit", 5);
         int64_t thread_id = arg_int64(args, "thread_id", -1);
@@ -2021,8 +2074,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "dialogue_context") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
         std::string query = args.value("query", "");
         int limit = args.value("limit", 5);
         int64_t thread_id = arg_int64(args, "thread_id", -1);

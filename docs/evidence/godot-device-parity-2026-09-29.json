@@ -1,0 +1,1375 @@
+{
+  "date": "2026-09-29",
+  "source_head": "3752a36",
+  "model_sha256": "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac",
+  "index_scope": {
+    "files": 78,
+    "symbols": 1498,
+    "edges": 18
+  },
+  "token_method": "Axon capsule token_estimate; raw selected source=sum ceil(file bytes/4)",
+  "queries": [
+    {
+      "id": "camera_en",
+      "query": "camera rig follow player zoom orbit",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 1678,
+          "pivots": [
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:625-629",
+              "tokens": 127
+            },
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:50-50",
+              "tokens": 91
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:999-1003",
+              "tokens": 63
+            },
+            {
+              "path": "ui/hud/npc_indicators.gd",
+              "source_ref": "ui/hud/npc_indicators.gd:381-382",
+              "tokens": 42
+            },
+            {
+              "path": "world/character/character_rig.gd",
+              "source_ref": "world/character/character_rig.gd:440-447",
+              "tokens": 84
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "world/character/persona_catalog.gd",
+            "world/character/kit_meshes.gd",
+            "world/character/base_colormap_atlas.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 639,
+          "pivots": [
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:625-629",
+              "tokens": 127
+            },
+            {
+              "path": "src/entities/player/player.gd",
+              "source_ref": "src/entities/player/player.gd:1-1",
+              "tokens": 28
+            },
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:50-50",
+              "tokens": 91
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:999-1003",
+              "tokens": 63
+            },
+            {
+              "path": "ui/hud/npc_indicators.gd",
+              "source_ref": "ui/hud/npc_indicators.gd:384-388",
+              "tokens": 59
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 698,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:50-50",
+              "tokens": 91
+            },
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:226-226",
+              "tokens": 87
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:625-629",
+              "tokens": 127
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:999-1003",
+              "tokens": 63
+            },
+            {
+              "path": "ui/hud/npc_indicators.gd",
+              "source_ref": "ui/hud/npc_indicators.gd:384-388",
+              "tokens": 59
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "camera_follow_exact",
+      "query": "_advance_follow_state",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 2029,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:69-69",
+              "tokens": 31
+            },
+            {
+              "path": "dialogue/dialogue_state.gd",
+              "source_ref": "dialogue/dialogue_state.gd:148-148",
+              "tokens": 28
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:374-424",
+              "tokens": 523
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:49-49",
+              "tokens": 28
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:83-83",
+              "tokens": 29
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_content.gd",
+            "dialogue/dialogue_panel.gd",
+            "dialogue/dialogue_bust.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 2029,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:69-69",
+              "tokens": 31
+            },
+            {
+              "path": "dialogue/dialogue_state.gd",
+              "source_ref": "dialogue/dialogue_state.gd:148-148",
+              "tokens": 28
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:374-424",
+              "tokens": 523
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:49-49",
+              "tokens": 28
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:83-83",
+              "tokens": 29
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_panel.gd",
+            "dialogue/dialogue_bust.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 2029,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:69-69",
+              "tokens": 31
+            },
+            {
+              "path": "dialogue/dialogue_state.gd",
+              "source_ref": "dialogue/dialogue_state.gd:148-148",
+              "tokens": 28
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:374-424",
+              "tokens": 523
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:49-49",
+              "tokens": 28
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:83-83",
+              "tokens": 29
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_content.gd",
+            "dialogue/dialogue_panel.gd",
+            "dialogue/dialogue_bust.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "camera_pt",
+      "query": "Como a camera segue o jogador e controla o zoom?",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 695,
+          "pivots": [
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:47-47",
+              "tokens": 40
+            },
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:50-50",
+              "tokens": 91
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:29-29",
+              "tokens": 58
+            },
+            {
+              "path": "ui/screens/sources/sources_screen.gd",
+              "source_ref": "ui/screens/sources/sources_screen.gd:28-28",
+              "tokens": 155
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 695,
+          "pivots": [
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:47-47",
+              "tokens": 40
+            },
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:50-50",
+              "tokens": 91
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:29-29",
+              "tokens": 58
+            },
+            {
+              "path": "ui/screens/sources/sources_screen.gd",
+              "source_ref": "ui/screens/sources/sources_screen.gd:28-28",
+              "tokens": 155
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 695,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:50-50",
+              "tokens": 91
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:47-47",
+              "tokens": 40
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:29-29",
+              "tokens": 58
+            },
+            {
+              "path": "ui/screens/sources/sources_screen.gd",
+              "source_ref": "ui/screens/sources/sources_screen.gd:28-28",
+              "tokens": 155
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "camera_zoom_exact",
+      "query": "_apply_zoom_and_overview",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 1296,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:620-635",
+              "tokens": 315
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:667-701",
+              "tokens": 522
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:138-138",
+              "tokens": 32
+            },
+            {
+              "path": "ui/screens/sources/sources_screen.gd",
+              "source_ref": "ui/screens/sources/sources_screen.gd:33-33",
+              "tokens": 42
+            },
+            {
+              "path": "world/zone.gd",
+              "source_ref": "world/zone.gd:46-55",
+              "tokens": 114
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 1296,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:620-635",
+              "tokens": 315
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:667-701",
+              "tokens": 522
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:138-138",
+              "tokens": 32
+            },
+            {
+              "path": "ui/screens/sources/sources_screen.gd",
+              "source_ref": "ui/screens/sources/sources_screen.gd:33-33",
+              "tokens": 42
+            },
+            {
+              "path": "world/zone.gd",
+              "source_ref": "world/zone.gd:46-55",
+              "tokens": 114
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 1296,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:620-635",
+              "tokens": 315
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:667-701",
+              "tokens": 522
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:138-138",
+              "tokens": 32
+            },
+            {
+              "path": "ui/screens/sources/sources_screen.gd",
+              "source_ref": "ui/screens/sources/sources_screen.gd:33-33",
+              "tokens": 42
+            },
+            {
+              "path": "world/zone.gd",
+              "source_ref": "world/zone.gd:46-55",
+              "tokens": 114
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dialogue_choice_exact",
+      "query": "choose_option",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 1094,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_content.gd",
+              "source_ref": "dialogue/dialogue_content.gd:31-38",
+              "tokens": 138
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:272-311",
+              "tokens": 521
+            },
+            {
+              "path": "domain/decision.gd",
+              "source_ref": "domain/decision.gd:1-1",
+              "tokens": 22
+            },
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:206-206",
+              "tokens": 32
+            },
+            {
+              "path": "ui/hud/screens_hud.gd",
+              "source_ref": "ui/hud/screens_hud.gd:168-169",
+              "tokens": 110
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 1106,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_content.gd",
+              "source_ref": "dialogue/dialogue_content.gd:31-38",
+              "tokens": 138
+            },
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:206-206",
+              "tokens": 32
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:272-311",
+              "tokens": 521
+            },
+            {
+              "path": "domain/decision.gd",
+              "source_ref": "domain/decision.gd:1-1",
+              "tokens": 22
+            },
+            {
+              "path": "world/avatar.gd",
+              "source_ref": "world/avatar.gd:106-110",
+              "tokens": 122
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 1106,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_content.gd",
+              "source_ref": "dialogue/dialogue_content.gd:31-38",
+              "tokens": 138
+            },
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:206-206",
+              "tokens": 32
+            },
+            {
+              "path": "domain/decision.gd",
+              "source_ref": "domain/decision.gd:1-1",
+              "tokens": 22
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:272-311",
+              "tokens": 521
+            },
+            {
+              "path": "world/avatar.gd",
+              "source_ref": "world/avatar.gd:106-110",
+              "tokens": 122
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dialogue_effect_exact",
+      "query": "_apply_pending_option",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 1124,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:235-235",
+              "tokens": 84
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:318-333",
+              "tokens": 211
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:878-914",
+              "tokens": 383
+            },
+            {
+              "path": "ui/notebook/notebook_hud_button.gd",
+              "source_ref": "ui/notebook/notebook_hud_button.gd:50-50",
+              "tokens": 34
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:49-49",
+              "tokens": 41
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 1124,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:235-235",
+              "tokens": 84
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:318-333",
+              "tokens": 211
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:878-914",
+              "tokens": 383
+            },
+            {
+              "path": "ui/notebook/notebook_hud_button.gd",
+              "source_ref": "ui/notebook/notebook_hud_button.gd:50-50",
+              "tokens": 34
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:49-49",
+              "tokens": 41
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 1124,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_panel.gd",
+              "source_ref": "dialogue/dialogue_panel.gd:235-235",
+              "tokens": 84
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:318-333",
+              "tokens": 211
+            },
+            {
+              "path": "src/systems/world_input_controller.gd",
+              "source_ref": "src/systems/world_input_controller.gd:878-914",
+              "tokens": 383
+            },
+            {
+              "path": "ui/notebook/notebook_hud_button.gd",
+              "source_ref": "ui/notebook/notebook_hud_button.gd:50-50",
+              "tokens": 34
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:49-49",
+              "tokens": 41
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dialogue_en",
+      "query": "dialogue choice state consequence",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 2511,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:264-267",
+              "tokens": 115
+            },
+            {
+              "path": "dialogue/dialogue_state.gd",
+              "source_ref": "dialogue/dialogue_state.gd:148-148",
+              "tokens": 28
+            },
+            {
+              "path": "src/systems/debug_bridge.gd",
+              "source_ref": "src/systems/debug_bridge.gd:88-103",
+              "tokens": 201
+            },
+            {
+              "path": "ui/hud/npc_indicators.gd",
+              "source_ref": "ui/hud/npc_indicators.gd:279-316",
+              "tokens": 385
+            },
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:466-483",
+              "tokens": 248
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_session.gd",
+            "dialogue/dialogue_panel.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 1846,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:264-267",
+              "tokens": 115
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:352-361",
+              "tokens": 125
+            },
+            {
+              "path": "dialogue/dialogue_state.gd",
+              "source_ref": "dialogue/dialogue_state.gd:148-148",
+              "tokens": 28
+            },
+            {
+              "path": "src/systems/debug_bridge.gd",
+              "source_ref": "src/systems/debug_bridge.gd:88-103",
+              "tokens": 201
+            },
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:466-483",
+              "tokens": 248
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_panel.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 1846,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_bust.gd",
+              "source_ref": "dialogue/dialogue_bust.gd:264-267",
+              "tokens": 115
+            },
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:352-361",
+              "tokens": 125
+            },
+            {
+              "path": "dialogue/dialogue_state.gd",
+              "source_ref": "dialogue/dialogue_state.gd:148-148",
+              "tokens": 28
+            },
+            {
+              "path": "src/systems/debug_bridge.gd",
+              "source_ref": "src/systems/debug_bridge.gd:88-103",
+              "tokens": 201
+            },
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:466-483",
+              "tokens": 248
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_panel.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dialogue_pt",
+      "query": "Como uma escolha de dialogo registra consequencias no estado do jogo?",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 443,
+          "pivots": [
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:41-41",
+              "tokens": 66
+            },
+            {
+              "path": "ui/screens/help/help_screen.gd",
+              "source_ref": "ui/screens/help/help_screen.gd:26-26",
+              "tokens": 95
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:31-31",
+              "tokens": 51
+            },
+            {
+              "path": "world/zone_transfer_button.gd",
+              "source_ref": "world/zone_transfer_button.gd:40-40",
+              "tokens": 151
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 443,
+          "pivots": [
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:41-41",
+              "tokens": 66
+            },
+            {
+              "path": "ui/screens/help/help_screen.gd",
+              "source_ref": "ui/screens/help/help_screen.gd:26-26",
+              "tokens": 95
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:31-31",
+              "tokens": 51
+            },
+            {
+              "path": "world/zone_transfer_button.gd",
+              "source_ref": "world/zone_transfer_button.gd:40-40",
+              "tokens": 151
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 443,
+          "pivots": [
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:41-41",
+              "tokens": 66
+            },
+            {
+              "path": "ui/screens/help/help_screen.gd",
+              "source_ref": "ui/screens/help/help_screen.gd:26-26",
+              "tokens": 95
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:31-31",
+              "tokens": 51
+            },
+            {
+              "path": "world/zone_transfer_button.gd",
+              "source_ref": "world/zone_transfer_button.gd:40-40",
+              "tokens": 151
+            }
+          ],
+          "support_paths": []
+        }
+      }
+    },
+    {
+      "id": "movement_exact",
+      "query": "compute_velocity",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 581,
+          "pivots": [
+            {
+              "path": "persistence/preferences.gd",
+              "source_ref": "persistence/preferences.gd:35-35",
+              "tokens": 30
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:226-226",
+              "tokens": 83
+            },
+            {
+              "path": "src/entities/player/player.gd",
+              "source_ref": "src/entities/player/player.gd:458-485",
+              "tokens": 406
+            },
+            {
+              "path": "world/look/render_look.gd",
+              "source_ref": "world/look/render_look.gd:136-136",
+              "tokens": 34
+            },
+            {
+              "path": "world/zone_data.gd",
+              "source_ref": "world/zone_data.gd:33-33",
+              "tokens": 28
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 581,
+          "pivots": [
+            {
+              "path": "persistence/preferences.gd",
+              "source_ref": "persistence/preferences.gd:35-35",
+              "tokens": 30
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:226-226",
+              "tokens": 83
+            },
+            {
+              "path": "src/entities/player/player.gd",
+              "source_ref": "src/entities/player/player.gd:458-485",
+              "tokens": 406
+            },
+            {
+              "path": "world/look/render_look.gd",
+              "source_ref": "world/look/render_look.gd:136-136",
+              "tokens": 34
+            },
+            {
+              "path": "world/zone_data.gd",
+              "source_ref": "world/zone_data.gd:33-33",
+              "tokens": 28
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 581,
+          "pivots": [
+            {
+              "path": "persistence/preferences.gd",
+              "source_ref": "persistence/preferences.gd:35-35",
+              "tokens": 30
+            },
+            {
+              "path": "src/entities/player/camera_rig.gd",
+              "source_ref": "src/entities/player/camera_rig.gd:226-226",
+              "tokens": 83
+            },
+            {
+              "path": "src/entities/player/player.gd",
+              "source_ref": "src/entities/player/player.gd:458-485",
+              "tokens": 406
+            },
+            {
+              "path": "world/look/render_look.gd",
+              "source_ref": "world/look/render_look.gd:136-136",
+              "tokens": 34
+            },
+            {
+              "path": "world/zone_data.gd",
+              "source_ref": "world/zone_data.gd:33-33",
+              "tokens": 28
+            }
+          ],
+          "support_paths": []
+        }
+      }
+    },
+    {
+      "id": "movement_pt",
+      "query": "Como o personagem calcula a velocidade e responde ao input de movimento?",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 425,
+          "pivots": [
+            {
+              "path": "src/entities/player/player.gd",
+              "source_ref": "src/entities/player/player.gd:111-111",
+              "tokens": 86
+            },
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:42-42",
+              "tokens": 50
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:29-29",
+              "tokens": 58
+            },
+            {
+              "path": "world/zone_transfer_button.gd",
+              "source_ref": "world/zone_transfer_button.gd:40-40",
+              "tokens": 151
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 425,
+          "pivots": [
+            {
+              "path": "src/entities/player/player.gd",
+              "source_ref": "src/entities/player/player.gd:111-111",
+              "tokens": 86
+            },
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:42-42",
+              "tokens": 50
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:29-29",
+              "tokens": 58
+            },
+            {
+              "path": "world/zone_transfer_button.gd",
+              "source_ref": "world/zone_transfer_button.gd:40-40",
+              "tokens": 151
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 440,
+          "pivots": [
+            {
+              "path": "src/entities/player/player.gd",
+              "source_ref": "src/entities/player/player.gd:111-111",
+              "tokens": 86
+            },
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:42-42",
+              "tokens": 50
+            },
+            {
+              "path": "ui/screens/help/help_screen.gd",
+              "source_ref": "ui/screens/help/help_screen.gd:26-26",
+              "tokens": 95
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:29-29",
+              "tokens": 58
+            },
+            {
+              "path": "world/zone_transfer_button.gd",
+              "source_ref": "world/zone_transfer_button.gd:40-40",
+              "tokens": 151
+            }
+          ],
+          "support_paths": []
+        }
+      }
+    },
+    {
+      "id": "save_en",
+      "query": "mission state save load persistence",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 1007,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:69-69",
+              "tokens": 31
+            },
+            {
+              "path": "domain/mission_result.gd",
+              "source_ref": "domain/mission_result.gd:13-13",
+              "tokens": 27
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:49-49",
+              "tokens": 28
+            },
+            {
+              "path": "persistence/save_local.gd",
+              "source_ref": "persistence/save_local.gd:152-198",
+              "tokens": 521
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:83-83",
+              "tokens": 29
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 1007,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:69-69",
+              "tokens": 31
+            },
+            {
+              "path": "domain/mission_result.gd",
+              "source_ref": "domain/mission_result.gd:13-13",
+              "tokens": 27
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:49-49",
+              "tokens": 28
+            },
+            {
+              "path": "persistence/save_local.gd",
+              "source_ref": "persistence/save_local.gd:152-198",
+              "tokens": 521
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:83-83",
+              "tokens": 29
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 1007,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:69-69",
+              "tokens": 31
+            },
+            {
+              "path": "persistence/save_local.gd",
+              "source_ref": "persistence/save_local.gd:152-198",
+              "tokens": 521
+            },
+            {
+              "path": "domain/mission_result.gd",
+              "source_ref": "domain/mission_result.gd:13-13",
+              "tokens": 27
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:49-49",
+              "tokens": 28
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:83-83",
+              "tokens": 29
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "save_load_exact",
+      "query": "SaveLocal load",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 578,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:68-68",
+              "tokens": 28
+            },
+            {
+              "path": "ui/notebook/notebook_hud_button.gd",
+              "source_ref": "ui/notebook/notebook_hud_button.gd:69-69",
+              "tokens": 94
+            },
+            {
+              "path": "persistence/preferences.gd",
+              "source_ref": "persistence/preferences.gd:38-38",
+              "tokens": 30
+            },
+            {
+              "path": "persistence/save_local.gd",
+              "source_ref": "persistence/save_local.gd:1-1",
+              "tokens": 24
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:81-81",
+              "tokens": 31
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 578,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:68-68",
+              "tokens": 28
+            },
+            {
+              "path": "ui/notebook/notebook_hud_button.gd",
+              "source_ref": "ui/notebook/notebook_hud_button.gd:69-69",
+              "tokens": 94
+            },
+            {
+              "path": "persistence/preferences.gd",
+              "source_ref": "persistence/preferences.gd:38-38",
+              "tokens": 30
+            },
+            {
+              "path": "persistence/save_local.gd",
+              "source_ref": "persistence/save_local.gd:1-1",
+              "tokens": 24
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:81-81",
+              "tokens": 31
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 578,
+          "pivots": [
+            {
+              "path": "dialogue/dialogue_session.gd",
+              "source_ref": "dialogue/dialogue_session.gd:68-68",
+              "tokens": 28
+            },
+            {
+              "path": "persistence/preferences.gd",
+              "source_ref": "persistence/preferences.gd:38-38",
+              "tokens": 30
+            },
+            {
+              "path": "persistence/save_local.gd",
+              "source_ref": "persistence/save_local.gd:1-1",
+              "tokens": 24
+            },
+            {
+              "path": "ui/notebook/notebook_hud_button.gd",
+              "source_ref": "ui/notebook/notebook_hud_button.gd:69-69",
+              "tokens": 94
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:81-81",
+              "tokens": 31
+            }
+          ],
+          "support_paths": [
+            "dialogue/dialogue_state.gd",
+            "dialogue/dialogue_content.gd"
+          ]
+        }
+      }
+    },
+    {
+      "id": "save_pt",
+      "query": "Como o estado das missoes e salvo e restaurado?",
+      "runs": {
+        "cpu": {
+          "capsule_tokens": 331,
+          "pivots": [
+            {
+              "path": "ui/notebook/notebook_screen.gd",
+              "source_ref": "ui/notebook/notebook_screen.gd:54-54",
+              "tokens": 45
+            },
+            {
+              "path": "ui/screens/help/help_screen.gd",
+              "source_ref": "ui/screens/help/help_screen.gd:26-26",
+              "tokens": 95
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:48-48",
+              "tokens": 43
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:26-26",
+              "tokens": 68
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_cpu_index": {
+          "capsule_tokens": 437,
+          "pivots": [
+            {
+              "path": "ui/screens/help/help_screen.gd",
+              "source_ref": "ui/screens/help/help_screen.gd:26-26",
+              "tokens": 95
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:29-29",
+              "tokens": 151
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:48-48",
+              "tokens": 43
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:26-26",
+              "tokens": 68
+            }
+          ],
+          "support_paths": []
+        },
+        "gpu_query_gpu_index": {
+          "capsule_tokens": 437,
+          "pivots": [
+            {
+              "path": "ui/screens/help/help_screen.gd",
+              "source_ref": "ui/screens/help/help_screen.gd:26-26",
+              "tokens": 95
+            },
+            {
+              "path": "ui/screens/onboarding/onboarding_screen.gd",
+              "source_ref": "ui/screens/onboarding/onboarding_screen.gd:39-39",
+              "tokens": 80
+            },
+            {
+              "path": "ui/screens/people/people_screen.gd",
+              "source_ref": "ui/screens/people/people_screen.gd:29-29",
+              "tokens": 151
+            },
+            {
+              "path": "ui/screens/proposal/proposal_screen.gd",
+              "source_ref": "ui/screens/proposal/proposal_screen.gd:48-48",
+              "tokens": 43
+            },
+            {
+              "path": "ui/screens/settings/settings_screen.gd",
+              "source_ref": "ui/screens/settings/settings_screen.gd:26-26",
+              "tokens": 68
+            }
+          ],
+          "support_paths": []
+        }
+      }
+    }
+  ]
+}
