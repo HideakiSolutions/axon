@@ -149,7 +149,7 @@ The installed v1.4.0 Linux package was also exercised against this index. Its
 embedding path terminated with `SIGILL` on an Intel i7-8700K (AVX2, no AVX-512)
 before a capsule was returned. The quality check above used a local source
 build on the same host. The release-build compatibility defect is addressed in
-v1.4.1 by disabling ggml's host-native instruction selection for x64 packages;
+v1.5.0 by disabling ggml's host-native instruction selection for x64 packages;
 the final packaged binary must pass a model-loading smoke on this host before
 installation is considered verified.
 
