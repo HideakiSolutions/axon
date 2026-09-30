@@ -1,0 +1,101 @@
+{
+  "device": "cpu",
+  "query": "Como o estado da missão é salvo e restaurado?",
+  "copies": 10,
+  "repeats": 5,
+  "source_index": "/tmp/axon-porto-bench-iNP7OM/runtime/.axon/index.duckdb",
+  "cases": {
+    "source": {
+      "semantic": [
+        {
+          "latency_ms": 122.93,
+          "max_rss_kb": 164864
+        },
+        {
+          "latency_ms": 123.42,
+          "max_rss_kb": 165088
+        },
+        {
+          "latency_ms": 126.54,
+          "max_rss_kb": 165248
+        },
+        {
+          "latency_ms": 121.91,
+          "max_rss_kb": 164800
+        },
+        {
+          "latency_ms": 124.03,
+          "max_rss_kb": 164732
+        }
+      ],
+      "hybrid": [
+        {
+          "latency_ms": 130.94,
+          "max_rss_kb": 163960
+        },
+        {
+          "latency_ms": 134.85,
+          "max_rss_kb": 164016
+        },
+        {
+          "latency_ms": 132.56,
+          "max_rss_kb": 162324
+        },
+        {
+          "latency_ms": 133.2,
+          "max_rss_kb": 162280
+        },
+        {
+          "latency_ms": 132.15,
+          "max_rss_kb": 164048
+        }
+      ]
+    },
+    "scaled": {
+      "semantic": [
+        {
+          "latency_ms": 197.21,
+          "max_rss_kb": 205268
+        },
+        {
+          "latency_ms": 191.29,
+          "max_rss_kb": 200372
+        },
+        {
+          "latency_ms": 198.74,
+          "max_rss_kb": 212032
+        },
+        {
+          "latency_ms": 196.97,
+          "max_rss_kb": 200164
+        },
+        {
+          "latency_ms": 194.47,
+          "max_rss_kb": 199624
+        }
+      ],
+      "hybrid": [
+        {
+          "latency_ms": 217.25,
+          "max_rss_kb": 212172
+        },
+        {
+          "latency_ms": 216.33,
+          "max_rss_kb": 211304
+        },
+        {
+          "latency_ms": 217.07,
+          "max_rss_kb": 211676
+        },
+        {
+          "latency_ms": 219.75,
+          "max_rss_kb": 211000
+        },
+        {
+          "latency_ms": 219.88,
+          "max_rss_kb": 211192
+        }
+      ]
+    }
+  }
+}

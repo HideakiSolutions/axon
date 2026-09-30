@@ -1,0 +1,8 @@
+asyncapi: 3.0.0
+info: {title: Notifications, version: 1.0.0}
+servers:
+  main: {host: broker-b, protocol: kafka}
+channels:
+  orderCreated: {address: orders.created}
+operations:
+  consumeCreated: {action: receive, channel: {$ref: '#/channels/orderCreated'}}

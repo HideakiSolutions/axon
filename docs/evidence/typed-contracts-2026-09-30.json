@@ -1,0 +1,328 @@
+{
+  "cases": [
+    {
+      "consumer": "billing/client.py::submitOrder",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/api.ts::createOrder",
+      "surface": "http"
+    },
+    {
+      "consumer": "notifications/worker.go::archiveOrder",
+      "expected": "false",
+      "linked": false,
+      "producer": "orders/api.ts::createOrder",
+      "surface": "http"
+    },
+    {
+      "consumer": "billing/client.py::submitOrder",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/openapi.yaml::createOrder",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "billing/client.py::submitOrder",
+      "expected": "false",
+      "linked": false,
+      "producer": "orders/openapi.yaml::getOrder",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "orders/grpc_client.cs::Charge",
+      "expected": "true",
+      "linked": true,
+      "producer": "billing/BillingService.java::charge",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "notifications/worker.go::notify",
+      "expected": "false",
+      "linked": false,
+      "producer": "billing/BillingService.java::charge",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "billing/events.py::onCreated",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/events.js::publishCreated",
+      "surface": "topic"
+    },
+    {
+      "consumer": "notifications/events.go::consumeCreated",
+      "expected": "false",
+      "linked": false,
+      "producer": "orders/events.js::publishCreated",
+      "surface": "topic"
+    },
+    {
+      "consumer": "notifications/dynamic.cs::Call",
+      "expected": "unknown",
+      "linked": false,
+      "producer": "orders/api.ts::createOrder",
+      "surface": "http"
+    },
+    {
+      "consumer": "notifications/dynamic.cs::Subscribe",
+      "expected": "unknown",
+      "linked": false,
+      "producer": "orders/events.js::publishCreated",
+      "surface": "topic"
+    },
+    {
+      "consumer": "billing/client.py::fetchOrderList",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/api.ts::listOrders",
+      "surface": "http"
+    },
+    {
+      "consumer": "billing/client.py::fetchOrderList",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/openapi.yaml::listOrders",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "billing/client.py::confirmOrder",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/api.ts::confirmOrder",
+      "surface": "http"
+    },
+    {
+      "consumer": "billing/client.py::confirmOrder",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/openapi.yaml::confirmOrder",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "billing/client.py::setOrderStatus",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/api.ts::updateStatus",
+      "surface": "http"
+    },
+    {
+      "consumer": "billing/client.py::setOrderStatus",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/openapi.yaml::updateStatus",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "billing/client.py::archiveOrder",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/api.ts::archiveOrder",
+      "surface": "http"
+    },
+    {
+      "consumer": "billing/client.py::archiveOrder",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/openapi.yaml::archiveOrder",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "orders/grpc_client.cs::Refund",
+      "expected": "true",
+      "linked": true,
+      "producer": "billing/BillingService.java::refund",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "orders/grpc_client.cs::Capture",
+      "expected": "true",
+      "linked": true,
+      "producer": "billing/BillingService.java::capture",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "orders/grpc_client.cs::Cancel",
+      "expected": "true",
+      "linked": true,
+      "producer": "billing/BillingService.java::cancel",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "orders/ledger_client.cs::Snapshot",
+      "expected": "true",
+      "linked": true,
+      "producer": "billing/LedgerService.java::snapshot",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "billing/event_confirmed.py::onConfirmed",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/event_confirmed.js::publishConfirmed",
+      "surface": "topic"
+    },
+    {
+      "consumer": "billing/event_cancelled.py::onCancelled",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/event_cancelled.js::publishCancelled",
+      "surface": "topic"
+    },
+    {
+      "consumer": "billing/event_archived.py::onArchived",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/event_archived.js::publishArchived",
+      "surface": "topic"
+    },
+    {
+      "consumer": "billing/event_failed.py::onFailed",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/event_failed.js::publishFailed",
+      "surface": "topic"
+    },
+    {
+      "consumer": "billing/client.py::setOrderStatus",
+      "expected": "false",
+      "linked": false,
+      "producer": "orders/api.ts::confirmOrder",
+      "surface": "http"
+    },
+    {
+      "consumer": "billing/client.py::setOrderStatus",
+      "expected": "false",
+      "linked": false,
+      "producer": "orders/openapi.yaml::confirmOrder",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "orders/grpc_client.cs::Charge",
+      "expected": "false",
+      "linked": false,
+      "producer": "billing/LedgerService.java::snapshot",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "billing/event_cancelled.py::onCancelled",
+      "expected": "false",
+      "linked": false,
+      "producer": "orders/event_confirmed.js::publishConfirmed",
+      "surface": "topic"
+    },
+    {
+      "consumer": "orders/shipping_client.cs::Charge",
+      "expected": "true",
+      "linked": true,
+      "producer": "billing/ShippingService.java::charge",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "orders/shipping_client.cs::Charge",
+      "expected": "false",
+      "linked": false,
+      "producer": "billing/BillingService.java::charge",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "notifications/worker.go::fetchOrders",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/api.ts::listOrders",
+      "surface": "http"
+    },
+    {
+      "consumer": "notifications/worker.go::fetchOrders",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/openapi.yaml::listOrders",
+      "surface": "openapi"
+    },
+    {
+      "consumer": "notifications/events_failover.go::consumeFailed",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/event_failed.js::publishFailed",
+      "surface": "topic"
+    },
+    {
+      "consumer": "notifications/events.go::consumeCreated",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/event_broker_b.js::publishCreatedReplica",
+      "surface": "topic"
+    },
+    {
+      "consumer": "notifications/asyncapi.yaml::consumeCreated",
+      "expected": "true",
+      "linked": true,
+      "producer": "orders/event_broker_b.js::publishCreatedReplica",
+      "surface": "topic"
+    },
+    {
+      "consumer": "notifications/asyncapi.yaml::consumeCreated",
+      "expected": "false",
+      "linked": false,
+      "producer": "orders/events.js::publishCreated",
+      "surface": "topic"
+    },
+    {
+      "consumer": "orders/grpc_unrelated.cs::ChargeOther",
+      "expected": "false",
+      "linked": false,
+      "producer": "billing/BillingService.java::charge",
+      "surface": "grpc"
+    },
+    {
+      "consumer": "orders/grpc_shadowed.cs::ChargeOther",
+      "expected": "false",
+      "linked": false,
+      "producer": "billing/BillingService.java::charge",
+      "surface": "grpc"
+    }
+  ],
+  "evidence_count": 58,
+  "gate_passed": true,
+  "link_count": 26,
+  "quality_thresholds_met": true,
+  "sample_adequate": true,
+  "surfaces": {
+    "grpc": {
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tn": 5,
+      "tp": 6,
+      "unknown": 0
+    },
+    "http": {
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tn": 2,
+      "tp": 6,
+      "unknown": 1
+    },
+    "openapi": {
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tn": 2,
+      "tp": 6,
+      "unknown": 0
+    },
+    "topic": {
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tn": 3,
+      "tp": 8,
+      "unknown": 1
+    }
+  },
+  "unlabeled_links": []
+}

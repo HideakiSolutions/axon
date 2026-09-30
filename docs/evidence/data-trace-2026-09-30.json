@@ -1,0 +1,17 @@
+{
+  "elapsed_us": 614,
+  "eligible_coverage": 1.0,
+  "eligible_total": 3,
+  "false_negative": 0,
+  "false_positive": 0,
+  "indexing_mode": "on_demand_ephemeral",
+  "persistent_index_bytes": 0,
+  "precision_confirmed": 1.0,
+  "source_bytes": 1670,
+  "trace_bytes": 5513,
+  "true_negative": 4,
+  "true_positive": 3,
+  "unknown_detection": 1.0,
+  "unknown_found": 5,
+  "unknown_total": 5
+}
