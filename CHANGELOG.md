@@ -5,6 +5,27 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-09-30
+
+### Added
+- `retrieval_mode=semantic|hybrid` for context capsules in MCP, CLI and HTTP.
+  `hybrid` (now the default) fuses vector ranking with a persisted, incremental
+  lexical index (path, name, signature, docs and split body identifiers),
+  selects the best symbol per file and preserves relevant bodies within the
+  capsule budget. The mode is part of the cache key.
+- Typed service contracts: OpenAPI, AsyncAPI 3 and `.proto` declarations plus
+  observed providers/consumers, linked only on resolved qualified identities.
+  `group_impact` reports them as the primary result and keeps the old base-name
+  match as a separate heuristic candidate.
+- Experimental queries (MCP and CLI): communities, execution flow, API shape
+  compatibility and intra-function TS/JS data trace (off by default).
+- Evaluation corpora and evidence under `evals/` and `docs/evidence/`.
+
+### Changed
+- The symbol index gains `search_terms`, `search_length` and `symbol_terms`;
+  the migration is idempotent and resumes after interruption.
+- MCP now exposes 45 tools.
+
 ## [1.5.0] — 2026-09-29
 
 ### Added
