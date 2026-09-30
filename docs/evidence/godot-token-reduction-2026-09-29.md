@@ -138,6 +138,13 @@ dialogue-effect coverage, but body truncation and missed symbol selection
 remain material limits. The compact context therefore cannot be treated as an
 equivalent replacement for source reading on these questions.
 
+A guided follow-up with `query="load"` and
+`pivot_files=["persistence/save_local.gd"]` did return the complete 11,428-byte
+file (2,857 estimated tokens), including `load()` and its validation branches.
+This repairs answer support by expanding the source; it provides no reduction
+for that file. A realistic workflow must spend additional tool calls and
+context when the first capsule lacks the needed evidence.
+
 The installed v1.4.0 Linux package was also exercised against this index. Its
 embedding path terminated with `SIGILL` on an Intel i7-8700K (AVX2, no AVX-512)
 before a capsule was returned. The quality check above used a local source
