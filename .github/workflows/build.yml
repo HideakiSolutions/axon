@@ -53,9 +53,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake build-essential ninja-build ccache jq ripgrep libpq-dev libvulkan-dev spirv-headers
 
-      - name: Stage glslc for Ubuntu 22.04
+      - name: Stage Vulkan compiler and headers for Ubuntu 22.04
         if: runner.os == 'Linux'
-        run: bash scripts/dependencies/stage-glslc-linux.sh
+        run: bash scripts/dependencies/stage-vulkan-linux.sh
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
@@ -114,6 +114,10 @@ jobs:
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAXON_BUILD_TESTS=ON -GNinja -DGGML_NATIVE=${{ matrix.ggml_native }} -DGGML_VULKAN=${{ matrix.ggml_vulkan }}
+
+      - name: Verify Vulkan headers (Linux)
+        if: runner.os == 'Linux'
+        run: grep -Fx 'Vulkan_INCLUDE_DIR:PATH=/usr/local/include' build/CMakeCache.txt
 
       - name: Build axon
         # Project policy enforces -j2 (host runs MCP server + embeddings + multiple
