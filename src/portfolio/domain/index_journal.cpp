@@ -3,6 +3,7 @@
 #include "core/db.hpp"
 #include <blake3.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <mutex>
 #include <regex>
 #include <stdexcept>
@@ -204,7 +205,7 @@ static uint64_t append_index_event_impl(Transaction& transaction, duckdb::Connec
         throw std::invalid_argument("RepositoryReidentified requires typed identity_change");
     if (manifest_hash.size() < 16 || manifest_hash.size() > 128)
         throw std::invalid_argument("manifest_hash length is outside [16,128]");
-    if (affected.size() > 10000)
+    if (affected.size() > kMaxAffectedPerEvent)
         throw std::invalid_argument("index event affected set exceeds 10000 entities");
     if (source_ref && source_ref->size() > 512)
         throw std::invalid_argument("index event source_ref exceeds 512 bytes");
@@ -288,6 +289,28 @@ uint64_t append_index_event(Transaction& transaction, duckdb::Connection& connec
                             const std::optional<std::string>& source_ref) {
     return append_index_event_impl(transaction, connection, event_type, affected, manifest_hash,
                                    source_ref, nullptr);
+}
+
+std::vector<uint64_t> append_index_events(Transaction& transaction, duckdb::Connection& connection,
+                                          const std::string& event_type,
+                                          const std::vector<AffectedEntity>& affected,
+                                          const std::string& manifest_hash,
+                                          const std::optional<std::string>& source_ref) {
+    std::vector<uint64_t> sequences;
+    if (affected.size() <= kMaxAffectedPerEvent) {
+        sequences.push_back(append_index_event(transaction, connection, event_type, affected,
+                                               manifest_hash, source_ref));
+        return sequences;
+    }
+    for (std::size_t begin = 0; begin < affected.size(); begin += kMaxAffectedPerEvent) {
+        const std::size_t end = std::min(affected.size(), begin + kMaxAffectedPerEvent);
+        const std::vector<AffectedEntity> chunk(
+            affected.begin() + static_cast<std::ptrdiff_t>(begin),
+            affected.begin() + static_cast<std::ptrdiff_t>(end));
+        sequences.push_back(append_index_event(transaction, connection, event_type, chunk,
+                                               manifest_hash, source_ref));
+    }
+    return sequences;
 }
 
 void upsert_tombstone(duckdb::Connection& connection, const AffectedEntity& entity,

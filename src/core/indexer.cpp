@@ -654,26 +654,29 @@ static void append_journal(portfolio::Transaction& transaction, duckdb::Connecti
     if (!updated_files.empty()) {
         for (const auto& updated : updated_files)
             portfolio::clear_tombstone(conn, updated);
-        portfolio::append_index_event(transaction, conn, "IndexFilesUpdated", updated_files,
-                                      manifest);
+        portfolio::append_index_events(transaction, conn, "IndexFilesUpdated", updated_files,
+                                       manifest);
     }
     if (!updated_symbols.empty())
-        portfolio::append_index_event(transaction, conn, "IndexSymbolsUpdated", updated_symbols,
-                                      manifest);
+        portfolio::append_index_events(transaction, conn, "IndexSymbolsUpdated", updated_symbols,
+                                       manifest);
     if (!deleted_files.empty()) {
-        const uint64_t sequence = portfolio::append_index_event(
+        const auto sequences = portfolio::append_index_events(
             transaction, conn, "IndexFilesDeleted", deleted_files, manifest);
         const std::string epoch = portfolio::index_identity(conn).current_epoch;
-        for (const auto& deleted : deleted_files)
-            portfolio::upsert_tombstone(conn, deleted, sequence, epoch);
+        for (std::size_t i = 0; i < deleted_files.size(); ++i)
+            portfolio::upsert_tombstone(conn, deleted_files[i],
+                                        sequences[i / portfolio::kMaxAffectedPerEvent], epoch);
     }
     if (!contract_changes.empty()) {
-        const uint64_t sequence = portfolio::append_index_event(
+        const auto sequences = portfolio::append_index_events(
             transaction, conn, "IndexContractsUpdated", contract_changes, manifest);
         const std::string epoch = portfolio::index_identity(conn).current_epoch;
-        for (const auto& change : contract_changes) {
+        for (std::size_t i = 0; i < contract_changes.size(); ++i) {
+            const auto& change = contract_changes[i];
             if (change.operation == "delete")
-                portfolio::upsert_tombstone(conn, change, sequence, epoch);
+                portfolio::upsert_tombstone(conn, change,
+                                            sequences[i / portfolio::kMaxAffectedPerEvent], epoch);
             else
                 portfolio::clear_tombstone(conn, change);
         }

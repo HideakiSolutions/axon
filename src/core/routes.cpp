@@ -219,11 +219,15 @@ int index_routes(const Config& cfg, Database& db) {
             portfolio::clear_tombstone(conn, {"route", route_key, "upsert", std::nullopt});
         portfolio::trigger_journal_failpoint_for_testing("after_mutation");
         const std::string manifest = portfolio::compute_manifest_hash(conn);
-        const uint64_t sequence = portfolio::append_index_event(
+        const auto sequences = portfolio::append_index_events(
             transaction, conn, "IndexRoutesUpdated", affected, manifest);
         const std::string epoch = portfolio::index_identity(conn).current_epoch;
-        for (const auto& route : deleted)
-            portfolio::upsert_tombstone(conn, route, sequence, epoch);
+        // Deletions are appended after the upserts, so entity i maps to its chunk's event.
+        const std::size_t first_deleted = affected.size() - deleted.size();
+        for (std::size_t i = 0; i < deleted.size(); ++i)
+            portfolio::upsert_tombstone(
+                conn, deleted[i], sequences[(first_deleted + i) / portfolio::kMaxAffectedPerEvent],
+                epoch);
     }
     transaction.commit();
     return inserted;
