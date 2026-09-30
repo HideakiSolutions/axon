@@ -218,8 +218,8 @@ int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
     }
     portfolio::trigger_journal_failpoint_for_testing("after_mutation");
     const std::string manifest = portfolio::compute_manifest_hash(db.conn());
-    portfolio::append_index_event(transaction, db.conn(), "IndexSymbolsUpdated", affected,
-                                  manifest);
+    portfolio::append_index_events(transaction, db.conn(), "IndexSymbolsUpdated", affected,
+                                   manifest);
     transaction.commit();
     return (int)ids.size();
 }

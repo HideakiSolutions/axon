@@ -5,6 +5,17 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] — 2026-09-30
+
+### Fixed
+- Indexing a repository with more than 10,000 files or symbols aborted at the
+  end with `index event affected set exceeds 10000 entities`, discarding the
+  whole index. The portfolio journal bounds each event at 10,000 entities, but
+  a full index logged every file, symbol and contract in a single event. Index
+  events are now split into consecutive events of at most 10,000 entities in
+  the same transaction, preserving tombstone and sequence semantics. The limit
+  has been latent since the journal was introduced in 1.4.0.
+
 ## [1.6.0] — 2026-09-30
 
 ### Added
