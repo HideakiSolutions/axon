@@ -13,10 +13,10 @@ struct ContractEvidence {
     std::string repository;
     std::string file;
     std::string symbol;
-    std::string surface;  // http, openapi, grpc, topic
-    std::string role;     // provider, consumer, declaration
+    std::string surface; // http, openapi, grpc, topic
+    std::string role;    // provider, consumer, declaration
     std::string identity;
-    std::string origin;   // observed, declared
+    std::string origin;    // observed, declared
     std::string ambiguity; // resolved, unknown
     std::string detail;
 };
@@ -30,8 +30,7 @@ struct ContractLink {
 
 // Pass evidence from every registered repository. A suffix-only RPC client is
 // resolved only if exactly one declared service/method has that suffix.
-std::vector<ContractLink> resolve_contract_links(
-    const std::vector<ContractEvidence>& all_evidence);
+std::vector<ContractLink> resolve_contract_links(const std::vector<ContractEvidence>& all_evidence);
 
 // Restricted static extraction. Dynamic URL, RPC and topic expressions produce
 // unknown evidence; they can never form a confirmed link.

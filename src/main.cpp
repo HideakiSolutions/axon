@@ -453,19 +453,25 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    if (cmd == "symbol-communities" || cmd == "execution-flow" ||
-        cmd == "api-shape" || cmd == "data-trace") {
+    if (cmd == "symbol-communities" || cmd == "execution-flow" || cmd == "api-shape" ||
+        cmd == "data-trace") {
         nlohmann::json args = nlohmann::json::object();
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
-            if (arg.rfind("--identity=", 0) == 0) args["identity"] = arg.substr(11);
-            else if (arg.rfind("--symbol=", 0) == 0) args["symbol"] = arg.substr(9);
+            if (arg.rfind("--identity=", 0) == 0)
+                args["identity"] = arg.substr(11);
+            else if (arg.rfind("--symbol=", 0) == 0)
+                args["symbol"] = arg.substr(9);
             else if (arg.rfind("--max-depth=", 0) == 0)
                 args["max_depth"] = std::stoi(arg.substr(12));
             else if (arg.rfind("--max-paths=", 0) == 0)
                 args["max_paths"] = std::stoi(arg.substr(12));
-            else if (cmd == "data-trace" && !args.contains("file")) args["file"] = arg;
-            else { std::cerr << "Unexpected argument: " << arg << "\n"; return 1; }
+            else if (cmd == "data-trace" && !args.contains("file"))
+                args["file"] = arg;
+            else {
+                std::cerr << "Unexpected argument: " << arg << "\n";
+                return 1;
+            }
         }
         auto cfg = load_config();
         if (!fs::exists(cfg.db_path)) {
@@ -474,9 +480,10 @@ int main(int argc, char* argv[]) {
         }
         auto db = open_database_or_report(cfg.db_path);
         if (!db) return 1;
-        const std::string query = cmd == "symbol-communities" ? "symbol_communities" :
-                                  cmd == "execution-flow" ? "execution_flow" :
-                                  cmd == "api-shape" ? "api_shape" : "trace_data_flow";
+        const std::string query = cmd == "symbol-communities" ? "symbol_communities"
+                                  : cmd == "execution-flow"   ? "execution_flow"
+                                  : cmd == "api-shape"        ? "api_shape"
+                                                              : "trace_data_flow";
         try {
             auto result = axon::run_impact_query(query, args, *db, cfg.project_root);
             std::cout << result.dump(2) << "\n";
@@ -490,7 +497,8 @@ int main(int argc, char* argv[]) {
     // ── axon capsule <query> [--no-cache] ──────────────────────────────────
     if (cmd == "capsule") {
         if (argc < 3) {
-            std::cerr << "Usage: axon capsule <query> [--no-cache] [--retrieval-mode=semantic|hybrid]\n";
+            std::cerr
+                << "Usage: axon capsule <query> [--no-cache] [--retrieval-mode=semantic|hybrid]\n";
             return 1;
         }
         std::string query;
@@ -525,7 +533,8 @@ int main(int argc, char* argv[]) {
         auto graph = axon::load_graph(*db);
         auto start = std::chrono::steady_clock::now();
         auto print_capsule = [](const axon::ContextCapsule& c, const char* cache_state) {
-            nlohmann::json j = {{"query", c.query}, {"retrieval_mode", c.retrieval_mode},
+            nlohmann::json j = {{"query", c.query},
+                                {"retrieval_mode", c.retrieval_mode},
                                 {"token_estimate", c.token_estimate},
                                 {"total_files_indexed", c.total_files},
                                 {"cache", cache_state}};
@@ -533,16 +542,21 @@ int main(int argc, char* argv[]) {
             j["support_files"] = nlohmann::json::array();
             j["selection"] = nlohmann::json::array();
             for (const auto& f : c.pivot_files)
-                j["pivot_files"].push_back({{"path", f.path}, {"source_ref", f.source_ref},
-                                             {"content", f.content}, {"tokens", f.token_estimate}});
+                j["pivot_files"].push_back({{"path", f.path},
+                                            {"source_ref", f.source_ref},
+                                            {"content", f.content},
+                                            {"tokens", f.token_estimate}});
             for (const auto& f : c.support_files)
-                j["support_files"].push_back({{"path", f.path}, {"source_ref", f.source_ref},
-                                               {"content", f.content}, {"tokens", f.token_estimate}});
+                j["support_files"].push_back({{"path", f.path},
+                                              {"source_ref", f.source_ref},
+                                              {"content", f.content},
+                                              {"tokens", f.token_estimate}});
             for (const auto& s : c.selection)
-                j["selection"].push_back({{"symbol_id", s.symbol_id}, {"file_id", s.file_id},
-                                           {"semantic_rank", s.semantic_rank},
-                                           {"lexical_rank", s.lexical_rank},
-                                           {"fused_score", s.fused_score}});
+                j["selection"].push_back({{"symbol_id", s.symbol_id},
+                                          {"file_id", s.file_id},
+                                          {"semantic_rank", s.semantic_rank},
+                                          {"lexical_rank", s.lexical_rank},
+                                          {"fused_score", s.fused_score}});
             std::cout << j.dump(2) << '\n';
         };
 
@@ -578,9 +592,9 @@ int main(int argc, char* argv[]) {
         axon::EmbeddingModel& model = *model_opt;
 
         auto compression = axon::compression_from_string(cfg.project_cfg.capsule_compression);
-        auto capsule = axon::assemble_capsule(query, {}, *db, model, graph, cfg.project_root,
-                                              cfg.project_cfg.token_budget, 0, compression,
-                                              retrieval_mode);
+        auto capsule =
+            axon::assemble_capsule(query, {}, *db, model, graph, cfg.project_root,
+                                   cfg.project_cfg.token_budget, 0, compression, retrieval_mode);
         if (!no_cache) {
             axon::capsule_cache_insert(*db, cache_key, epoch, capsule);
         }

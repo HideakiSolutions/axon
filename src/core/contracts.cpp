@@ -56,29 +56,30 @@ std::string function_near(const std::string& source, size_t offset, const std::s
     // Source-level attribution is deliberately conservative: only a lexical
     // function declaration before the occurrence in this file is accepted.
     std::string prefix = source.substr(0, offset);
-    std::regex re(R"((?:function\s+|def\s+|func\s+|(?:public|private|export|async|static)\s+(?:(?:async|static|public|private)\s+)*(?:(?:[A-Za-z_][A-Za-z0-9_<>,?\[\].]*|void)\s+)?)([A-Za-z_][A-Za-z0-9_]*)\s*\()",
-                  std::regex::ECMAScript);
+    std::regex re(
+        R"((?:function\s+|def\s+|func\s+|(?:public|private|export|async|static)\s+(?:(?:async|static|public|private)\s+)*(?:(?:[A-Za-z_][A-Za-z0-9_<>,?\[\].]*|void)\s+)?)([A-Za-z_][A-Za-z0-9_]*)\s*\()",
+        std::regex::ECMAScript);
     std::string last;
     for (std::sregex_iterator it(prefix.begin(), prefix.end(), re), end; it != end; ++it)
         last = (*it)[1];
     return last.empty() ? fallback : last;
 }
 
-void emit(std::vector<ContractEvidence>& out, const std::string& repo,
-          const std::string& file, const std::string& symbol, const std::string& surface,
-          const std::string& role, const std::string& identity, const std::string& origin,
-          const std::string& detail = {}) {
+void emit(std::vector<ContractEvidence>& out, const std::string& repo, const std::string& file,
+          const std::string& symbol, const std::string& surface, const std::string& role,
+          const std::string& identity, const std::string& origin, const std::string& detail = {}) {
     out.push_back({repo, file, symbol, surface, role, identity, origin,
                    identity.empty() ? "unknown" : "resolved", detail});
 }
 
-void extract_openapi(const std::string& source, const std::string& repo,
-                     const std::string& file, std::vector<ContractEvidence>& out) {
+void extract_openapi(const std::string& source, const std::string& repo, const std::string& file,
+                     std::vector<ContractEvidence>& out) {
     if (source.find("openapi:") == std::string::npos) return;
     std::istringstream lines(source);
     std::string line, route, method;
     std::regex route_re(R"(^\s{2}(/[^:]+):\s*$)");
-    std::regex method_re(R"(^\s{4}(get|post|put|patch|delete|head|options):\s*$)", std::regex::icase);
+    std::regex method_re(R"(^\s{4}(get|post|put|patch|delete|head|options):\s*$)",
+                         std::regex::icase);
     std::regex operation_re(R"(^\s{6}operationId:\s*['\"]?([A-Za-z_][A-Za-z0-9_.-]*))");
     std::smatch m;
     while (std::getline(lines, line)) {
@@ -94,8 +95,8 @@ void extract_openapi(const std::string& source, const std::string& repo,
     }
 }
 
-void extract_proto(const std::string& source, const std::string& repo,
-                   const std::string& file, std::vector<ContractEvidence>& out) {
+void extract_proto(const std::string& source, const std::string& repo, const std::string& file,
+                   std::vector<ContractEvidence>& out) {
     std::smatch m;
     if (!match(source, R"(\bpackage\s+([A-Za-z0-9_.]+)\s*;)", m)) return;
     const std::string package = m[1];
@@ -103,21 +104,21 @@ void extract_proto(const std::string& source, const std::string& repo,
     for (std::sregex_iterator it(source.begin(), source.end(), service_re), end; it != end; ++it) {
         std::string service = (*it)[1], block = (*it)[2];
         std::regex rpc_re(R"(\brpc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\()");
-        for (std::sregex_iterator rpc(block.begin(), block.end(), rpc_re), rpc_end;
-             rpc != rpc_end; ++rpc)
+        for (std::sregex_iterator rpc(block.begin(), block.end(), rpc_re), rpc_end; rpc != rpc_end;
+             ++rpc)
             emit(out, repo, file, (*rpc)[1], "grpc", "declaration",
                  package + "|" + service + "|" + (*rpc)[1].str(), "declared");
     }
 }
 
-void extract_asyncapi(const std::string& source, const std::string& repo,
-                      const std::string& file, std::vector<ContractEvidence>& out) {
+void extract_asyncapi(const std::string& source, const std::string& repo, const std::string& file,
+                      std::vector<ContractEvidence>& out) {
     if (source.find("asyncapi:") == std::string::npos) return;
     std::regex operation_re(R"(^\s{2}([A-Za-z_][A-Za-z0-9_]*):\s*\{action:\s*(send|receive))",
                             std::regex::icase | std::regex::multiline);
     auto unknown_operations = [&] {
-        for (std::sregex_iterator it(source.begin(), source.end(), operation_re), end;
-             it != end; ++it)
+        for (std::sregex_iterator it(source.begin(), source.end(), operation_re), end; it != end;
+             ++it)
             emit(out, repo, file, (*it)[1], "topic", "declaration", "", "declared",
                  "unresolved server or channel");
     };
@@ -145,7 +146,8 @@ void extract_asyncapi(const std::string& source, const std::string& repo,
         unknown_operations();
         return;
     }
-    for (std::sregex_iterator it(source.begin(), source.end(), operation_re), end; it != end; ++it) {
+    for (std::sregex_iterator it(source.begin(), source.end(), operation_re), end; it != end;
+         ++it) {
         auto line_end = source.find('\n', (*it).position());
         const std::string line = source.substr((*it).position(), line_end - (*it).position());
         if (line.find("#/channels/" + channel[1].str()) == std::string::npos) {
@@ -158,9 +160,10 @@ void extract_asyncapi(const std::string& source, const std::string& repo,
     }
 }
 
-void extract_source(const std::string& source, const std::string& repo,
-                    const std::string& file, std::vector<ContractEvidence>& out,
-                    const std::unordered_map<std::string, std::vector<std::string>>& proto_methods) {
+void extract_source(
+    const std::string& source, const std::string& repo, const std::string& file,
+    std::vector<ContractEvidence>& out,
+    const std::unordered_map<std::string, std::vector<std::string>>& proto_methods) {
     std::smatch m;
     auto rpc_identity = [&](const std::string& service, const std::string& method) {
         const auto it = proto_methods.find(method);
@@ -174,8 +177,9 @@ void extract_source(const std::string& source, const std::string& repo,
         return resolved;
     };
     // Express route registration; method and path are literal.
-    std::regex express_re(R"(\b(?:app|router)\.(get|post|put|patch|delete)\s*\(\s*['\"](/[^'\"]+)['\"]\s*,\s*(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*))",
-                          std::regex::icase);
+    std::regex express_re(
+        R"(\b(?:app|router)\.(get|post|put|patch|delete)\s*\(\s*['\"](/[^'\"]+)['\"]\s*,\s*(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*))",
+        std::regex::icase);
     for (std::sregex_iterator it(source.begin(), source.end(), express_re), end; it != end; ++it)
         emit(out, repo, file, (*it)[3], "http", "provider",
              repo + "|" + upper((*it)[1]) + "|" + (*it)[2].str(), "observed");
@@ -184,8 +188,9 @@ void extract_source(const std::string& source, const std::string& repo,
     std::string base;
     if (match(source, R"(\b(?:ORDERS|BASE_URL|API_URL)\s*=\s*['\"](https?://[^'\"]+)['\"])", m))
         base = m[1];
-    std::regex http_re(R"(\b(?:httpx\.|requests\.|http\.|client\.)(get|post|put|patch|delete)\s*\(\s*([fF]?['\"][^'\"]+['\"]|[A-Za-z_][A-Za-z0-9_]*))",
-                       std::regex::icase);
+    std::regex http_re(
+        R"(\b(?:httpx\.|requests\.|http\.|client\.)(get|post|put|patch|delete)\s*\(\s*([fF]?['\"][^'\"]+['\"]|[A-Za-z_][A-Za-z0-9_]*))",
+        std::regex::icase);
     for (std::sregex_iterator it(source.begin(), source.end(), http_re), end; it != end; ++it) {
         std::string raw = (*it)[2], url = trim(raw);
         if (url.find("{ORDERS}") != std::string::npos && !base.empty())
@@ -196,7 +201,8 @@ void extract_source(const std::string& source, const std::string& repo,
             if (match(url, R"(https?://[^/]+(/[^?#]*))", path)) route = path[1];
         }
         emit(out, repo, file, function_near(source, (*it).position(), "http_call"), "http",
-             "consumer", host.empty() || route.empty() ? "" : host + "|" + upper((*it)[1]) + "|" + route,
+             "consumer",
+             host.empty() || route.empty() ? "" : host + "|" + upper((*it)[1]) + "|" + route,
              "observed", raw);
     }
     if (source.find("GetAsync(route)") != std::string::npos)
@@ -207,20 +213,19 @@ void extract_source(const std::string& source, const std::string& repo,
     std::regex grpc_re(R"(\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Z][A-Za-z0-9_]*)Async\s*\()");
     std::regex typed_client_re(
         R"(\b([A-Za-z_][A-Za-z0-9_]*)\.\1Client\s+([A-Za-z_][A-Za-z0-9_]*)\b)");
-    std::regex any_client_re(
-        R"(\b([A-Za-z_][A-Za-z0-9_.]*)Client\s+([A-Za-z_][A-Za-z0-9_]*)\b)");
+    std::regex any_client_re(R"(\b([A-Za-z_][A-Za-z0-9_.]*)Client\s+([A-Za-z_][A-Za-z0-9_]*)\b)");
     std::unordered_map<std::string, std::string> client_types;
     std::unordered_map<std::string, std::string> all_types;
-    for (std::sregex_iterator it(source.begin(), source.end(), any_client_re), end;
-         it != end; ++it) {
+    for (std::sregex_iterator it(source.begin(), source.end(), any_client_re), end; it != end;
+         ++it) {
         const std::string scope = function_near(source, (*it).position(), "<file>");
         const std::string key = scope + "|" + (*it)[2].str();
         const std::string type = (*it)[1];
         auto [known, inserted] = all_types.emplace(key, type);
         if (!inserted && known->second != type) known->second.clear();
     }
-    for (std::sregex_iterator it(source.begin(), source.end(), typed_client_re), end;
-         it != end; ++it) {
+    for (std::sregex_iterator it(source.begin(), source.end(), typed_client_re), end; it != end;
+         ++it) {
         const std::string scope = function_near(source, (*it).position(), "<file>");
         const std::string variable = scope + "|" + (*it)[2].str();
         const std::string service = (*it)[1];
@@ -239,16 +244,16 @@ void extract_source(const std::string& source, const std::string& repo,
         const std::string service = declared->second;
         const std::string resolved = rpc_identity(service, method);
         emit(out, repo, file, function_near(source, (*it).position(), method), "grpc", "consumer",
-             !resolved.empty() ? resolved :
-             (service.empty() ? "" : service + "|" + method), "observed", method);
-        if (resolved.empty())
-            out.back().ambiguity = "unknown";
+             !resolved.empty() ? resolved : (service.empty() ? "" : service + "|" + method),
+             "observed", method);
+        if (resolved.empty()) out.back().ambiguity = "unknown";
     }
     if (file.size() >= 5 && file.substr(file.size() - 5) == ".java") {
         std::smatch class_name;
         if (!match(source, R"(\bclass\s+([A-Za-z_][A-Za-z0-9_]*))", class_name)) return;
         std::regex provider_re(R"(\bpublic\s+[A-Za-z_][A-Za-z0-9_]*\s+([a-z][A-Za-z0-9_]*)\s*\()");
-        for (std::sregex_iterator it(source.begin(), source.end(), provider_re), end; it != end; ++it) {
+        for (std::sregex_iterator it(source.begin(), source.end(), provider_re), end; it != end;
+             ++it) {
             std::string method = (*it)[1];
             method[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(method[0])));
             const std::string resolved = rpc_identity(class_name[1], method);
@@ -268,8 +273,11 @@ void extract_source(const std::string& source, const std::string& repo,
             emit(out, repo, file, function_near(source, send, "topic_reference"), "topic",
                  "provider", broker.empty() ? "" : "kafka|" + lower(broker) + "|" + topic,
                  "observed");
-        if (match(source, R"(\bsubscribe\s*\(\s*(?:TOPIC|topic)\s*,\s*([A-Za-z_][A-Za-z0-9_]*))", m) ||
-            match(source, R"(\bbrokerSubscribe\s*\(\s*broker\s*,\s*topic\s*,\s*([A-Za-z_][A-Za-z0-9_]*))", m))
+        if (match(source, R"(\bsubscribe\s*\(\s*(?:TOPIC|topic)\s*,\s*([A-Za-z_][A-Za-z0-9_]*))",
+                  m) ||
+            match(source,
+                  R"(\bbrokerSubscribe\s*\(\s*broker\s*,\s*topic\s*,\s*([A-Za-z_][A-Za-z0-9_]*))",
+                  m))
             emit(out, repo, file, m[1], "topic", "consumer",
                  broker.empty() ? "" : "kafka|" + lower(broker) + "|" + topic, "observed");
     }
@@ -278,8 +286,8 @@ void extract_source(const std::string& source, const std::string& repo,
 }
 } // namespace
 
-std::vector<ContractLink> resolve_contract_links(
-    const std::vector<ContractEvidence>& all_evidence) {
+std::vector<ContractLink>
+resolve_contract_links(const std::vector<ContractEvidence>& all_evidence) {
     std::vector<ContractLink> links;
     std::unordered_map<std::string, std::vector<std::string>> rpc_declarations;
     std::unordered_map<std::string, std::vector<std::string>> operation_by_http;
@@ -293,40 +301,43 @@ std::vector<ContractLink> resolve_contract_links(
         if (e.surface == "http" && e.role == "declaration" &&
             e.detail.rfind("operationId=", 0) == 0)
             operation_by_http[e.identity].push_back(e.repository + "|" + e.detail.substr(12));
-        if (e.surface == "openapi" && e.role == "declaration")
-            ++operation_occurrences[e.identity];
+        if (e.surface == "openapi" && e.role == "declaration") ++operation_occurrences[e.identity];
     }
     auto qualified = [&](const ContractEvidence& e) {
         if (e.identity.empty()) return std::string{};
-        if (e.surface != "grpc" || e.identity.find('|') != e.identity.rfind('|'))
-            return e.identity;
+        if (e.surface != "grpc" || e.identity.find('|') != e.identity.rfind('|')) return e.identity;
         auto it = rpc_declarations.find(e.identity);
         return it != rpc_declarations.end() && it->second.size() == 1 ? it->second.front()
-                                                                    : std::string{};
+                                                                      : std::string{};
     };
     for (const auto& provider : all_evidence) {
         const bool declared_sender = provider.surface == "topic" &&
-            provider.role == "declaration" && provider.detail == "provider";
-        if (provider.role != "provider" && provider.surface != "openapi" &&
-            !declared_sender) continue;
+                                     provider.role == "declaration" &&
+                                     provider.detail == "provider";
+        if (provider.role != "provider" && provider.surface != "openapi" && !declared_sender)
+            continue;
         std::string provider_key = qualified(provider);
         if (provider_key.empty()) continue;
         for (const auto& consumer : all_evidence) {
             const bool declared_receiver = consumer.surface == "topic" &&
-                consumer.role == "declaration" && consumer.detail == "consumer";
+                                           consumer.role == "declaration" &&
+                                           consumer.detail == "consumer";
             if ((consumer.role != "consumer" && !declared_receiver) ||
-                consumer.repository == provider.repository) continue;
+                consumer.repository == provider.repository)
+                continue;
             const std::string consumer_key = qualified(consumer);
             if (consumer_key.empty()) continue;
             bool found = provider.surface == consumer.surface && provider_key == consumer_key;
             if (provider.surface == "openapi" && consumer.surface == "http") {
                 const auto it = operation_by_http.find(consumer_key);
                 found = it != operation_by_http.end() && it->second.size() == 1 &&
-                        it->second.front() == provider_key && operation_occurrences[provider_key] == 1;
+                        it->second.front() == provider_key &&
+                        operation_occurrences[provider_key] == 1;
             }
             if (found)
-                links.push_back({provider, consumer, provider_key,
-                    consumer_key == consumer.identity ? "exact" : "declaration_resolved"});
+                links.push_back(
+                    {provider, consumer, provider_key,
+                     consumer_key == consumer.identity ? "exact" : "declaration_resolved"});
         }
     }
     return links;
@@ -339,12 +350,12 @@ std::vector<ContractEvidence> extract_contracts(const fs::path& root, const std:
     auto skipped = [](const fs::path& path) {
         const auto name = path.filename().string();
         return (!name.empty() && name.front() == '.') || name == "CMakeFiles" ||
-               name == "node_modules" ||
-               name == "build" || name == "dist" || name == "target" ||
+               name == "node_modules" || name == "build" || name == "dist" || name == "target" ||
                name == ".venv" || name == "vendor" || name == ".worktrees";
     };
     // Contracts first; source evidence may refer to their qualified identities.
-    for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied);
+    for (auto it =
+             fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied);
          it != fs::end(it); ++it) {
         if (it->is_directory() && skipped(it->path())) {
             it.disable_recursion_pending();
@@ -355,7 +366,8 @@ std::vector<ContractEvidence> extract_contracts(const fs::path& root, const std:
         if (ext != ".yaml" && ext != ".yml" && ext != ".proto") continue;
         const std::string file = fs::relative(it->path(), root).generic_string();
         const std::string source = read_text(it->path());
-        if (ext == ".proto") extract_proto(source, repo, file, out);
+        if (ext == ".proto")
+            extract_proto(source, repo, file, out);
         else {
             extract_openapi(source, repo, file, out);
             extract_asyncapi(source, repo, file, out);
@@ -366,7 +378,8 @@ std::vector<ContractEvidence> extract_contracts(const fs::path& root, const std:
             auto pos = e.identity.find_last_of('|');
             proto_methods[e.identity.substr(pos + 1)].push_back(e.identity);
         }
-    for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied);
+    for (auto it =
+             fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied);
          it != fs::end(it); ++it) {
         if (it->is_directory() && skipped(it->path())) {
             it.disable_recursion_pending();
@@ -374,17 +387,22 @@ std::vector<ContractEvidence> extract_contracts(const fs::path& root, const std:
         }
         if (!it->is_regular_file()) continue;
         const std::string ext = lower(it->path().extension().string());
-        if (ext != ".ts" && ext != ".js" && ext != ".py" && ext != ".java" && ext != ".go" && ext != ".cs") continue;
-        extract_source(read_text(it->path()), repo, fs::relative(it->path(), root).generic_string(), out, proto_methods);
+        if (ext != ".ts" && ext != ".js" && ext != ".py" && ext != ".java" && ext != ".go" &&
+            ext != ".cs")
+            continue;
+        extract_source(read_text(it->path()), repo, fs::relative(it->path(), root).generic_string(),
+                       out, proto_methods);
     }
     return out;
 }
 
 void ensure_contract_schema(duckdb::Connection& conn) {
-    require_success(conn.Query("CREATE TABLE IF NOT EXISTS contract_evidence ("
-        "repository VARCHAR NOT NULL, file_path VARCHAR NOT NULL, symbol VARCHAR NOT NULL,"
-        "surface VARCHAR NOT NULL, role VARCHAR NOT NULL, identity VARCHAR NOT NULL,"
-        "origin VARCHAR NOT NULL, ambiguity VARCHAR NOT NULL, detail VARCHAR NOT NULL)"),
+    require_success(
+        conn.Query(
+            "CREATE TABLE IF NOT EXISTS contract_evidence ("
+            "repository VARCHAR NOT NULL, file_path VARCHAR NOT NULL, symbol VARCHAR NOT NULL,"
+            "surface VARCHAR NOT NULL, role VARCHAR NOT NULL, identity VARCHAR NOT NULL,"
+            "origin VARCHAR NOT NULL, ambiguity VARCHAR NOT NULL, detail VARCHAR NOT NULL)"),
         "create contract evidence");
 }
 
@@ -393,19 +411,21 @@ bool replace_contract_evidence(duckdb::Connection& conn,
     ensure_contract_schema(conn);
     using Row = std::array<std::string, 9>;
     auto row_of = [](const ContractEvidence& e) -> Row {
-        return {e.repository, e.file, e.symbol, e.surface, e.role, e.identity,
-                e.origin, e.ambiguity, e.detail};
+        return {e.repository, e.file,   e.symbol,    e.surface, e.role,
+                e.identity,   e.origin, e.ambiguity, e.detail};
     };
     std::vector<Row> desired, stored;
     desired.reserve(evidence.size());
-    for (const auto& e : evidence) desired.push_back(row_of(e));
+    for (const auto& e : evidence)
+        desired.push_back(row_of(e));
     auto existing = conn.Query("SELECT repository,file_path,symbol,surface,role,identity,"
                                "origin,ambiguity,detail FROM contract_evidence");
     require_ok(existing, "load contract evidence");
     stored.reserve(existing->RowCount());
     for (duckdb::idx_t i = 0; i < existing->RowCount(); ++i) {
         Row row;
-        for (int col = 0; col < 9; ++col) row[col] = existing->GetValue(col, i).ToString();
+        for (int col = 0; col < 9; ++col)
+            row[col] = existing->GetValue(col, i).ToString();
         stored.push_back(std::move(row));
     }
     std::sort(desired.begin(), desired.end());
@@ -415,8 +435,9 @@ bool replace_contract_evidence(duckdb::Connection& conn,
     auto stmt = conn.Prepare("INSERT INTO contract_evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
     if (stmt->HasError()) throw std::runtime_error(stmt->GetError());
     for (const auto& e : evidence) {
-        duckdb::vector<duckdb::Value> values = {e.repository, e.file, e.symbol, e.surface, e.role,
-                                                 e.identity, e.origin, e.ambiguity, e.detail};
+        duckdb::vector<duckdb::Value> values = {e.repository, e.file,      e.symbol,
+                                                e.surface,    e.role,      e.identity,
+                                                e.origin,     e.ambiguity, e.detail};
         auto result = stmt->Execute(values);
         if (result->HasError()) throw std::runtime_error(result->GetError());
     }

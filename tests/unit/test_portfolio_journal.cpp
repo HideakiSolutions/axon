@@ -273,18 +273,20 @@ TEST_F(PortfolioJournalTest, FullIncrementalDeleteAndRoutesAreJournaledWithTombs
 }
 
 TEST_F(PortfolioJournalTest, LexicalDocumentsFollowIncrementalReplaceDeleteAndRebuild) {
-    write_file(root / "src/main.ts",
-               "export function saveMissionState() {\n"
-               "  // misleadingGhostTerm appears only in a comment\n"
-               "  /* blockGhostTerm must not be indexed */\n"
-               "  const storageWrite = true; // inlineGhostTerm\n"
-               "  return storageWrite;\n"
-               "}\n");
+    write_file(root / "src/main.ts", "export function saveMissionState() {\n"
+                                     "  // misleadingGhostTerm appears only in a comment\n"
+                                     "  /* blockGhostTerm must not be indexed */\n"
+                                     "  const storageWrite = true; // inlineGhostTerm\n"
+                                     "  return storageWrite;\n"
+                                     "}\n");
     axon::Database db(cfg.db_path);
     EXPECT_EQ(axon::index_project(cfg, db).files_indexed, 1);
-    EXPECT_GT(scalar_i64(db, "SELECT COUNT(*) FROM symbols WHERE search_terms LIKE '% save %' "
-                             "AND search_terms LIKE '% mission %' AND search_terms LIKE '% storage %'"), 0);
-    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM symbols WHERE search_terms LIKE '% ghost %'"), 0);
+    EXPECT_GT(scalar_i64(db,
+                         "SELECT COUNT(*) FROM symbols WHERE search_terms LIKE '% save %' "
+                         "AND search_terms LIKE '% mission %' AND search_terms LIKE '% storage %'"),
+              0);
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM symbols WHERE search_terms LIKE '% ghost %'"),
+              0);
     EXPECT_GT(scalar_i64(db, "SELECT COUNT(*) FROM symbol_terms WHERE term='save'"), 0);
     EXPECT_GT(scalar_i64(db, "SELECT COUNT(*) FROM symbols WHERE search_length > 0"), 0);
 
@@ -307,8 +309,7 @@ TEST_F(PortfolioJournalTest, LexicalDocumentsFollowIncrementalReplaceDeleteAndRe
 }
 
 TEST_F(PortfolioJournalTest, ReopenRepairsInterruptedLexicalLengthBackfill) {
-    write_file(root / "src/main.ts",
-               "export function saveMissionState() { return true; }\n");
+    write_file(root / "src/main.ts", "export function saveMissionState() { return true; }\n");
     int64_t original_length = 0;
     {
         axon::Database db(cfg.db_path);
@@ -345,19 +346,23 @@ TEST_F(PortfolioJournalTest, ContractDeclarationsFollowIncrementalReplaceDeleteA
                       "service BillingService { rpc Refund (Request) returns (Reply); }\n");
     axon::index_files(cfg, db, {proto}, false);
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM contract_evidence WHERE identity="
-                             "'commerce.billing|BillingService|Charge'"), 0);
+                             "'commerce.billing|BillingService|Charge'"),
+              0);
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM contract_evidence WHERE identity="
-                             "'commerce.billing|BillingService|Refund'"), 1);
+                             "'commerce.billing|BillingService|Refund'"),
+              1);
     EXPECT_GT(scalar_i64(db, "SELECT COUNT(*) FROM index_events"), initial_events);
     EXPECT_NE(axon::portfolio::compute_manifest_hash(db.conn()), initial_manifest);
     EXPECT_GT(scalar_i64(db, "SELECT COUNT(*) FROM index_events WHERE "
-                             "event_type='IndexContractsUpdated'"), 0);
+                             "event_type='IndexContractsUpdated'"),
+              0);
 
     fs::remove(proto);
     axon::index_files(cfg, db, {proto}, false);
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM contract_evidence WHERE surface='grpc'"), 0);
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM index_tombstones WHERE "
-                             "entity_kind='contract' AND entity_key='contracts/billing.proto'"), 1);
+                             "entity_kind='contract' AND entity_key='contracts/billing.proto'"),
+              1);
     fs::remove(openapi);
     axon::index_files(cfg, db, {openapi}, false);
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM contract_evidence"), 0);
@@ -370,7 +375,8 @@ TEST_F(PortfolioJournalTest, ContractDeclarationsFollowIncrementalReplaceDeleteA
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM contract_evidence WHERE surface='grpc'"), 1);
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM contract_evidence WHERE surface='openapi'"), 1);
     EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM index_tombstones WHERE "
-                             "entity_kind='contract' AND entity_key='contracts/billing.proto'"), 0);
+                             "entity_kind='contract' AND entity_key='contracts/billing.proto'"),
+              0);
 }
 
 TEST_F(PortfolioJournalTest, CapabilityEvidenceIsNormalizedBackfilledAndPrunedTransactionally) {

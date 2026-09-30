@@ -13,10 +13,11 @@ std::filesystem::path fixture(const char* name) {
 }
 std::unordered_map<std::string, std::string> statuses(const axon::DataTraceResult& result) {
     std::unordered_map<std::string, std::string> out;
-    for (const auto& path : result.paths) out[path.function] = path.status;
+    for (const auto& path : result.paths)
+        out[path.function] = path.status;
     return out;
 }
-}
+} // namespace
 
 TEST(DataTraceTest, LabeledTypeScriptAndJavaScriptCorpus) {
     auto ts = axon::trace_data_flow(fixture("corpus.ts"));

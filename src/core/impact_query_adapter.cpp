@@ -30,11 +30,11 @@ bool safe_relative_file(const std::filesystem::path& path) {
     return true;
 }
 
-std::string read_lines(const std::filesystem::path& root, const std::string& file,
-                       int first, int last, std::size_t max_bytes) {
+std::string read_lines(const std::filesystem::path& root, const std::string& file, int first,
+                       int last, std::size_t max_bytes) {
     const std::filesystem::path relative(file);
-    if (!safe_relative_file(relative) || first <= 0 || last < first ||
-        last - first > 2000) return {};
+    if (!safe_relative_file(relative) || first <= 0 || last < first || last - first > 2000)
+        return {};
     std::ifstream input(root / relative);
     if (!input) return {};
     std::string line, body;
@@ -47,17 +47,18 @@ std::string read_lines(const std::filesystem::path& root, const std::string& fil
 }
 
 const IndexedImpactSymbol* find_symbol(const ImpactIndexSnapshot& index,
-                                        const ContractEvidence& evidence) {
+                                       const ContractEvidence& evidence) {
     for (const auto& symbol : index.symbols)
         if (symbol.repository == evidence.repository && symbol.file == evidence.file &&
-            symbol.name == evidence.symbol) return &symbol;
+            symbol.name == evidence.symbol)
+            return &symbol;
     return nullptr;
 }
 
 // Split an object literal into top-level properties. This rejects spreads,
 // computed names and malformed delimiters instead of claiming a closed shape.
-bool parse_object_fields(const std::string& source, std::size_t open,
-                         std::set<std::string>& fields, std::size_t& end) {
+bool parse_object_fields(const std::string& source, std::size_t open, std::set<std::string>& fields,
+                         std::size_t& end) {
     if (open >= source.size() || source[open] != '{') return false;
     int braces = 0, brackets = 0, parens = 0;
     char quote = 0;
@@ -78,13 +79,20 @@ bool parse_object_fields(const std::string& source, std::size_t open,
     for (std::size_t i = open; i < source.size(); ++i) {
         const char ch = source[i];
         if (quote) {
-            if (escaped) escaped = false;
-            else if (ch == '\\') escaped = true;
-            else if (ch == quote) quote = 0;
+            if (escaped)
+                escaped = false;
+            else if (ch == '\\')
+                escaped = true;
+            else if (ch == quote)
+                quote = 0;
             continue;
         }
-        if (ch == '\'' || ch == '"' || ch == '`') { quote = ch; continue; }
-        if (ch == '{') ++braces;
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            quote = ch;
+            continue;
+        }
+        if (ch == '{')
+            ++braces;
         else if (ch == '}') {
             --braces;
             if (braces == 0) {
@@ -92,10 +100,14 @@ bool parse_object_fields(const std::string& source, std::size_t open,
                 end = i + 1;
                 return brackets == 0 && parens == 0;
             }
-        } else if (ch == '[') ++brackets;
-        else if (ch == ']') --brackets;
-        else if (ch == '(') ++parens;
-        else if (ch == ')') --parens;
+        } else if (ch == '[')
+            ++brackets;
+        else if (ch == ']')
+            --brackets;
+        else if (ch == '(')
+            ++parens;
+        else if (ch == ')')
+            --parens;
         else if (ch == ',' && braces == 1 && brackets == 0 && parens == 0) {
             if (!collect(i)) return false;
             start = i + 1;
@@ -123,19 +135,18 @@ ImpactIndexSnapshot load_impact_index(duckdb::Connection& conn,
     ImpactIndexSnapshot snapshot;
     auto rows = conn.Query("SELECT s.id,f.path,s.name,s.start_line,s.end_line "
                            "FROM symbols s JOIN files f ON f.id=s.file_id "
-                           "ORDER BY s.id LIMIT " + std::to_string(limits.max_symbols + 1));
+                           "ORDER BY s.id LIMIT " +
+                           std::to_string(limits.max_symbols + 1));
     require_ok(rows, "hydrate impact symbols");
     snapshot.truncated = rows->RowCount() > limits.max_symbols;
     std::set<int64_t> loaded;
     for (duckdb::idx_t row = 0; row < rows->RowCount() && row < limits.max_symbols; ++row) {
         const int64_t id = rows->GetValue<int64_t>(0, row);
         const std::string file = rows->GetValue(1, row).ToString();
-        snapshot.symbols.push_back({symbol_id(repository, id), repository, file,
-                                    rows->GetValue(2, row).ToString(),
-                                    read_lines(project_root, file,
-                                               rows->GetValue<int32_t>(3, row),
-                                               rows->GetValue<int32_t>(4, row),
-                                               limits.max_body_bytes)});
+        snapshot.symbols.push_back(
+            {symbol_id(repository, id), repository, file, rows->GetValue(2, row).ToString(),
+             read_lines(project_root, file, rows->GetValue<int32_t>(3, row),
+                        rows->GetValue<int32_t>(4, row), limits.max_body_bytes)});
         loaded.insert(id);
     }
     auto edges = conn.Query("SELECT from_symbol,to_symbol,kind FROM edges "
@@ -160,10 +171,10 @@ ResponseShape hydrate_http_response_shape(const ContractLink& link,
     ResponseShape shape;
     if (link.provider.surface != "http" && link.provider.surface != "openapi") return shape;
     shape.link_identity = link.identity;
-    shape.provider_symbol = link.provider.repository + "/" + link.provider.file + "::" +
-                            link.provider.symbol;
-    shape.consumer_symbol = link.consumer.repository + "/" + link.consumer.file + "::" +
-                            link.consumer.symbol;
+    shape.provider_symbol =
+        link.provider.repository + "/" + link.provider.file + "::" + link.provider.symbol;
+    shape.consumer_symbol =
+        link.consumer.repository + "/" + link.consumer.file + "::" + link.consumer.symbol;
     const auto* provider = find_symbol(provider_index, link.provider);
     const auto* consumer = find_symbol(consumer_index, link.consumer);
     if (consumer) {
@@ -175,12 +186,14 @@ ResponseShape hydrate_http_response_shape(const ContractLink& link,
     }
     if (!provider || provider->body.empty()) return shape;
     const std::string& body = provider->body;
-    static const std::regex response_call(R"(\b(?:res|reply|response)(?:\s*\.\s*status\([^)]*\))?\s*\.\s*json\s*\()");
+    static const std::regex response_call(
+        R"(\b(?:res|reply|response)(?:\s*\.\s*status\([^)]*\))?\s*\.\s*json\s*\()");
     std::set<std::string> common, observed;
     bool first = true, complete = true;
     for (std::sregex_iterator it(body.begin(), body.end(), response_call), end; it != end; ++it) {
         std::size_t start = static_cast<std::size_t>(it->position() + it->length());
-        while (start < body.size() && std::isspace(static_cast<unsigned char>(body[start]))) ++start;
+        while (start < body.size() && std::isspace(static_cast<unsigned char>(body[start])))
+            ++start;
         std::set<std::string> fields;
         std::size_t after = start;
         if (!parse_object_fields(body, start, fields, after)) {
@@ -188,8 +201,10 @@ ResponseShape hydrate_http_response_shape(const ContractLink& link,
             continue;
         }
         observed.insert(fields.begin(), fields.end());
-        if (first) { common = std::move(fields); first = false; }
-        else {
+        if (first) {
+            common = std::move(fields);
+            first = false;
+        } else {
             std::set<std::string> intersection;
             std::set_intersection(common.begin(), common.end(), fields.begin(), fields.end(),
                                   std::inserter(intersection, intersection.begin()));
@@ -198,14 +213,17 @@ ResponseShape hydrate_http_response_shape(const ContractLink& link,
     }
     // A source body can contain other return paths that do not invoke json.
     // Treat them as unknown unless the only returns are the literal res.json calls.
-    const bool suspicious_return =
-        std::regex_search(body, std::regex(R"(\breturn\b)"));
+    const bool suspicious_return = std::regex_search(body, std::regex(R"(\breturn\b)"));
     const bool other_response = std::regex_search(
-        body, std::regex(R"(\b(?:res|reply|response)\s*\.\s*(?:send|end|redirect|render|sendStatus)\s*\()"));
+        body,
+        std::regex(
+            R"(\b(?:res|reply|response)\s*\.\s*(?:send|end|redirect|render|sendStatus)\s*\()"));
     shape.closed = !first && complete && !suspicious_return && !other_response;
     if (shape.closed) {
-    for (const auto& field : common) shape.guaranteed_fields.push_back({field, "observed"});
-    for (const auto& field : observed) shape.observed_fields.push_back({field, "observed"});
+        for (const auto& field : common)
+            shape.guaranteed_fields.push_back({field, "observed"});
+        for (const auto& field : observed)
+            shape.observed_fields.push_back({field, "observed"});
         shape.closure_origin = "observed";
     }
     return shape;
@@ -215,18 +233,23 @@ ExecutionGraphInput hydrate_execution_graph(const ImpactIndexSnapshot& index,
                                             const std::vector<ContractEvidence>& evidence) {
     ExecutionGraphInput graph;
     std::map<std::string, ExecutionNode> nodes;
-    for (const auto& symbol : index.symbols) nodes[symbol.id] = {symbol.id, "call", ""};
+    for (const auto& symbol : index.symbols)
+        nodes[symbol.id] = {symbol.id, "call", ""};
     for (const auto& item : evidence) {
         if (item.identity.empty() || item.ambiguity != "resolved") continue;
         const auto* symbol = find_symbol(index, item);
         if (!symbol) continue;
         auto& node = nodes[symbol->id];
-        if (item.surface == "http" && item.role == "provider") node.kind = "http_handler";
-        else if (item.surface == "grpc" && item.role == "provider") node.kind = "rpc_handler";
-        else if (item.surface == "topic" && item.role == "consumer") node.kind = "event_handler";
+        if (item.surface == "http" && item.role == "provider")
+            node.kind = "http_handler";
+        else if (item.surface == "grpc" && item.role == "provider")
+            node.kind = "rpc_handler";
+        else if (item.surface == "topic" && item.role == "consumer")
+            node.kind = "event_handler";
     }
     for (const auto& relation : index.relations) {
-        if (!relation.resolved || !nodes.count(relation.from) || !nodes.count(relation.to)) continue;
+        if (!relation.resolved || !nodes.count(relation.from) || !nodes.count(relation.to))
+            continue;
         graph.edges.push_back({relation.from, relation.to, relation.kind, "inferred"});
     }
     const std::vector<std::pair<std::string, std::regex>> sinks = {
@@ -243,7 +266,8 @@ ExecutionGraphInput hydrate_execution_graph(const ImpactIndexSnapshot& index,
             graph.edges.push_back({symbol.id, output_id, "output", "inferred"});
         }
     }
-    for (auto& [_, node] : nodes) graph.nodes.push_back(std::move(node));
+    for (auto& [_, node] : nodes)
+        graph.nodes.push_back(std::move(node));
     return graph;
 }
 

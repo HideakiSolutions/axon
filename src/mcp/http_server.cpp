@@ -1109,7 +1109,17 @@ static std::string handle_request(const std::string& method, const std::string& 
                                          {"token_estimate", f.token_estimate}});
             json cap = {{"query", c.query},
                         {"retrieval_mode", c.retrieval_mode},
-                        {"selection", [&] { json a = json::array(); for (const auto& s : c.selection) a.push_back({{"symbol_id", s.symbol_id}, {"file_id", s.file_id}, {"semantic_rank", s.semantic_rank}, {"lexical_rank", s.lexical_rank}, {"fused_score", s.fused_score}}); return a; }()},
+                        {"selection",
+                         [&] {
+                             json a = json::array();
+                             for (const auto& s : c.selection)
+                                 a.push_back({{"symbol_id", s.symbol_id},
+                                              {"file_id", s.file_id},
+                                              {"semantic_rank", s.semantic_rank},
+                                              {"lexical_rank", s.lexical_rank},
+                                              {"fused_score", s.fused_score}});
+                             return a;
+                         }()},
                         {"pivot_files", pivot_files},
                         {"support_files", support_files},
                         {"token_estimate", c.token_estimate},
@@ -1130,8 +1140,8 @@ static std::string handle_request(const std::string& method, const std::string& 
         const bool eligible_for_cache = !no_cache && explicit_pivots.empty();
         std::string cache_key;
         if (eligible_for_cache) {
-            cache_key = axon::compute_capsule_cache_key(q, budget, epoch, axon::VERSION,
-                                                        retrieval_mode);
+            cache_key =
+                axon::compute_capsule_cache_key(q, budget, epoch, axon::VERSION, retrieval_mode);
             if (auto hit = axon::capsule_cache_lookup(*ctx.db, cache_key, epoch))
                 return capsule_to_json(*hit, "hit");
         }

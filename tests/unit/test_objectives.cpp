@@ -473,11 +473,8 @@ TEST(CapsuleCacheKey, BinaryVersionIsPartOfTheKey) {
 }
 
 TEST(CapsuleCacheKey, RetrievalModeIsPartOfTheKey) {
-    auto semantic = axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.5.0",
-                                                     "semantic");
-    auto hybrid = axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.5.0",
-                                                   "hybrid");
+    auto semantic = axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.5.0", "semantic");
+    auto hybrid = axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.5.0", "hybrid");
     EXPECT_NE(semantic, hybrid);
-    EXPECT_EQ(hybrid, axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.5.0",
-                                                      "hybrid"));
+    EXPECT_EQ(hybrid, axon::compute_capsule_cache_key("query", 8000, "epoch-1", "1.5.0", "hybrid"));
 }

@@ -17,16 +17,22 @@ TSLanguage* tree_sitter_javascript();
 namespace axon {
 namespace {
 
-std::string type(TSNode n) { return ts_node_is_null(n) ? "" : ts_node_type(n); }
+std::string type(TSNode n) {
+    return ts_node_is_null(n) ? "" : ts_node_type(n);
+}
 std::string slice(TSNode n, const std::string& src) {
     if (ts_node_is_null(n) || ts_node_end_byte(n) > src.size()) return {};
     return src.substr(ts_node_start_byte(n), ts_node_end_byte(n) - ts_node_start_byte(n));
 }
-TSNode field(TSNode n, const char* name) { return ts_node_child_by_field_name(n, name, std::char_traits<char>::length(name)); }
-int line(TSNode n) { return static_cast<int>(ts_node_start_point(n).row) + 1; }
+TSNode field(TSNode n, const char* name) {
+    return ts_node_child_by_field_name(n, name, std::char_traits<char>::length(name));
+}
+int line(TSNode n) {
+    return static_cast<int>(ts_node_start_point(n).row) + 1;
+}
 bool is_function(const std::string& t) {
-    return t == "function_declaration" || t == "method_definition" ||
-           t == "function_expression" || t == "arrow_function" || t == "generator_function_declaration";
+    return t == "function_declaration" || t == "method_definition" || t == "function_expression" ||
+           t == "arrow_function" || t == "generator_function_declaration";
 }
 bool is_control(const std::string& t) {
     return t == "if_statement" || t == "for_statement" || t == "for_in_statement" ||
@@ -37,10 +43,14 @@ bool source_expr(const std::string& s) {
     static const std::regex re(R"(^(req|request)\.(body|params|query|headers)(\.|\[|$))");
     return std::regex_search(s, re);
 }
-bool dynamic_expr(const std::string& s) { return s.find('[') != std::string::npos || s.find("?.") != std::string::npos; }
+bool dynamic_expr(const std::string& s) {
+    return s.find('[') != std::string::npos || s.find("?.") != std::string::npos;
+}
 std::string sink_kind(const std::string& name) {
-    static const std::regex db(R"(^(db|database|repository|repo|prisma|model|collection)\.(save|create|insert|update|upsert|write|put|set|delete|insertOne|updateOne)$)");
-    static const std::regex http(R"(^(fetch|axios(\.(get|post|put|patch|delete|request))?|http(\.(get|post|put|patch|delete|request))?)$)");
+    static const std::regex db(
+        R"(^(db|database|repository|repo|prisma|model|collection)\.(save|create|insert|update|upsert|write|put|set|delete|insertOne|updateOne)$)");
+    static const std::regex http(
+        R"(^(fetch|axios(\.(get|post|put|patch|delete|request))?|http(\.(get|post|put|patch|delete|request))?)$)");
     if (std::regex_match(name, db)) return "persistence";
     if (std::regex_match(name, http)) return "http";
     return {};
@@ -59,7 +69,8 @@ Flow eval(TSNode n, const std::string& src, const Env& env) {
     if (ts_node_is_null(n)) return out;
     auto t = type(n);
     auto s = slice(n, src);
-    if ((t == "member_expression" || t == "subscript_expression" || t == "optional_chain") && source_expr(s)) {
+    if ((t == "member_expression" || t == "subscript_expression" || t == "optional_chain") &&
+        source_expr(s)) {
         out.source = s;
         out.unknown = dynamic_expr(s);
         if (out.unknown) out.reason = "propriedade de request dinâmica";
@@ -119,8 +130,8 @@ Flow eval(TSNode n, const std::string& src, const Env& env) {
     return out;
 }
 
-void collect_sinks(TSNode n, const std::string& src, const Env& env,
-                   const std::string& function, bool uncertain, DataTraceResult& result) {
+void collect_sinks(TSNode n, const std::string& src, const Env& env, const std::string& function,
+                   bool uncertain, DataTraceResult& result) {
     if (ts_node_is_null(n) || is_function(type(n))) return;
     if (type(n) == "call_expression") {
         auto callee = slice(field(n, "function"), src);
@@ -133,7 +144,8 @@ void collect_sinks(TSNode n, const std::string& src, const Env& env,
             for (uint32_t i = 0; i < ts_node_named_child_count(args); ++i) {
                 auto candidate = eval(ts_node_named_child(args, i), src, env);
                 if (candidate.source.empty()) continue;
-                if (flow.source.empty()) flow = candidate;
+                if (flow.source.empty())
+                    flow = candidate;
                 else if (flow.source != candidate.source) {
                     flow.unknown = true;
                     flow.reason = "múltiplas origens combinadas";
@@ -146,9 +158,11 @@ void collect_sinks(TSNode n, const std::string& src, const Env& env,
                 path.sink = callee;
                 path.sink_kind = kind;
                 path.status = uncertain || flow.unknown ? "unknown" : "confirmed";
-                path.reason = uncertain ? "fluxo de controle ou atribuição condicional" : flow.reason;
+                path.reason =
+                    uncertain ? "fluxo de controle ou atribuição condicional" : flow.reason;
                 path.steps = std::move(flow.steps);
-                path.steps.push_back({"sink", slice(n, src), line(n), path.status == "confirmed" ? "observed" : "unknown"});
+                path.steps.push_back({"sink", slice(n, src), line(n),
+                                      path.status == "confirmed" ? "observed" : "unknown"});
                 if (path.status == "unknown") ++result.unknown_sinks;
                 result.paths.push_back(std::move(path));
             }
@@ -159,9 +173,8 @@ void collect_sinks(TSNode n, const std::string& src, const Env& env,
                       uncertain || is_control(type(n)), result);
 }
 
-void process_statement(TSNode n, const std::string& src, Env& env,
-                       const std::string& function, DataTraceResult& result,
-                       bool uncertain = false) {
+void process_statement(TSNode n, const std::string& src, Env& env, const std::string& function,
+                       DataTraceResult& result, bool uncertain = false) {
     auto t = type(n);
     if (t == "statement_block") {
         for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i)
@@ -185,8 +198,10 @@ void process_statement(TSNode n, const std::string& src, Env& env,
             if (!ts_node_is_null(alternative))
                 process_statement(alternative, src, other, function, result, true);
             std::unordered_set<std::string> names;
-            for (const auto& [name, _] : branch) names.insert(name);
-            for (const auto& [name, _] : other) names.insert(name);
+            for (const auto& [name, _] : branch)
+                names.insert(name);
+            for (const auto& [name, _] : other)
+                names.insert(name);
             Env merged;
             for (const auto& name : names) {
                 const auto a = branch.find(name), b = other.find(name);
@@ -213,8 +228,12 @@ void process_statement(TSNode n, const std::string& src, Env& env,
             if (type(lhs) != "identifier") continue;
             auto name = slice(lhs, src);
             auto flow = eval(rhs, src, env);
-            if (flow.source.empty()) { env.erase(name); continue; }
-            flow.steps.push_back({"assignment", name + " = " + slice(rhs, src), line(decl), "observed"});
+            if (flow.source.empty()) {
+                env.erase(name);
+                continue;
+            }
+            flow.steps.push_back(
+                {"assignment", name + " = " + slice(rhs, src), line(decl), "observed"});
             env[name] = std::move(flow);
         }
     } else if (t == "expression_statement") {
@@ -225,8 +244,12 @@ void process_statement(TSNode n, const std::string& src, Env& env,
         if (type(lhs) != "identifier") return;
         auto name = slice(lhs, src);
         auto flow = eval(rhs, src, env);
-        if (flow.source.empty()) { env.erase(name); return; }
-        flow.steps.push_back({"assignment", name + " = " + slice(rhs, src), line(expr), "observed"});
+        if (flow.source.empty()) {
+            env.erase(name);
+            return;
+        }
+        flow.steps.push_back(
+            {"assignment", name + " = " + slice(rhs, src), line(expr), "observed"});
         env[name] = std::move(flow);
     }
 }
@@ -274,7 +297,8 @@ DataTraceResult trace_data_flow(const std::filesystem::path& file,
     result.source_bytes = src.size();
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, ts ? tree_sitter_typescript() : tree_sitter_javascript());
-    TSTree* tree = ts_parser_parse_string(parser, nullptr, src.c_str(), static_cast<uint32_t>(src.size()));
+    TSTree* tree =
+        ts_parser_parse_string(parser, nullptr, src.c_str(), static_cast<uint32_t>(src.size()));
     if (tree) {
         result.supported = true;
         scan_functions(ts_tree_root_node(tree), src, symbol_filter, result);
@@ -282,11 +306,14 @@ DataTraceResult trace_data_flow(const std::filesystem::path& file,
     }
     ts_parser_delete(parser);
     for (const auto& path : result.paths) {
-        result.trace_bytes += sizeof(path) + path.function.size() + path.source.size() + path.sink.size() + path.reason.size();
-        for (const auto& step : path.steps) result.trace_bytes += sizeof(step) + step.expression.size();
+        result.trace_bytes += sizeof(path) + path.function.size() + path.source.size() +
+                              path.sink.size() + path.reason.size();
+        for (const auto& step : path.steps)
+            result.trace_bytes += sizeof(step) + step.expression.size();
     }
     result.elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now() - started).count();
+                            std::chrono::steady_clock::now() - started)
+                            .count();
     return result;
 }
 

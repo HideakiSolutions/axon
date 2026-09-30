@@ -115,8 +115,8 @@ static json tools_list() {
                   {{"query", {{"type", "string"}}},
                    {"pivot_files", {{"type", "array"}, {"items", {{"type", "string"}}}}},
                    {"token_budget", {{"type", "integer"}, {"default", 8000}}},
-                   {"retrieval_mode", {{"type", "string"}, {"enum", {"semantic", "hybrid"}},
-                                        {"default", "hybrid"}}},
+                   {"retrieval_mode",
+                    {{"type", "string"}, {"enum", {"semantic", "hybrid"}}, {"default", "hybrid"}}},
                    {"dialogue_budget", {{"type", "integer"}, {"default", 0}}},
                    {"no_cache", {{"type", "boolean"}, {"default", false}}},
                    {"compression",
@@ -265,17 +265,25 @@ static json tools_list() {
                {"description", "Deterministic local symbol groups from indexed calls and imports."},
                {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}},
               {{"name", "execution_flow"},
-               {"description", "Bounded paths from resolved HTTP, RPC and event entries to inferred outputs; edges carry uncertainty."},
-               {"inputSchema", {{"type", "object"}, {"properties",
-                   {{"max_depth", {{"type", "integer"}}}, {"max_paths", {{"type", "integer"}}}}}}}},
+               {"description", "Bounded paths from resolved HTTP, RPC and event entries to "
+                               "inferred outputs; edges carry uncertainty."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"properties",
+                  {{"max_depth", {{"type", "integer"}}}, {"max_paths", {{"type", "integer"}}}}}}}},
               {{"name", "api_shape"},
-               {"description", "Compare linked HTTP response fields and consumer accesses in the supported static subset."},
-               {"inputSchema", {{"type", "object"}, {"properties",
-                   {{"identity", {{"type", "string"}}}}}}}},
+               {"description", "Compare linked HTTP response fields and consumer accesses in the "
+                               "supported static subset."},
+               {"inputSchema",
+                {{"type", "object"}, {"properties", {{"identity", {{"type", "string"}}}}}}}},
               {{"name", "trace_data_flow"},
-               {"description", "Experimental on-demand TS/JS intra-function request-to-sink trace."},
-               {"inputSchema", {{"type", "object"}, {"required", {"file"}}, {"properties",
-                   {{"file", {{"type", "string"}}}, {"symbol", {{"type", "string"}}}}}}}},
+               {"description",
+                "Experimental on-demand TS/JS intra-function request-to-sink trace."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"file"}},
+                 {"properties",
+                  {{"file", {{"type", "string"}}}, {"symbol", {{"type", "string"}}}}}}}},
               {{"name", "portfolio_status"},
                {"description", "Report the derived portfolio capability catalog status."},
                {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}},
@@ -906,7 +914,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                                         compression == CapsuleCompression::Off;
         std::string cache_key;
         if (eligible_for_cache) {
-            cache_key = compute_capsule_cache_key(query, budget, epoch, axon::VERSION, retrieval_mode);
+            cache_key =
+                compute_capsule_cache_key(query, budget, epoch, axon::VERSION, retrieval_mode);
             if (auto hit = capsule_cache_lookup(*ctx.db, cache_key, epoch)) {
                 json pf = json::array();
                 for (const auto& f : hit->pivot_files)
@@ -924,7 +933,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                                   {"tokens", f.token_estimate}});
                 return make_tool_result({{"query", hit->query},
                                          {"retrieval_mode", hit->retrieval_mode},
-                                         {"selection", [&] { json a = json::array(); for (const auto& s : hit->selection) a.push_back({{"symbol_id", s.symbol_id}, {"file_id", s.file_id}, {"semantic_rank", s.semantic_rank}, {"lexical_rank", s.lexical_rank}, {"fused_score", s.fused_score}}); return a; }()},
+                                         {"selection",
+                                          [&] {
+                                              json a = json::array();
+                                              for (const auto& s : hit->selection)
+                                                  a.push_back({{"symbol_id", s.symbol_id},
+                                                               {"file_id", s.file_id},
+                                                               {"semantic_rank", s.semantic_rank},
+                                                               {"lexical_rank", s.lexical_rank},
+                                                               {"fused_score", s.fused_score}});
+                                              return a;
+                                          }()},
                                          {"pivot_files", pf},
                                          {"support_files", sf},
                                          {"related_turns", json::array()},
@@ -948,9 +967,9 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                                : ctx.model_error}},
                 true);
 
-        auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model, ctx.graph,
-                                        ctx.cfg.project_root, budget, dialogue_budget, compression,
-                                        retrieval_mode);
+        auto capsule =
+            assemble_capsule(query, pivots, *ctx.db, *ctx.model, ctx.graph, ctx.cfg.project_root,
+                             budget, dialogue_budget, compression, retrieval_mode);
 
         if (eligible_for_cache) {
             capsule_cache_insert(*ctx.db, cache_key, epoch, capsule);
@@ -988,7 +1007,17 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         return make_tool_result({{"query", capsule.query},
                                  {"retrieval_mode", capsule.retrieval_mode},
-                                 {"selection", [&] { json a = json::array(); for (const auto& s : capsule.selection) a.push_back({{"symbol_id", s.symbol_id}, {"file_id", s.file_id}, {"semantic_rank", s.semantic_rank}, {"lexical_rank", s.lexical_rank}, {"fused_score", s.fused_score}}); return a; }()},
+                                 {"selection",
+                                  [&] {
+                                      json a = json::array();
+                                      for (const auto& s : capsule.selection)
+                                          a.push_back({{"symbol_id", s.symbol_id},
+                                                       {"file_id", s.file_id},
+                                                       {"semantic_rank", s.semantic_rank},
+                                                       {"lexical_rank", s.lexical_rank},
+                                                       {"fused_score", s.fused_score}});
+                                      return a;
+                                  }()},
                                  {"pivot_files", pf},
                                  {"support_files", sf},
                                  {"related_turns", rt},
@@ -1902,8 +1931,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                                  {"validation_errors", validation}});
     }
 
-    if (name == "symbol_communities" || name == "execution_flow" ||
-        name == "api_shape" || name == "trace_data_flow") {
+    if (name == "symbol_communities" || name == "execution_flow" || name == "api_shape" ||
+        name == "trace_data_flow") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         try {
             auto result = axon::run_impact_query(name, args, *ctx.db, ctx.cfg.project_root);
@@ -1940,20 +1969,23 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             auto rows = connection.Query("SELECT repository,file_path,symbol,surface,role,identity,"
                                          "origin,ambiguity,detail FROM contract_evidence");
             if (rows->HasError()) {
-                typed_unavailable.push_back({{"repo", repo_name},
-                                             {"reason", "contract_index_unavailable"}});
+                typed_unavailable.push_back(
+                    {{"repo", repo_name}, {"reason", "contract_index_unavailable"}});
                 return;
             }
             for (duckdb::idx_t i = 0; i < rows->RowCount(); ++i)
-                contract_evidence.push_back({rows->GetValue(0, i).ToString(),
-                    rows->GetValue(1, i).ToString(), rows->GetValue(2, i).ToString(),
-                    rows->GetValue(3, i).ToString(), rows->GetValue(4, i).ToString(),
-                    rows->GetValue(5, i).ToString(), rows->GetValue(6, i).ToString(),
-                    rows->GetValue(7, i).ToString(), rows->GetValue(8, i).ToString()});
+                contract_evidence.push_back(
+                    {rows->GetValue(0, i).ToString(), rows->GetValue(1, i).ToString(),
+                     rows->GetValue(2, i).ToString(), rows->GetValue(3, i).ToString(),
+                     rows->GetValue(4, i).ToString(), rows->GetValue(5, i).ToString(),
+                     rows->GetValue(6, i).ToString(), rows->GetValue(7, i).ToString(),
+                     rows->GetValue(8, i).ToString()});
         };
-        if (ctx.db_ready()) load_contracts(ctx.db->conn(), ctx.cfg.project_root.filename().string());
-        else typed_unavailable.push_back({{"repo", ctx.cfg.project_root.filename().string()},
-                                          {"reason", "current_index_unavailable"}});
+        if (ctx.db_ready())
+            load_contracts(ctx.db->conn(), ctx.cfg.project_root.filename().string());
+        else
+            typed_unavailable.push_back({{"repo", ctx.cfg.project_root.filename().string()},
+                                         {"reason", "current_index_unavailable"}});
         for (const auto& issue : selection.issues)
             failures.push_back({{"repo", nullptr},
                                 {"repo_root", nullptr},
@@ -2005,21 +2037,33 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         json typed_links = json::array();
         json unknown_contracts = json::array();
         for (const auto& e : contract_evidence)
-            if (e.repository == ctx.cfg.project_root.filename().string() &&
-                e.file == target_file && e.ambiguity != "resolved")
-                unknown_contracts.push_back({{"surface", e.surface}, {"symbol", e.symbol},
-                    {"role", e.role}, {"origin", e.origin}, {"reason", e.detail}});
+            if (e.repository == ctx.cfg.project_root.filename().string() && e.file == target_file &&
+                e.ambiguity != "resolved")
+                unknown_contracts.push_back({{"surface", e.surface},
+                                             {"symbol", e.symbol},
+                                             {"role", e.role},
+                                             {"origin", e.origin},
+                                             {"reason", e.detail}});
         for (const auto& link : axon::resolve_contract_links(contract_evidence)) {
             const auto& here = link.provider.repository == ctx.cfg.project_root.filename().string()
-                                   ? link.provider : link.consumer;
+                                   ? link.provider
+                                   : link.consumer;
             if (here.repository != ctx.cfg.project_root.filename().string() ||
-                here.file != target_file) continue;
+                here.file != target_file)
+                continue;
             typed_links.push_back({{"surface", link.provider.surface},
-                {"identity", link.identity}, {"resolution", link.resolution},
-                {"provider", {{"repo", link.provider.repository}, {"file", link.provider.file},
-                               {"symbol", link.provider.symbol}, {"origin", link.provider.origin}}},
-                {"consumer", {{"repo", link.consumer.repository}, {"file", link.consumer.file},
-                               {"symbol", link.consumer.symbol}, {"origin", link.consumer.origin}}}});
+                                   {"identity", link.identity},
+                                   {"resolution", link.resolution},
+                                   {"provider",
+                                    {{"repo", link.provider.repository},
+                                     {"file", link.provider.file},
+                                     {"symbol", link.provider.symbol},
+                                     {"origin", link.provider.origin}}},
+                                   {"consumer",
+                                    {{"repo", link.consumer.repository},
+                                     {"file", link.consumer.file},
+                                     {"symbol", link.consumer.symbol},
+                                     {"origin", link.consumer.origin}}}});
         }
         auto canonical_json_order = [](const json& a, const json& b) {
             return a.dump() < b.dump();
@@ -2027,19 +2071,19 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         std::sort(typed_links.begin(), typed_links.end(), canonical_json_order);
         std::sort(unknown_contracts.begin(), unknown_contracts.end(), canonical_json_order);
 
-        return make_tool_result({{"file", file_arg},
-                                 {"stem", stem},
-                                 {"group_filter", group_filter},
-                                 {"typed_contracts", typed_links},
-                                 {"unknown_contracts", unknown_contracts},
-                                 {"contract_result_state", typed_links.empty()
-                                      ? "no_confirmed_link" : "confirmed_links"},
-                                 {"typed_evidence_state", typed_unavailable.empty()
-                                      ? "indexed" : "incomplete"},
-                                 {"typed_unavailable", typed_unavailable},
-                                 {"heuristic_candidates", cross_impact},
-                                 {"cross_repo_impact", cross_impact},
-                                 {"failures", failures}});
+        return make_tool_result(
+            {{"file", file_arg},
+             {"stem", stem},
+             {"group_filter", group_filter},
+             {"typed_contracts", typed_links},
+             {"unknown_contracts", unknown_contracts},
+             {"contract_result_state",
+              typed_links.empty() ? "no_confirmed_link" : "confirmed_links"},
+             {"typed_evidence_state", typed_unavailable.empty() ? "indexed" : "incomplete"},
+             {"typed_unavailable", typed_unavailable},
+             {"heuristic_candidates", cross_impact},
+             {"cross_repo_impact", cross_impact},
+             {"failures", failures}});
     }
 
     // ── Dialogue Layer tools ──────────────────────────────────────────────────

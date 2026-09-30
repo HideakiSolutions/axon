@@ -107,8 +107,7 @@ fetch_file_skeletons(Database& db, const std::vector<int64_t>& file_ids) {
 static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_text, Database& db,
                                                       EmbeddingModel& model,
                                                       const std::string& mode,
-                                                      const fs::path& project_root,
-                                                      int top_k = 5) {
+                                                      const fs::path& project_root, int top_k = 5) {
     auto qvec = model.embed(query_text);
 
     std::ostringstream vec_str;
@@ -158,10 +157,9 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
         qterms.erase(std::unique(qterms.begin(), qterms.end()), qterms.end());
         auto stats = db.conn().Query("SELECT COUNT(*), COALESCE(AVG(search_length),0) "
                                      "FROM symbols WHERE search_length IS NOT NULL");
-        if (!stats->HasError())
-            lexical_corpus_size = stats->GetValue<int64_t>(0, 0);
-        double avg_len = !stats->HasError() && lexical_corpus_size > 0
-            ? stats->GetValue<double>(1, 0) : 1.0;
+        if (!stats->HasError()) lexical_corpus_size = stats->GetValue<int64_t>(0, 0);
+        double avg_len =
+            !stats->HasError() && lexical_corpus_size > 0 ? stats->GetValue<double>(1, 0) : 1.0;
         if (avg_len <= 0) avg_len = 1.0;
         if (!qterms.empty() && lexical_corpus_size > 0) {
             struct Doc {
@@ -187,7 +185,8 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                 "SELECT t.symbol_id,t.term,t.tf,s.file_id,s.name,s.kind,s.search_length,f.path "
                 "FROM symbol_terms t JOIN symbols s ON s.id=t.symbol_id "
                 "JOIN files f ON f.id=s.file_id WHERE s.search_length IS NOT NULL "
-                "AND t.term IN (" + terms_sql.str() + ")");
+                "AND t.term IN (" +
+                terms_sql.str() + ")");
             if (!postings->HasError()) {
                 for (duckdb::idx_t i = 0; i < postings->RowCount(); ++i) {
                     const int64_t id = postings->GetValue<int64_t>(0, i);
@@ -206,7 +205,8 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                     d.tf[term] = postings->GetValue<int32_t>(2, i);
                     ++df[term];
                     if (std::find(d.name_terms.begin(), d.name_terms.end(), term) !=
-                        d.name_terms.end()) ++name_df[term];
+                        d.name_terms.end())
+                        ++name_df[term];
                 }
             }
             struct Scored {
@@ -222,19 +222,20 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                     auto frequency = d.tf.find(q);
                     int freq = frequency == d.tf.end() ? 0 : frequency->second;
                     if (!freq) continue;
-                    double idf = std::log(1.0 +
-                        (lexical_corpus_size - df[q] + 0.5) / (df[q] + 0.5));
-                    score += idf * freq * 2.2 /
-                             (freq + 1.2 * (0.25 + 0.75 * d.length / avg_len));
-                    if (std::find(d.name_terms.begin(), d.name_terms.end(), q) != d.name_terms.end())
+                    double idf =
+                        std::log(1.0 + (lexical_corpus_size - df[q] + 0.5) / (df[q] + 0.5));
+                    score += idf * freq * 2.2 / (freq + 1.2 * (0.25 + 0.75 * d.length / avg_len));
+                    if (std::find(d.name_terms.begin(), d.name_terms.end(), q) !=
+                        d.name_terms.end())
                         score += idf * 4.0;
-                    if (std::find(d.path_terms.begin(), d.path_terms.end(), q) != d.path_terms.end())
+                    if (std::find(d.path_terms.begin(), d.path_terms.end(), q) !=
+                        d.path_terms.end())
                         score += idf * 1.5;
                 }
                 bool exact_name = lexical_document(d.name) == lexical_document(query_text);
                 if (exact_name) score += 100.0;
-                if (score > 0) scores.push_back({d.id, d.file_id, score, exact_name,
-                                                 d.name, d.kind});
+                if (score > 0)
+                    scores.push_back({d.id, d.file_id, score, exact_name, d.name, d.kind});
             }
             std::sort(scores.begin(), scores.end(), [](const auto& a, const auto& b) {
                 return a.score == b.score ? a.id < b.id : a.score > b.score;
@@ -255,12 +256,14 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
         for (auto& [_, m] : fused) {
             if (m.kind != "function" && m.kind != "method") continue;
             std::unordered_set<std::string> in_name;
-            for (const auto& t : lexical_terms(m.name)) if (wanted.count(t)) in_name.insert(t);
+            for (const auto& t : lexical_terms(m.name))
+                if (wanted.count(t)) in_name.insert(t);
             for (const auto& t : in_name)
-                m.fused_score += 0.009 * std::log(1.0 +
-                    (lexical_corpus_size + 1.0) / (name_df[t] + 1.0));
+                m.fused_score +=
+                    0.009 * std::log(1.0 + (lexical_corpus_size + 1.0) / (name_df[t] + 1.0));
         }
-        for (const auto& [_, m] : fused) matches.push_back(m);
+        for (const auto& [_, m] : fused)
+            matches.push_back(m);
         std::sort(matches.begin(), matches.end(), [](const auto& a, const auto& b) {
             return a.fused_score == b.fused_score ? a.symbol_id < b.symbol_id
                                                   : a.fused_score > b.fused_score;
@@ -278,17 +281,16 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
         // implements those operations together. Max-symbol scoring alone can
         // bury save/load or read/write pairs under a single broad state match.
         static const std::unordered_set<std::string> operation_terms = {
-            "save", "load", "read", "write", "create", "update", "delete",
-            "import", "export", "serialize", "deserialize", "parse", "persist",
-            "apply", "restore"};
+            "save",   "load",      "read",        "write", "create",  "update", "delete", "import",
+            "export", "serialize", "deserialize", "parse", "persist", "apply",  "restore"};
         std::unordered_set<std::string> queried_operations;
         for (const auto& term : wanted)
             if (operation_terms.count(term)) queried_operations.insert(term);
         for (const auto& [fid, best] : file_best) {
             double coverage = 0;
             for (const auto& t : file_terms[fid])
-                coverage += 0.008 * std::log(1.0 +
-                    (lexical_corpus_size + 1.0) / (name_df[t] + 1.0));
+                coverage +=
+                    0.008 * std::log(1.0 + (lexical_corpus_size + 1.0) / (name_df[t] + 1.0));
             if (queried_operations.size() >= 2) {
                 int matched_operations = 0;
                 for (const auto& term : queried_operations)
@@ -321,7 +323,8 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                 for (const auto& candidate : matches) {
                     if (candidate.file_id != primary.file_id ||
                         candidate.symbol_id == primary.symbol_id ||
-                        (candidate.kind != "function" && candidate.kind != "method")) continue;
+                        (candidate.kind != "function" && candidate.kind != "method"))
+                        continue;
                     bool used = false;
                     for (const auto& chosen : companions)
                         if (chosen.symbol_id == candidate.symbol_id) used = true;
@@ -329,7 +332,10 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                     int gain = 0;
                     for (const auto& term : lexical_terms(candidate.name))
                         if (wanted.count(term) && !covered.count(term)) ++gain;
-                    if (gain > best_gain) { best = &candidate; best_gain = gain; }
+                    if (gain > best_gain) {
+                        best = &candidate;
+                        best_gain = gain;
+                    }
                 }
                 if (!best) break;
                 companions.push_back(*best);
@@ -345,21 +351,31 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
             if (name.size() < 3) return false;
             size_t at = body.find(name);
             while (at != std::string::npos) {
-                auto ident = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+                auto ident = [](char c) {
+                    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+                };
                 if ((at == 0 || !ident(body[at - 1])) &&
-                    (at + name.size() == body.size() || !ident(body[at + name.size()]))) return true;
+                    (at + name.size() == body.size() || !ident(body[at + name.size()])))
+                    return true;
                 at = body.find(name, at + 1);
             }
             return false;
         };
         std::unordered_set<int64_t> chosen_files, chosen_ids;
-        for (const auto& m : selected) { chosen_files.insert(m.file_id); chosen_ids.insert(m.symbol_id); }
+        for (const auto& m : selected) {
+            chosen_files.insert(m.file_id);
+            chosen_ids.insert(m.symbol_id);
+        }
         for (auto fid : chosen_files) {
-            auto found = db.conn().Query("SELECT s.id, s.name, s.kind, s.start_line, s.end_line, f.path "
-                                         "FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.file_id=" +
-                                         std::to_string(fid));
+            auto found =
+                db.conn().Query("SELECT s.id, s.name, s.kind, s.start_line, s.end_line, f.path "
+                                "FROM symbols s JOIN files f ON f.id=s.file_id WHERE s.file_id=" +
+                                std::to_string(fid));
             if (found->HasError() || found->RowCount() == 0) continue;
-            struct Local { PivotMatch match; std::string body; };
+            struct Local {
+                PivotMatch match;
+                std::string body;
+            };
             std::vector<Local> local;
             auto relative_path = found->GetValue(5, 0).ToString();
             auto source = read_file(project_root / relative_path);
@@ -368,18 +384,24 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                                        extension == ".sh" || extension == ".bash" ||
                                        extension == ".rb" || extension == ".nix";
             std::vector<size_t> starts{0};
-            for (size_t i = 0; i < source.size(); ++i) if (source[i] == '\n') starts.push_back(i + 1);
+            for (size_t i = 0; i < source.size(); ++i)
+                if (source[i] == '\n') starts.push_back(i + 1);
             for (duckdb::idx_t i = 0; i < found->RowCount(); ++i) {
                 auto kind = found->GetValue(2, i).ToString();
                 if (kind != "function" && kind != "method") continue;
                 auto first = found->GetValue<int32_t>(3, i);
                 auto last = found->GetValue<int32_t>(4, i);
-                size_t begin = first > 0 && static_cast<size_t>(first) <= starts.size() ? starts[first - 1] : 0;
-                size_t end = last > 0 && static_cast<size_t>(last) < starts.size() ? starts[last] : source.size();
-                local.push_back({{found->GetValue<int64_t>(0, i), fid, 0, 0, 0,
-                                  found->GetValue(1, i).ToString(), kind},
-                                 end >= begin ? code_without_comments(source.substr(begin, end - begin),
-                                                                      hash_comments) : std::string{}});
+                size_t begin = first > 0 && static_cast<size_t>(first) <= starts.size()
+                                   ? starts[first - 1]
+                                   : 0;
+                size_t end = last > 0 && static_cast<size_t>(last) < starts.size() ? starts[last]
+                                                                                   : source.size();
+                local.push_back(
+                    {{found->GetValue<int64_t>(0, i), fid, 0, 0, 0,
+                      found->GetValue(1, i).ToString(), kind},
+                     end >= begin
+                         ? code_without_comments(source.substr(begin, end - begin), hash_comments)
+                         : std::string{}});
             }
             for (int extra = 0; extra < 3; ++extra) {
                 const Local* best = nullptr;
@@ -392,13 +414,16 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                         if (mentions(selected_local.body, candidate.match.name)) score += 6;
                         if (mentions(candidate.body, selected_local.match.name)) score += 1;
                         for (const auto& term : wanted)
-                            if (term.size() >= 5 &&
-                                mentions(selected_local.body, term) &&
-                                mentions(candidate.body, term)) { score += 1; break; }
+                            if (term.size() >= 5 && mentions(selected_local.body, term) &&
+                                mentions(candidate.body, term)) {
+                                score += 1;
+                                break;
+                            }
                     }
                     if (score > best_score || (score == best_score && best &&
                                                candidate.match.symbol_id < best->match.symbol_id)) {
-                        best = &candidate; best_score = score;
+                        best = &candidate;
+                        best_score = score;
                     }
                 }
                 if (!best || best_score == 0) break;
@@ -414,8 +439,8 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
         int64_t fid = mat.GetValue<int64_t>(1, i);
         if (seen_files.count(fid)) continue; // one pivot per file
         seen_files.insert(fid);
-        matches.push_back({sid, fid, static_cast<int>(i + 1), 0, 0,
-                           mat.GetValue(2, i).ToString(), mat.GetValue(3, i).ToString()});
+        matches.push_back({sid, fid, static_cast<int>(i + 1), 0, 0, mat.GetValue(2, i).ToString(),
+                           mat.GetValue(3, i).ToString()});
     }
     return matches;
 }
@@ -488,7 +513,8 @@ static std::string compact_code_lines(const std::string& content) {
     while (std::getline(input, line)) {
         auto first = line.find_first_not_of(" \t\r");
         if (first == std::string::npos || line.compare(first, 1, "#") == 0 ||
-            line.compare(first, 2, "//") == 0) continue;
+            line.compare(first, 2, "//") == 0)
+            continue;
         out += line + "\n";
     }
     return out;
@@ -562,8 +588,8 @@ static ContextCapsule assemble_symbol_mode(const std::string& query,
     ContextCapsule capsule;
     capsule.query = query;
     for (const auto& p : pivots)
-        capsule.selection.push_back({p.symbol_id, p.file_id, p.semantic_rank,
-                                     p.lexical_rank, p.fused_score});
+        capsule.selection.push_back(
+            {p.symbol_id, p.file_id, p.semantic_rank, p.lexical_rank, p.fused_score});
     capsule.total_files = (int)graph.id_to_path.size();
 
     // 1. BFS through symbol_incoming starting from pivot symbol IDs
@@ -573,8 +599,9 @@ static ContextCapsule assemble_symbol_mode(const std::string& query,
         pivot_sym_ids.push_back(p.symbol_id);
 
     // Conservative BFS — small expansion keeps the capsule focused
-    auto hits = bfs_symbols_from_pivots(graph, pivot_sym_ids, /*max_depth=*/1,
-                                        /*max_symbols=*/std::min(60, static_cast<int>(pivot_sym_ids.size()) + 15));
+    auto hits = bfs_symbols_from_pivots(
+        graph, pivot_sym_ids, /*max_depth=*/1,
+        /*max_symbols=*/std::min(60, static_cast<int>(pivot_sym_ids.size()) + 15));
 
     std::vector<int64_t> hit_ids;
     hit_ids.reserve(hits.size());
@@ -599,7 +626,8 @@ static ContextCapsule assemble_symbol_mode(const std::string& query,
     }
     std::unordered_map<int64_t, size_t> pivot_order;
     std::unordered_set<int64_t> ranked_pivot_ids;
-    for (size_t i = 0; i < pivots.size(); ++i) pivot_order[pivots[i].symbol_id] = i;
+    for (size_t i = 0; i < pivots.size(); ++i)
+        pivot_order[pivots[i].symbol_id] = i;
     for (const auto& pivot : pivots)
         if (pivot.semantic_rank > 0 || pivot.lexical_rank > 0)
             ranked_pivot_ids.insert(pivot.symbol_id);
@@ -644,9 +672,11 @@ static ContextCapsule assemble_symbol_mode(const std::string& query,
         std::ostringstream body;
         body << "// file: " << cf.path << "\n";
         int used = estimate_tokens(body.str());
-        const int matched_count = pivot_content
-            ? static_cast<int>(std::count_if(syms.begin(), syms.end(),
-                [&](const auto& s) { return ranked_pivot_ids.count(s.id) > 0; })) : 0;
+        const int matched_count =
+            pivot_content ? static_cast<int>(std::count_if(
+                                syms.begin(), syms.end(),
+                                [&](const auto& s) { return ranked_pivot_ids.count(s.id) > 0; }))
+                          : 0;
         const int related_count = static_cast<int>(syms.size()) - matched_count;
         for (const auto& s : syms) {
             if (used >= file_token_cap) break;
@@ -659,17 +689,18 @@ static ContextCapsule assemble_symbol_mode(const std::string& query,
             // Note: signature is intentionally not emitted here — the body slice
             // already starts with the declaration line, avoiding duplication.
 
-            int allocated = matched_count > 0 ? per_symbol_cap :
-                            file_token_cap / std::max(1, static_cast<int>(syms.size()));
+            int allocated = matched_count > 0
+                                ? per_symbol_cap
+                                : file_token_cap / std::max(1, static_cast<int>(syms.size()));
             if (matched_count > 0) {
-                allocated = ranked_pivot_ids.count(s.id)
-                    ? std::max(120, file_token_cap * 80 / 100 / matched_count)
-                    : std::max(60, file_token_cap * 20 / 100 /
-                              std::max(1, related_count));
+                allocated =
+                    ranked_pivot_ids.count(s.id)
+                        ? std::max(120, file_token_cap * 80 / 100 / matched_count)
+                        : std::max(60, file_token_cap * 20 / 100 / std::max(1, related_count));
             }
             int header_tokens = estimate_tokens(entry.str());
-            int body_budget = std::min({per_symbol_cap, allocated,
-                                        file_token_cap - used}) - header_tokens;
+            int body_budget =
+                std::min({per_symbol_cap, allocated, file_token_cap - used}) - header_tokens;
             if (body_budget <= 0) {
                 // No room for body — emit signature/header only
                 body << entry.str();
@@ -755,9 +786,8 @@ static ContextCapsule assemble_symbol_mode(const std::string& query,
     for (auto& [fid, syms] : by_file_support) {
         if (tokens_used >= token_budget * 90 / 100) break;
         int remaining = token_budget - tokens_used;
-        auto cf =
-            render_file(fid, syms, std::min(support_file_cap, remaining), support_per_symbol_cap,
-                        false);
+        auto cf = render_file(fid, syms, std::min(support_file_cap, remaining),
+                              support_per_symbol_cap, false);
         if (cf.path.empty()) continue;
         tokens_used += cf.token_estimate;
         capsule.support_files.push_back(std::move(cf));
@@ -1047,8 +1077,8 @@ std::string compute_capsule_cache_key(const std::string& query, int token_budget
     // releases — a pre-upgrade entry must not outlive the code that built it
     // (observed: a budget-violating capsule cached by 1.2.8 was still served
     // by 1.2.9 until the index epoch happened to change).
-    std::string composite =
-        query + "|" + retrieval_mode + "|" + std::to_string(token_budget) + "|" + epoch + "|" + version;
+    std::string composite = query + "|" + retrieval_mode + "|" + std::to_string(token_budget) +
+                            "|" + epoch + "|" + version;
     return blake3_hex(composite);
 }
 
@@ -1071,8 +1101,7 @@ std::optional<ContextCapsule> capsule_cache_lookup(Database& db, const std::stri
         for (const auto& item : j.value("selection", nlohmann::json::array()))
             cap.selection.push_back({item.value("symbol_id", int64_t(0)),
                                      item.value("file_id", int64_t(0)),
-                                     item.value("semantic_rank", 0),
-                                     item.value("lexical_rank", 0),
+                                     item.value("semantic_rank", 0), item.value("lexical_rank", 0),
                                      item.value("fused_score", 0.0)});
         cap.token_estimate = j.value("token_estimate", 0);
         cap.total_files = j.value("total_files", 0);
@@ -1105,7 +1134,8 @@ void capsule_cache_insert(Database& db, const std::string& key, const std::strin
         j["retrieval_mode"] = capsule.retrieval_mode;
         j["selection"] = nlohmann::json::array();
         for (const auto& s : capsule.selection)
-            j["selection"].push_back({{"symbol_id", s.symbol_id}, {"file_id", s.file_id},
+            j["selection"].push_back({{"symbol_id", s.symbol_id},
+                                      {"file_id", s.file_id},
                                       {"semantic_rank", s.semantic_rank},
                                       {"lexical_rank", s.lexical_rank},
                                       {"fused_score", s.fused_score}});

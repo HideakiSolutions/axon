@@ -230,28 +230,28 @@ static int64_t upsert_file(duckdb::Connection& conn, const std::string& rel_path
     return mat2.GetValue<int64_t>(0, 0);
 }
 
-static void insert_symbols(duckdb::Connection& conn, int64_t file_id,
-                           const std::string& path, const std::string& source,
-                           const std::vector<Symbol>& symbols) {
+static void insert_symbols(duckdb::Connection& conn, int64_t file_id, const std::string& path,
+                           const std::string& source, const std::vector<Symbol>& symbols) {
     const auto extension = fs::path(path).extension().string();
-    const bool hash_comments = extension == ".py" || extension == ".gd" ||
-                               extension == ".sh" || extension == ".bash" ||
-                               extension == ".rb" || extension == ".nix";
+    const bool hash_comments = extension == ".py" || extension == ".gd" || extension == ".sh" ||
+                               extension == ".bash" || extension == ".rb" || extension == ".nix";
     std::vector<size_t> line_offsets{0};
     for (size_t i = 0; i < source.size(); ++i)
         if (source[i] == '\n') line_offsets.push_back(i + 1);
     for (const auto& sym : symbols) {
-        std::string evidence = path + " " + sym.name + " " + sym.signature.value_or("") +
-                               " " + sym.docstring.value_or("").substr(0, 256);
+        std::string evidence = path + " " + sym.name + " " + sym.signature.value_or("") + " " +
+                               sym.docstring.value_or("").substr(0, 256);
         if (sym.start_line > 0 && static_cast<size_t>(sym.start_line) <= line_offsets.size()) {
             size_t begin = line_offsets[sym.start_line - 1];
             size_t end = static_cast<size_t>(sym.end_line) < line_offsets.size()
-                             ? line_offsets[sym.end_line] : source.size();
+                             ? line_offsets[sym.end_line]
+                             : source.size();
             // Index executable lines, not historical comments: prose in a
             // large method can otherwise outrank its actual identifiers.
             if (end > begin) {
                 evidence += " " + code_without_comments(
-                    source.substr(begin, std::min(end - begin, size_t(8192))), hash_comments);
+                                      source.substr(begin, std::min(end - begin, size_t(8192))),
+                                      hash_comments);
             }
         }
         std::string terms = lexical_document(evidence);
@@ -265,12 +265,14 @@ static void insert_symbols(duckdb::Connection& conn, int64_t file_id,
                           std::to_string(lexical_terms(terms).size()) + ")";
         require_success(conn.Query(sql), "insert indexed symbol");
     }
-    require_success(conn.Query(
-        "INSERT INTO symbol_terms SELECT s.id,t.term,COUNT(*)::INTEGER "
-        "FROM symbols s CROSS JOIN "
-        "UNNEST(string_split(trim(s.search_terms),' ')) AS t(term) "
-        "WHERE s.file_id = " + std::to_string(file_id) + " AND t.term <> '' "
-        "GROUP BY s.id,t.term"), "insert lexical postings");
+    require_success(conn.Query("INSERT INTO symbol_terms SELECT s.id,t.term,COUNT(*)::INTEGER "
+                               "FROM symbols s CROSS JOIN "
+                               "UNNEST(string_split(trim(s.search_terms),' ')) AS t(term) "
+                               "WHERE s.file_id = " +
+                               std::to_string(file_id) +
+                               " AND t.term <> '' "
+                               "GROUP BY s.id,t.term"),
+                    "insert lexical postings");
 }
 
 static std::optional<std::string> inferred_bounded_context(const std::string& relative_path) {
@@ -923,15 +925,16 @@ IndexStats index_files(const Config& cfg, Database& db, const std::vector<fs::pa
 
     if (prune) stats.files_pruned = sweep_deleted(conn, cfg.project_root, deleted_files);
     if (stats.files_pruned > 0) transaction.mark_index_mutation();
-    if (replace_contract_evidence(conn,
-        extract_contracts(cfg.project_root, cfg.project_root.filename().string()))) {
+    if (replace_contract_evidence(
+            conn, extract_contracts(cfg.project_root, cfg.project_root.filename().string()))) {
         transaction.mark_index_mutation();
         if (contract_paths.empty())
             contract_changes.push_back({"contract", ".", "snapshot", std::nullopt});
         else
             for (const auto& path : contract_paths)
-                contract_changes.push_back({"contract", path,
-                    fs::exists(cfg.project_root / path) ? "upsert" : "delete", std::nullopt});
+                contract_changes.push_back(
+                    {"contract", path, fs::exists(cfg.project_root / path) ? "upsert" : "delete",
+                     std::nullopt});
     }
     if (!updated_files.empty() || !updated_symbols.empty() || !deleted_files.empty() ||
         !contract_changes.empty())

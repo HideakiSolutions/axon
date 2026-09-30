@@ -11,18 +11,18 @@ namespace axon {
 // indexing; callers must opt in explicitly. A confirmed trace only follows
 // straight-line assignments in one function.
 struct DataTraceStep {
-    std::string kind;       // source | assignment | transform | sink
+    std::string kind; // source | assignment | transform | sink
     std::string expression;
     int line = 0;
-    std::string evidence;   // observed | inferred | unknown
+    std::string evidence; // observed | inferred | unknown
 };
 
 struct DataTracePath {
     std::string function;
     std::string source;
     std::string sink;
-    std::string sink_kind;  // persistence | http
-    std::string status;     // confirmed | unknown
+    std::string sink_kind; // persistence | http
+    std::string status;    // confirmed | unknown
     std::vector<DataTraceStep> steps;
     std::string reason;
 };

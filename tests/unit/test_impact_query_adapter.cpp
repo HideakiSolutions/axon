@@ -34,16 +34,18 @@ protected:
                        const std::string& source) {
         std::ofstream(root / path) << source;
         int lines = 1;
-        for (char ch : source) if (ch == '\n') ++lines;
-        auto file = db->conn().Query(
-            "INSERT INTO files(id,path,language,hash,byte_size) VALUES "
-            "(nextval('seq_id'), '" + path + "', 'typescript', 'hash', " +
-            std::to_string(source.size()) + ") RETURNING id");
+        for (char ch : source)
+            if (ch == '\n') ++lines;
+        auto file = db->conn().Query("INSERT INTO files(id,path,language,hash,byte_size) VALUES "
+                                     "(nextval('seq_id'), '" +
+                                     path + "', 'typescript', 'hash', " +
+                                     std::to_string(source.size()) + ") RETURNING id");
         const auto file_id = file->GetValue<int64_t>(0, 0);
-        auto symbol = db->conn().Query(
-            "INSERT INTO symbols(id,file_id,name,kind,start_line,end_line) VALUES "
-            "(nextval('seq_id'), " + std::to_string(file_id) + ", '" + name +
-            "', 'function', 1, " + std::to_string(lines) + ") RETURNING id");
+        auto symbol =
+            db->conn().Query("INSERT INTO symbols(id,file_id,name,kind,start_line,end_line) VALUES "
+                             "(nextval('seq_id'), " +
+                             std::to_string(file_id) + ", '" + name + "', 'function', 1, " +
+                             std::to_string(lines) + ") RETURNING id");
         return symbol->GetValue<int64_t>(0, 0);
     }
 };
@@ -63,10 +65,10 @@ TEST_F(ImpactAdapterTest, TwoStaticResponsesMustAgreeBeforeAFieldIsGuaranteed) {
     ASSERT_EQ(index.symbols.size(), 2u);
     axon::ContractLink link;
     link.identity = "orders|GET|/v1/orders";
-    link.provider = {"orders", "src/api.ts", "getOrder", "http", "provider",
-                     link.identity, "observed", "resolved", ""};
-    link.consumer = {"orders", "src/client.ts", "readOrder", "http", "consumer",
-                     link.identity, "observed", "resolved", ""};
+    link.provider = {"orders",      "src/api.ts", "getOrder", "http", "provider",
+                     link.identity, "observed",   "resolved", ""};
+    link.consumer = {"orders",      "src/client.ts", "readOrder", "http", "consumer",
+                     link.identity, "observed",      "resolved",  ""};
     auto shape = axon::hydrate_http_response_shape(link, index, index);
     ASSERT_TRUE(shape.closed);
     ASSERT_EQ(shape.guaranteed_fields.size(), 1u);
@@ -101,10 +103,10 @@ TEST_F(ImpactAdapterTest, SpreadAndDynamicResponsesKeepShapeOpen) {
     const auto index = axon::load_impact_index(db->conn(), root, "orders");
     axon::ContractLink link;
     link.identity = "orders|GET|/v1/orders";
-    link.provider = {"orders", "src/api.ts", "getOrder", "http", "provider",
-                     link.identity, "observed", "resolved", ""};
-    link.consumer = {"orders", "src/client.ts", "readOrder", "http", "consumer",
-                     link.identity, "observed", "resolved", ""};
+    link.provider = {"orders",      "src/api.ts", "getOrder", "http", "provider",
+                     link.identity, "observed",   "resolved", ""};
+    link.consumer = {"orders",      "src/client.ts", "readOrder", "http", "consumer",
+                     link.identity, "observed",      "resolved",  ""};
     auto shape = axon::hydrate_http_response_shape(link, index, index);
     EXPECT_FALSE(shape.closed);
     const auto findings = axon::compare_response_fields(shape);
@@ -122,12 +124,12 @@ TEST_F(ImpactAdapterTest, IndexedCallsAndQualifiedEntrypointsProduceBoundedTrace
                      "FROM symbols a,symbols b WHERE a.name='handle' AND b.name='work'");
     const auto index = axon::load_impact_index(db->conn(), root, "orders");
     std::vector<axon::ContractEvidence> evidence = {
-        {"orders", "src/http.ts", "handle", "http", "provider", "orders|GET|/x",
-         "observed", "resolved", ""},
-        {"orders", "src/rpc.ts", "charge", "grpc", "provider", "p|S|Charge",
-         "observed", "resolved", ""},
-        {"orders", "src/event.ts", "consume", "topic", "consumer", "kafka|a|x",
-         "observed", "resolved", ""}};
+        {"orders", "src/http.ts", "handle", "http", "provider", "orders|GET|/x", "observed",
+         "resolved", ""},
+        {"orders", "src/rpc.ts", "charge", "grpc", "provider", "p|S|Charge", "observed", "resolved",
+         ""},
+        {"orders", "src/event.ts", "consume", "topic", "consumer", "kafka|a|x", "observed",
+         "resolved", ""}};
     auto graph = axon::hydrate_execution_graph(index, evidence);
     auto trace = axon::trace_execution_paths(graph.nodes, graph.edges);
     ASSERT_GE(trace.paths.size(), 4u);

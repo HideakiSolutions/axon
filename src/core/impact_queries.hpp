@@ -15,7 +15,7 @@ struct ResponseField {
 
 struct ConsumerFieldAccess {
     std::string path;
-    std::string origin; // observed or declared
+    std::string origin;   // observed or declared
     bool required = true; // false when guarded by an optional/null check
     bool dynamic = false;
 };
@@ -29,7 +29,7 @@ struct ResponseShape {
     // guaranteed_fields but inside observed_fields is conditional, not absent.
     std::vector<ResponseField> observed_fields;
     std::vector<ConsumerFieldAccess> accesses;
-    bool closed = false; // complete, strict response schema or exhaustive observed shape
+    bool closed = false;        // complete, strict response schema or exhaustive observed shape
     std::string closure_origin; // observed or declared, when closed
 };
 
@@ -61,20 +61,19 @@ struct SymbolCommunity {
 
 // Weakly connected components of confirmed call/import relations. Isolated
 // symbols remain visible. Unresolved relations never join communities.
-std::vector<SymbolCommunity> group_symbol_communities(
-    const std::vector<std::string>& symbols,
-    const std::vector<SymbolRelation>& relations);
+std::vector<SymbolCommunity> group_symbol_communities(const std::vector<std::string>& symbols,
+                                                      const std::vector<SymbolRelation>& relations);
 
 struct ExecutionNode {
     std::string id;
-    std::string kind; // http_handler, rpc_handler, event_handler, call, output
+    std::string kind;        // http_handler, rpc_handler, event_handler, call, output
     std::string output_kind; // return, persistence, external_http, publish, etc.
 };
 
 struct ExecutionEdge {
     std::string from;
     std::string to;
-    std::string kind; // calls, imports, invokes, emits
+    std::string kind;     // calls, imports, invokes, emits
     std::string evidence; // observed, declared, inferred
 };
 
@@ -100,7 +99,7 @@ struct TraceLimits {
 // Traverses only supplied edges, with deterministic ordering and cycle guard.
 // Unknown/dynamic edges have no destination and must not be supplied as links.
 ExecutionTrace trace_execution_paths(const std::vector<ExecutionNode>& nodes,
-                                    const std::vector<ExecutionEdge>& edges,
-                                    const TraceLimits& limits = {});
+                                     const std::vector<ExecutionEdge>& edges,
+                                     const TraceLimits& limits = {});
 
 } // namespace axon

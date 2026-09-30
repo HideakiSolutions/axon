@@ -20,9 +20,9 @@ TEST(ApiShapeQuery, LabeledCompatibleProvenPossibleAndUnknownCases) {
     closed.closure_origin = "observed";
     auto findings = axon::compare_response_fields(closed);
     ASSERT_EQ(findings.size(), 4u);
-    EXPECT_EQ(findings[0].verdict, "unknown"); // dynamic lookup
-    EXPECT_EQ(findings[1].verdict, "proven"); // required field absent from closed shape
-    EXPECT_EQ(findings[2].verdict, "possible"); // guarded optional lookup
+    EXPECT_EQ(findings[0].verdict, "unknown");    // dynamic lookup
+    EXPECT_EQ(findings[1].verdict, "proven");     // required field absent from closed shape
+    EXPECT_EQ(findings[2].verdict, "possible");   // guarded optional lookup
     EXPECT_EQ(findings[3].verdict, "compatible"); // guaranteed field
 
     closed.closed = false; // e.g. handler has res.json(variable) on another branch
@@ -30,7 +30,8 @@ TEST(ApiShapeQuery, LabeledCompatibleProvenPossibleAndUnknownCases) {
     EXPECT_EQ(findings[1].verdict, "possible");
     closed.link_identity.clear(); // no confirmed qualified HTTP link
     findings = axon::compare_response_fields(closed);
-    for (const auto& finding : findings) EXPECT_EQ(finding.verdict, "unknown");
+    for (const auto& finding : findings)
+        EXPECT_EQ(finding.verdict, "unknown");
 }
 
 TEST(SymbolCommunityQuery, DeterministicResolvedComponentsAndIsolates) {
@@ -53,8 +54,8 @@ TEST(SymbolCommunityQuery, DeterministicResolvedComponentsAndIsolates) {
 
 TEST(ExecutionPathQuery, OrderedBoundedPathsRetainUncertainEdges) {
     const std::vector<axon::ExecutionNode> nodes = {
-        {"a_http", "http_handler", ""}, {"b_rpc", "rpc_handler", ""},
-        {"c_event", "event_handler", ""}, {"d_call", "call", ""},
+        {"a_http", "http_handler", ""},       {"b_rpc", "rpc_handler", ""},
+        {"c_event", "event_handler", ""},     {"d_call", "call", ""},
         {"e_store", "output", "persistence"}, {"f_http", "output", "external_http"}};
     const std::vector<axon::ExecutionEdge> links = {
         {"a_http", "d_call", "calls", "observed"},
@@ -65,24 +66,23 @@ TEST(ExecutionPathQuery, OrderedBoundedPathsRetainUncertainEdges) {
         {"c_event", "f_http", "calls", "observed"}};
     auto trace = axon::trace_execution_paths(nodes, links);
     ASSERT_EQ(trace.paths.size(), 5u);
-    EXPECT_EQ(trace.paths[0].nodes,
-              (std::vector<std::string>{"a_http", "d_call", "e_store"}));
+    EXPECT_EQ(trace.paths[0].nodes, (std::vector<std::string>{"a_http", "d_call", "e_store"}));
     EXPECT_EQ(trace.paths[0].uncertain_edges, (std::vector<bool>{false, true}));
-    EXPECT_EQ(trace.paths[0].edge_evidence,
-              (std::vector<std::string>{"observed", "inferred"}));
+    EXPECT_EQ(trace.paths[0].edge_evidence, (std::vector<std::string>{"observed", "inferred"}));
     EXPECT_EQ(trace.paths[0].output_kind, "persistence");
     EXPECT_FALSE(trace.truncated);
     bool declared_uncertain = false;
     for (const auto& path : trace.paths)
         if (path.nodes.front() == "b_rpc")
-            declared_uncertain |= path.edge_evidence.front() == "declared" &&
-                                  path.uncertain_edges.front();
+            declared_uncertain |=
+                path.edge_evidence.front() == "declared" && path.uncertain_edges.front();
     EXPECT_TRUE(declared_uncertain);
 
     trace = axon::trace_execution_paths(nodes, links, {1, 2, 2});
     EXPECT_TRUE(trace.truncated);
     EXPECT_LE(trace.paths.size(), 2u);
-    for (const auto& path : trace.paths) EXPECT_LE(path.edge_kinds.size(), 1u);
+    for (const auto& path : trace.paths)
+        EXPECT_LE(path.edge_kinds.size(), 1u);
 }
 
 } // namespace

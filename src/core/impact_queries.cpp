@@ -50,8 +50,8 @@ std::vector<ApiFieldFinding> compare_response_fields(const ResponseShape& shape)
         } else if (!guaranteed.empty() || shape.closed) {
             finding.verdict = "possible";
             finding.producer_origin = shape.closure_origin;
-            finding.reason = shape.closed ? "access is optional or guarded" :
-                                            "response shape is incomplete";
+            finding.reason =
+                shape.closed ? "access is optional or guarded" : "response shape is incomplete";
         } else {
             finding.verdict = "unknown";
             finding.reason = "no response field evidence is available";
@@ -65,14 +65,16 @@ std::vector<ApiFieldFinding> compare_response_fields(const ResponseShape& shape)
     return findings;
 }
 
-std::vector<SymbolCommunity> group_symbol_communities(
-    const std::vector<std::string>& symbols, const std::vector<SymbolRelation>& relations) {
+std::vector<SymbolCommunity>
+group_symbol_communities(const std::vector<std::string>& symbols,
+                         const std::vector<SymbolRelation>& relations) {
     std::set<std::string> ids(symbols.begin(), symbols.end());
     ids.erase("");
     std::vector<std::pair<std::string, std::string>> links;
     for (const auto& edge : relations) {
         if (!edge.resolved || (edge.kind != "calls" && edge.kind != "imports") ||
-            edge.from.empty() || edge.to.empty()) continue;
+            edge.from.empty() || edge.to.empty())
+            continue;
         ids.insert(edge.from);
         ids.insert(edge.to);
         auto pair = std::minmax(edge.from, edge.to);
@@ -80,7 +82,8 @@ std::vector<SymbolCommunity> group_symbol_communities(
     }
     std::vector<std::string> ordered(ids.begin(), ids.end());
     std::map<std::string, std::size_t> index;
-    for (std::size_t i = 0; i < ordered.size(); ++i) index[ordered[i]] = i;
+    for (std::size_t i = 0; i < ordered.size(); ++i)
+        index[ordered[i]] = i;
     std::vector<std::size_t> parent(ordered.size());
     std::iota(parent.begin(), parent.end(), 0);
     std::function<std::size_t(std::size_t)> root = [&](std::size_t x) -> std::size_t {
@@ -96,37 +99,39 @@ std::vector<SymbolCommunity> group_symbol_communities(
     std::map<std::size_t, SymbolCommunity> grouped;
     for (std::size_t i = 0; i < ordered.size(); ++i)
         grouped[root(i)].symbols.push_back(ordered[i]);
-    for (const auto& [a, b] : links) ++grouped[root(index[a])].relation_count;
+    for (const auto& [a, b] : links)
+        ++grouped[root(index[a])].relation_count;
     std::vector<SymbolCommunity> result;
     for (auto& [_, community] : grouped) {
         community.id = community.symbols.front();
         result.push_back(std::move(community));
     }
-    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
-        return a.id < b.id;
-    });
+    std::sort(result.begin(), result.end(),
+              [](const auto& a, const auto& b) { return a.id < b.id; });
     return result;
 }
 
 ExecutionTrace trace_execution_paths(const std::vector<ExecutionNode>& nodes,
-                                    const std::vector<ExecutionEdge>& edges,
-                                    const TraceLimits& limits) {
+                                     const std::vector<ExecutionEdge>& edges,
+                                     const TraceLimits& limits) {
     ExecutionTrace result;
     std::map<std::string, ExecutionNode> by_id;
     for (const auto& node : nodes)
         if (!node.id.empty()) by_id[node.id] = node;
     std::map<std::string, std::vector<ExecutionEdge>> outgoing;
     for (const auto& edge : edges) {
-        if (by_id.count(edge.from) && by_id.count(edge.to))
-            outgoing[edge.from].push_back(edge);
+        if (by_id.count(edge.from) && by_id.count(edge.to)) outgoing[edge.from].push_back(edge);
     }
     for (auto& [_, next] : outgoing) {
         std::sort(next.begin(), next.end(), [](const auto& a, const auto& b) {
             return std::tie(a.to, a.kind, a.evidence) < std::tie(b.to, b.kind, b.evidence);
         });
-        next.erase(std::unique(next.begin(), next.end(), [](const auto& a, const auto& b) {
-            return std::tie(a.to, a.kind, a.evidence) == std::tie(b.to, b.kind, b.evidence);
-        }), next.end());
+        next.erase(std::unique(next.begin(), next.end(),
+                               [](const auto& a, const auto& b) {
+                                   return std::tie(a.to, a.kind, a.evidence) ==
+                                          std::tie(b.to, b.kind, b.evidence);
+                               }),
+                   next.end());
     }
     std::vector<std::string> path;
     std::vector<std::string> kinds;
@@ -173,7 +178,8 @@ ExecutionTrace trace_execution_paths(const std::vector<ExecutionNode>& nodes,
     };
     for (const auto& [id, node] : by_id) {
         if (node.kind != "http_handler" && node.kind != "rpc_handler" &&
-            node.kind != "event_handler") continue;
+            node.kind != "event_handler")
+            continue;
         if (result.paths.size() >= limits.max_paths) {
             result.truncated = true;
             break;
