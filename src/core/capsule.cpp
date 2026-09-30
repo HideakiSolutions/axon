@@ -303,7 +303,8 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
             return a.second == b.second ? a.first < b.first : a.second > b.second;
         });
         std::vector<PivotMatch> selected;
-        for (const auto& [fid, _] : ranked_files) {
+        for (const auto& ranked : ranked_files) {
+            const auto fid = ranked.first;
             auto it = std::find_if(matches.begin(), matches.end(),
                                    [&](const auto& m) { return m.file_id == fid; });
             if (it != matches.end()) selected.push_back(*it);

@@ -114,8 +114,9 @@ void extract_proto(const std::string& source, const std::string& repo, const std
 void extract_asyncapi(const std::string& source, const std::string& repo, const std::string& file,
                       std::vector<ContractEvidence>& out) {
     if (source.find("asyncapi:") == std::string::npos) return;
-    std::regex operation_re(R"(^\s{2}([A-Za-z_][A-Za-z0-9_]*):\s*\{action:\s*(send|receive))",
-                            std::regex::icase | std::regex::multiline);
+    std::regex operation_re(
+        R"((?:^|\n)[ \t]{2}([A-Za-z_][A-Za-z0-9_]*):\s*\{action:\s*(send|receive))",
+        std::regex::icase);
     auto unknown_operations = [&] {
         for (std::sregex_iterator it(source.begin(), source.end(), operation_re), end; it != end;
              ++it)
