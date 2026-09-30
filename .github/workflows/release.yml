@@ -25,14 +25,17 @@ jobs:
             os: ubuntu-22.04
             archive_ext: tar.gz
             ggml_native: 'OFF'
+            ggml_vulkan: 'ON'
           - target: macos-arm64
             os: macos-14
             archive_ext: tar.gz
             ggml_native: 'ON'
+            ggml_vulkan: 'OFF'
           - target: windows-x64
             os: windows-2022
             archive_ext: zip
             ggml_native: 'OFF'
+            ggml_vulkan: 'OFF'
     env:
       AXON_DUCKDB_VERSION: 1.2.2
     steps:
@@ -45,7 +48,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build patchelf jq ripgrep libpq-dev
+          sudo apt-get install -y cmake build-essential ninja-build patchelf jq ripgrep libpq-dev libvulkan-dev glslc spirv-headers
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
@@ -76,7 +79,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja -DGGML_NATIVE=${{ matrix.ggml_native }}
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja -DGGML_NATIVE=${{ matrix.ggml_native }} -DGGML_VULKAN=${{ matrix.ggml_vulkan }}
 
       - name: Verify portable x64 CPU configuration
         if: matrix.ggml_native == 'OFF'
@@ -235,6 +238,9 @@ jobs:
             docker run --rm --network none \
               --mount "type=bind,src=$(pwd)/${stage},dst=/app,readonly" \
               ubuntu:22.04 /app/bin/axon --version
+            AXON_EMBEDDING_MODEL="${RUNNER_TEMP}/nomic-embed-text-v1.5.Q4_K_M.gguf" \
+              AXON_EMBEDDING_DEVICE=cpu \
+              bash tests/smoke/test_mcp_capsule_schema.sh "${stage}/bin/axon"
           fi
 
       - name: Stage release tree (Windows)

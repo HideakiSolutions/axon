@@ -152,3 +152,22 @@ build on the same host. The release-build compatibility defect is addressed in
 v1.4.1 by disabling ggml's host-native instruction selection for x64 packages;
 the final packaged binary must pass a model-loading smoke on this host before
 installation is considered verified.
+
+### CPU/GPU preference check
+
+The follow-up Vulkan build was exercised on the same i7-8700K host with an
+NVIDIA GeForce RTX 4060. `AXON_EMBEDDING_DEVICE=cpu` logged `CPU`;
+`gpu` and the default `auto` logged `Vulkan0` after the backend identified the
+RTX 4060. All three returned a 581-token capsule for `compute_velocity`.
+An invalid preference failed with an explicit validation error. A separate
+one-file Godot fixture indexed and embedded two symbols on `Vulkan0`.
+
+The 13 uncached MCP questions above were then replayed against the same
+CPU-built index using GPU inference. Nine retained the same pivot order and
+token estimate; four changed selected pivots or output size (`camera_en`,
+`dialogue_en`, `save_pt`, `dialogue_choice_exact`). The answer-support verdicts
+for those four did not worsen: the broad camera/dialogue/save questions were
+still partial or insufficient, while the exact dialogue choice still returned
+its function. Backend floating-point differences can therefore change ranking
+near a selection boundary; token reduction and answer quality should be
+evaluated per device rather than assumed bit-identical.

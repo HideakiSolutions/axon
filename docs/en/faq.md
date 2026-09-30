@@ -12,7 +12,7 @@ Yes. Axon speaks stdio JSON-RPC 2.0 (the MCP protocol). Any MCP-compatible clien
 A 1,000-file TypeScript project takes ~15–30s on first index. Subsequent incremental reindexes (write-through hooks) are near-instant.
 
 **Q: Does axon send my code anywhere?**
-No. Everything runs locally. The embedding model runs via llama.cpp on your CPU. DuckDB is embedded. No network calls are made.
+No. Everything runs locally. The embedding model runs via llama.cpp on the available GPU or CPU, according to `AXON_EMBEDDING_DEVICE=auto|gpu|cpu`; DuckDB is embedded. No network calls are made during inference. The Linux release includes Vulkan GPU support, macOS uses Metal, and the Windows package currently uses CPU.
 
 ---
 

@@ -642,7 +642,9 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
                     ctx.binary_dir.empty() ? ctx.cfg.project_root / "models" : ctx.binary_dir;
                 auto model_path = find_model(binary_dir);
                 ctx.model = std::make_unique<EmbeddingModel>(model_path);
-            } catch (...) {
+                ctx.model_error.clear();
+            } catch (const std::exception& e) {
+                ctx.model_error = e.what();
                 // The model is optional for startup; tools that need embeddings
                 // already return an explicit error when it is unavailable.
             }
@@ -874,8 +876,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         // Miss path needs the embedding model; defer the readiness check until
         // here so cache hits don't require it.
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
 
         auto capsule = assemble_capsule(query, pivots, *ctx.db, *ctx.model, ctx.graph,
                                         ctx.cfg.project_root, budget, dialogue_budget, compression);
@@ -1052,8 +1057,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "search_memory") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
 
         std::string q = args.value("query", "");
         int limit = args.value("limit", 5);
@@ -1954,8 +1962,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "turn_search") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
         std::string query = args.value("query", "");
         int limit = args.value("limit", 5);
         int64_t thread_id = arg_int64(args, "thread_id", -1);
@@ -2021,8 +2032,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "dialogue_context") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
         if (!ctx.model_ready())
-            return make_tool_result({{"error", "Embedding model not loaded; run_pipeline first"}},
-                                    true);
+            return make_tool_result(
+                {{"error", ctx.model_error.empty()
+                               ? "Embedding model not loaded; run_pipeline first"
+                               : ctx.model_error}},
+                true);
         std::string query = args.value("query", "");
         int limit = args.value("limit", 5);
         int64_t thread_id = arg_int64(args, "thread_id", -1);

@@ -86,6 +86,12 @@ huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF \
 
 ### Passo 5 — Configurar Claude Code
 
+Selecione o dispositivo de embeddings com `AXON_EMBEDDING_DEVICE=auto`
+(padrão), `cpu` ou `gpu`. A opção explícita `gpu` retorna erro quando não há
+backend/dispositivo disponível. A release Linux inclui Vulkan; no macOS é
+usado Metal, e o pacote Windows atualmente oferece CPU. O dispositivo
+escolhido aparece no log ao carregar o modelo.
+
 Adicionar ao `~/.claude.json`:
 
 ```json

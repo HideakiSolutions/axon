@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.1] — 2026-09-29
 
+### Added
+- `AXON_EMBEDDING_DEVICE=auto|cpu|gpu` selects the embedding device. `auto`
+  uses an available GPU and falls back to CPU; `gpu` fails clearly when no
+  usable GPU backend/device is present. Linux release packages include Vulkan,
+  and macOS uses Metal; the Windows package remains CPU only.
+
 ### Fixed
 - Linux and Windows x64 release builds now disable host-native ggml CPU
   instructions. This prevents an illegal-instruction crash when inference runs
