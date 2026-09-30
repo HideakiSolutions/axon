@@ -5,6 +5,7 @@
 #include "core/graph.hpp"
 #include "core/skeleton.hpp"
 #include "core/capsule.hpp"
+#include "core/impact_query_api.hpp"
 #include "core/ccr.hpp"
 #include "core/embeddings.hpp"
 #include "core/shell_filter.hpp"
@@ -69,7 +70,11 @@ Usage:
   axon watch [path] [--interval-ms=1000] [--debounce-ms=500] [--backend=auto|native|poll]
                                         Watch for external edits and incrementally reindex
                                         (native inotify/FSEvents with automatic poll fallback)
-  axon capsule <query> [--no-cache]     Print context capsule for a query
+  axon capsule <query> [--no-cache] [--retrieval-mode=semantic|hybrid]
+  axon symbol-communities
+  axon execution-flow [--max-depth=N] [--max-paths=N]
+  axon api-shape [--identity=qualified-contract-key]
+  axon data-trace <relative-ts-or-js-file> [--symbol=name]
   axon artifact-retrieve <artifact_id>   Retrieve original CCR artifact content
   axon filter <kind> [--budget=N] [--metrics=json]
                                         Filter stdin output (auto|diff|lint|log|grep|json|package|test|tsc|text)
@@ -448,22 +453,73 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (cmd == "symbol-communities" || cmd == "execution-flow" || cmd == "api-shape" ||
+        cmd == "data-trace") {
+        nlohmann::json args = nlohmann::json::object();
+        for (int i = 2; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg.rfind("--identity=", 0) == 0)
+                args["identity"] = arg.substr(11);
+            else if (arg.rfind("--symbol=", 0) == 0)
+                args["symbol"] = arg.substr(9);
+            else if (arg.rfind("--max-depth=", 0) == 0)
+                args["max_depth"] = std::stoi(arg.substr(12));
+            else if (arg.rfind("--max-paths=", 0) == 0)
+                args["max_paths"] = std::stoi(arg.substr(12));
+            else if (cmd == "data-trace" && !args.contains("file"))
+                args["file"] = arg;
+            else {
+                std::cerr << "Unexpected argument: " << arg << "\n";
+                return 1;
+            }
+        }
+        auto cfg = load_config();
+        if (!fs::exists(cfg.db_path)) {
+            std::cerr << "No index found. Run `axon index` first.\n";
+            return 1;
+        }
+        auto db = open_database_or_report(cfg.db_path);
+        if (!db) return 1;
+        const std::string query = cmd == "symbol-communities" ? "symbol_communities"
+                                  : cmd == "execution-flow"   ? "execution_flow"
+                                  : cmd == "api-shape"        ? "api_shape"
+                                                              : "trace_data_flow";
+        try {
+            auto result = axon::run_impact_query(query, args, *db, cfg.project_root);
+            std::cout << result.dump(2) << "\n";
+            return result.contains("error") ? 1 : 0;
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << "\n";
+            return 1;
+        }
+    }
+
     // ── axon capsule <query> [--no-cache] ──────────────────────────────────
     if (cmd == "capsule") {
         if (argc < 3) {
-            std::cerr << "Usage: axon capsule <query> [--no-cache]\n";
+            std::cerr
+                << "Usage: axon capsule <query> [--no-cache] [--retrieval-mode=semantic|hybrid]\n";
             return 1;
         }
         std::string query;
         bool no_cache = false;
+        std::string retrieval_mode = "hybrid";
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
             if (a == "--no-cache") {
                 no_cache = true;
                 continue;
             }
+            if (a.rfind("--retrieval-mode=", 0) == 0) {
+                retrieval_mode = a.substr(17);
+                continue;
+            }
             if (!query.empty()) query += " ";
             query += a;
+        }
+        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid") {
+            std::cerr << "retrieval_mode must be semantic or hybrid\n";
+            return 1;
         }
 
         auto cfg = load_config();
@@ -476,24 +532,43 @@ int main(int argc, char* argv[]) {
         if (!db) return 1;
         auto graph = axon::load_graph(*db);
         auto start = std::chrono::steady_clock::now();
+        auto print_capsule = [](const axon::ContextCapsule& c, const char* cache_state) {
+            nlohmann::json j = {{"query", c.query},
+                                {"retrieval_mode", c.retrieval_mode},
+                                {"token_estimate", c.token_estimate},
+                                {"total_files_indexed", c.total_files},
+                                {"cache", cache_state}};
+            j["pivot_files"] = nlohmann::json::array();
+            j["support_files"] = nlohmann::json::array();
+            j["selection"] = nlohmann::json::array();
+            for (const auto& f : c.pivot_files)
+                j["pivot_files"].push_back({{"path", f.path},
+                                            {"source_ref", f.source_ref},
+                                            {"content", f.content},
+                                            {"tokens", f.token_estimate}});
+            for (const auto& f : c.support_files)
+                j["support_files"].push_back({{"path", f.path},
+                                              {"source_ref", f.source_ref},
+                                              {"content", f.content},
+                                              {"tokens", f.token_estimate}});
+            for (const auto& s : c.selection)
+                j["selection"].push_back({{"symbol_id", s.symbol_id},
+                                          {"file_id", s.file_id},
+                                          {"semantic_rank", s.semantic_rank},
+                                          {"lexical_rank", s.lexical_rank},
+                                          {"fused_score", s.fused_score}});
+            std::cout << j.dump(2) << '\n';
+        };
 
         // Cache check (W2.T01) — skipped under --no-cache so devs can force
         // a fresh assemble after parser/grammar changes that would otherwise
         // be served from a stale entry.
         const std::string epoch = axon::current_project_epoch(*db);
         const std::string cache_key = axon::compute_capsule_cache_key(
-            query, cfg.project_cfg.token_budget, epoch, axon::VERSION);
+            query, cfg.project_cfg.token_budget, epoch, axon::VERSION, retrieval_mode);
         if (!no_cache) {
             if (auto hit = axon::capsule_cache_lookup(*db, cache_key, epoch)) {
-                std::cout << "{\n";
-                std::cout << "  \"query\": \"" << hit->query << "\",\n";
-                std::cout << "  \"token_estimate\": " << hit->token_estimate << ",\n";
-                std::cout << "  \"pivot_files\": " << hit->pivot_files.size() << ",\n";
-                std::cout << "  \"support_files\": " << hit->support_files.size() << ",\n";
-                std::cout << "  \"compression_tokens_saved\": " << hit->compression_tokens_saved
-                          << ",\n";
-                std::cout << "  \"cache\": \"hit\"\n";
-                std::cout << "}\n";
+                print_capsule(*hit, "hit");
                 for (const auto& f : hit->pivot_files)
                     std::cerr << "  [pivot]   " << f.path << " (" << f.token_estimate << " tok)\n";
                 for (const auto& f : hit->support_files)
@@ -517,8 +592,9 @@ int main(int argc, char* argv[]) {
         axon::EmbeddingModel& model = *model_opt;
 
         auto compression = axon::compression_from_string(cfg.project_cfg.capsule_compression);
-        auto capsule = axon::assemble_capsule(query, {}, *db, model, graph, cfg.project_root,
-                                              cfg.project_cfg.token_budget, 0, compression);
+        auto capsule =
+            axon::assemble_capsule(query, {}, *db, model, graph, cfg.project_root,
+                                   cfg.project_cfg.token_budget, 0, compression, retrieval_mode);
         if (!no_cache) {
             axon::capsule_cache_insert(*db, cache_key, epoch, capsule);
         }
@@ -530,13 +606,7 @@ int main(int argc, char* argv[]) {
                                     capsule.compression_tokens_saved, false, "compression"});
         }
 
-        std::cout << "{\n";
-        std::cout << "  \"query\": \"" << query << "\",\n";
-        std::cout << "  \"token_estimate\": " << capsule.token_estimate << ",\n";
-        std::cout << "  \"pivot_files\": " << capsule.pivot_files.size() << ",\n";
-        std::cout << "  \"support_files\": " << capsule.support_files.size() << ",\n";
-        std::cout << "  \"compression_tokens_saved\": " << capsule.compression_tokens_saved << "\n";
-        std::cout << "}\n";
+        print_capsule(capsule, "miss");
 
         for (const auto& f : capsule.pivot_files)
             std::cerr << "  [pivot]   " << f.path << " (" << f.token_estimate << " tok)\n";

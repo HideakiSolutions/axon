@@ -1,0 +1,308 @@
+{
+  "repositories": [
+    "orders",
+    "billing",
+    "notifications"
+  ],
+  "languages": [
+    "typescript",
+    "javascript",
+    "python",
+    "java",
+    "go",
+    "csharp"
+  ],
+  "labels": [
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::createOrder",
+      "consumer": "billing/client.py::submitOrder",
+      "identity": "orders|POST|/v1/orders",
+      "verdict": "true"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::createOrder",
+      "consumer": "notifications/worker.go::archiveOrder",
+      "identity": "orders|POST|/v1/orders",
+      "verdict": "false",
+      "reason": "different route and method"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::createOrder",
+      "consumer": "billing/client.py::submitOrder",
+      "identity": "orders|createOrder",
+      "verdict": "true"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::getOrder",
+      "consumer": "billing/client.py::submitOrder",
+      "identity": "orders|getOrder",
+      "verdict": "false"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::charge",
+      "consumer": "orders/grpc_client.cs::Charge",
+      "identity": "commerce.billing|BillingService|Charge",
+      "verdict": "true"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::charge",
+      "consumer": "notifications/worker.go::notify",
+      "identity": "commerce.billing|BillingService|Charge",
+      "verdict": "false",
+      "reason": "different RPC"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/events.js::publishCreated",
+      "consumer": "billing/events.py::onCreated",
+      "identity": "kafka|broker-a|orders.created",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/events.js::publishCreated",
+      "consumer": "notifications/events.go::consumeCreated",
+      "identity": "kafka|broker-a|orders.created",
+      "verdict": "false",
+      "reason": "homonymous topic on broker-b"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::createOrder",
+      "consumer": "notifications/dynamic.cs::Call",
+      "verdict": "unknown",
+      "reason": "runtime-computed route"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/events.js::publishCreated",
+      "consumer": "notifications/dynamic.cs::Subscribe",
+      "verdict": "unknown",
+      "reason": "runtime-computed topic"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::listOrders",
+      "consumer": "billing/client.py::fetchOrderList",
+      "identity": "orders|GET|/v1/orders/list",
+      "verdict": "true"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::listOrders",
+      "consumer": "billing/client.py::fetchOrderList",
+      "identity": "orders|listOrders",
+      "verdict": "true"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::confirmOrder",
+      "consumer": "billing/client.py::confirmOrder",
+      "identity": "orders|POST|/v1/orders/confirm",
+      "verdict": "true"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::confirmOrder",
+      "consumer": "billing/client.py::confirmOrder",
+      "identity": "orders|confirmOrder",
+      "verdict": "true"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::updateStatus",
+      "consumer": "billing/client.py::setOrderStatus",
+      "identity": "orders|PUT|/v1/orders/status",
+      "verdict": "true"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::updateStatus",
+      "consumer": "billing/client.py::setOrderStatus",
+      "identity": "orders|updateStatus",
+      "verdict": "true"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::archiveOrder",
+      "consumer": "billing/client.py::archiveOrder",
+      "identity": "orders|DELETE|/v1/orders/archive",
+      "verdict": "true"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::archiveOrder",
+      "consumer": "billing/client.py::archiveOrder",
+      "identity": "orders|archiveOrder",
+      "verdict": "true"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::refund",
+      "consumer": "orders/grpc_client.cs::Refund",
+      "identity": "commerce.billing|BillingService|Refund",
+      "verdict": "true"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::capture",
+      "consumer": "orders/grpc_client.cs::Capture",
+      "identity": "commerce.billing|BillingService|Capture",
+      "verdict": "true"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::cancel",
+      "consumer": "orders/grpc_client.cs::Cancel",
+      "identity": "commerce.billing|BillingService|Cancel",
+      "verdict": "true"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/LedgerService.java::snapshot",
+      "consumer": "orders/ledger_client.cs::Snapshot",
+      "identity": "commerce.billing|LedgerService|Snapshot",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_confirmed.js::publishConfirmed",
+      "consumer": "billing/event_confirmed.py::onConfirmed",
+      "identity": "kafka|broker-a|orders.confirmed",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_cancelled.js::publishCancelled",
+      "consumer": "billing/event_cancelled.py::onCancelled",
+      "identity": "kafka|broker-a|orders.cancelled",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_archived.js::publishArchived",
+      "consumer": "billing/event_archived.py::onArchived",
+      "identity": "kafka|broker-a|orders.archived",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_failed.js::publishFailed",
+      "consumer": "billing/event_failed.py::onFailed",
+      "identity": "kafka|broker-a|orders.failed",
+      "verdict": "true"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::confirmOrder",
+      "consumer": "billing/client.py::setOrderStatus",
+      "identity": "orders|POST|/v1/orders/confirm",
+      "verdict": "false",
+      "reason": "different method and route"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::confirmOrder",
+      "consumer": "billing/client.py::setOrderStatus",
+      "identity": "orders|confirmOrder",
+      "verdict": "false",
+      "reason": "different operationId"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/LedgerService.java::snapshot",
+      "consumer": "orders/grpc_client.cs::Charge",
+      "identity": "commerce.billing|LedgerService|Snapshot",
+      "verdict": "false",
+      "reason": "different service and method"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_confirmed.js::publishConfirmed",
+      "consumer": "billing/event_cancelled.py::onCancelled",
+      "identity": "kafka|broker-a|orders.confirmed",
+      "verdict": "false",
+      "reason": "different topic"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/ShippingService.java::charge",
+      "consumer": "orders/shipping_client.cs::Charge",
+      "identity": "commerce.billing|ShippingService|Charge",
+      "verdict": "true"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::charge",
+      "consumer": "orders/shipping_client.cs::Charge",
+      "identity": "commerce.billing|BillingService|Charge",
+      "verdict": "false",
+      "reason": "same RPC method name, different service"
+    },
+    {
+      "surface": "http",
+      "producer": "orders/api.ts::listOrders",
+      "consumer": "notifications/worker.go::fetchOrders",
+      "identity": "orders|GET|/v1/orders/list",
+      "verdict": "true"
+    },
+    {
+      "surface": "openapi",
+      "producer": "orders/openapi.yaml::listOrders",
+      "consumer": "notifications/worker.go::fetchOrders",
+      "identity": "orders|listOrders",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_failed.js::publishFailed",
+      "consumer": "notifications/events_failover.go::consumeFailed",
+      "identity": "kafka|broker-a|orders.failed",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_broker_b.js::publishCreatedReplica",
+      "consumer": "notifications/events.go::consumeCreated",
+      "identity": "kafka|broker-b|orders.created",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/event_broker_b.js::publishCreatedReplica",
+      "consumer": "notifications/asyncapi.yaml::consumeCreated",
+      "identity": "kafka|broker-b|orders.created",
+      "verdict": "true"
+    },
+    {
+      "surface": "topic",
+      "producer": "orders/events.js::publishCreated",
+      "consumer": "notifications/asyncapi.yaml::consumeCreated",
+      "identity": "kafka|broker-a|orders.created",
+      "verdict": "false",
+      "reason": "declared consumer belongs to broker-b"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::charge",
+      "consumer": "orders/grpc_unrelated.cs::ChargeOther",
+      "identity": "commerce.billing|BillingService|Charge",
+      "verdict": "false",
+      "reason": "receiver is not the typed BillingService client in the same file"
+    },
+    {
+      "surface": "grpc",
+      "producer": "billing/BillingService.java::charge",
+      "consumer": "orders/grpc_shadowed.cs::ChargeOther",
+      "identity": "commerce.billing|BillingService|Charge",
+      "verdict": "false",
+      "reason": "same receiver name is OtherClient in a different method"
+    }
+  ]
+}

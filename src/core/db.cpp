@@ -1,4 +1,5 @@
 #include "db.hpp"
+#include "contracts.hpp"
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -136,6 +137,7 @@ duckdb::MaterializedQueryResult& Database::query(const std::string& sql) {
 }
 
 void Database::run_migrations() {
+    ensure_contract_schema(*conn_);
     exec("CREATE TABLE IF NOT EXISTS files ("
          "  id        BIGINT PRIMARY KEY,"
          "  path      VARCHAR NOT NULL UNIQUE,"
@@ -162,8 +164,38 @@ void Database::run_migrations() {
          "  end_line   INTEGER NOT NULL,"
          "  signature  VARCHAR,"
          "  docstring  VARCHAR,"
+         "  search_terms VARCHAR,"
+         "  search_length INTEGER,"
          "  embedding  FLOAT[768]"
          ")");
+    try {
+        exec("ALTER TABLE symbols ADD COLUMN search_terms VARCHAR");
+    } catch (...) {
+    }
+    try {
+        exec("ALTER TABLE symbols ADD COLUMN search_length INTEGER");
+    } catch (...) {
+    }
+    exec("CREATE TABLE IF NOT EXISTS symbol_terms ("
+         "  symbol_id BIGINT NOT NULL,"
+         "  term VARCHAR NOT NULL,"
+         "  tf INTEGER NOT NULL"
+         ")");
+    exec("CREATE INDEX IF NOT EXISTS idx_symbol_terms_term ON symbol_terms(term)");
+    // Idempotent after interruption between adding the column and backfilling
+    // it: a NULL length would otherwise silently disable lexical retrieval.
+    exec("UPDATE symbols SET search_length = CASE WHEN trim(search_terms) = '' THEN 0 "
+         "ELSE array_length(string_split(trim(search_terms), ' ')) END "
+         "WHERE search_terms IS NOT NULL AND search_length IS NULL");
+    auto lexical_postings = conn_->Query("SELECT COUNT(*) FROM symbol_terms");
+    require_ok(lexical_postings, "check lexical postings migration");
+    if (lexical_postings->GetValue<int64_t>(0, 0) == 0) {
+        exec("INSERT INTO symbol_terms "
+             "SELECT s.id,t.term,COUNT(*)::INTEGER FROM symbols s "
+             "CROSS JOIN UNNEST(string_split(trim(s.search_terms),' ')) AS t(term) "
+             "WHERE s.search_terms IS NOT NULL AND t.term <> '' "
+             "GROUP BY s.id,t.term");
+    }
 
     exec("CREATE TABLE IF NOT EXISTS edges ("
          "  id          BIGINT PRIMARY KEY,"

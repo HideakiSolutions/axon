@@ -1,0 +1,28 @@
+openapi: 3.1.0
+info: {title: Orders, version: 1.0.0}
+servers: [{url: 'https://orders.example.test'}]
+paths:
+  /v1/orders:
+    post:
+      operationId: createOrder
+      responses: {'200': {description: Created}}
+  /v1/orders/{id}:
+    get:
+      operationId: getOrder
+      responses: {'200': {description: Found}}
+  /v1/orders/list:
+    get:
+      operationId: listOrders
+      responses: {'200': {description: Found}}
+  /v1/orders/confirm:
+    post:
+      operationId: confirmOrder
+      responses: {'200': {description: Confirmed}}
+  /v1/orders/status:
+    put:
+      operationId: updateStatus
+      responses: {'200': {description: Updated}}
+  /v1/orders/archive:
+    delete:
+      operationId: archiveOrder
+      responses: {'200': {description: Archived}}

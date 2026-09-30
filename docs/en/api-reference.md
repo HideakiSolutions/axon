@@ -1,6 +1,6 @@
 # API Reference — axon MCP Tools
 
-All 41 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
+All 45 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ---
 
@@ -15,11 +15,14 @@ Token-efficient context: pivot files in full + support files skeletonized. Optio
 | `query` | string | No | Natural language query to guide pivot selection |
 | `pivot_files` | string[] | No | Force specific files as pivots |
 | `token_budget` | number | No | Max tokens for the capsule (default: 8000) |
+| `retrieval_mode` | string | No | `hybrid` (default after the Godot gate) or `semantic`; older indexes without lexical documents need `axon index --force` |
 | `dialogue_budget` | number | No | Token budget for `related_turns[]` from dialogue history (default: 0 = disabled) |
 | `no_cache` | boolean | No | Bypass the query-hash cache and force a fresh assembly (default: false) |
 | `compression` | string | No | `off` or `body`; `body` classifies oversized payloads before lossy compression and only returns compressed output when it saves tokens |
 
 `compression="body"` classifies content as source code, JSON, diff, log, Markdown, plain text, or binary-like before applying any lossy reduction. Binary-like content and impossible budgets pass through unchanged. Responses include a `compression` object with `input_tokens`, `output_tokens`, and `tokens_saved`; nonzero body-compression savings are also recorded in the `compression` telemetry layer. Recoverable lossy slices include CCR markers in content and their IDs in `ccr_artifact_ids`; call `artifact_retrieve` with one of those IDs to recover the original slice.
+
+Responses also include `retrieval_mode` and `selection[]` with symbol/file IDs, semantic and lexical ranks, and fused scores. Cache entries are separate for each mode. CLI: `axon capsule "query" --retrieval-mode=hybrid --no-cache`.
 
 ---
 
@@ -192,12 +195,51 @@ No parameters.
 
 ### `group_impact`
 
-Cross-repo blast radius: given a file path in the current repo, return impacted files in other registered repos.
+Cross-repository impact for a file in the current repository. `typed_contracts`
+contains resolved HTTP (service, method, route), OpenAPI (`operationId`), RPC
+(package, service, method), and topic (protocol, broker, address) links. Each
+link includes provider and consumer repository, file, symbol, and evidence
+origin (`observed` or `declared`). The current static extractor is experimental.
+`unknown_contracts` lists unresolved dynamic references in the requested file.
+`contract_result_state=no_confirmed_link` means the index has no confirmed
+link; it does not establish that there are no consumers. `typed_evidence_state`
+is `incomplete` when a registered index could not supply contract evidence.
+
+`heuristic_candidates` contains legacy filename-stem matches separately. The
+existing `cross_repo_impact`, `file`, `stem`, `group_filter`, and `failures`
+fields remain available for clients using the previous response shape.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `file` | string | **Yes** | File path (relative to current project root) |
 | `group` | string | No | Limit search to repos in this group |
+
+---
+
+### `symbol_communities`, `execution_flow`, `api_shape`, `trace_data_flow`
+
+These read-only pilot tools share their JSON implementation with the CLI:
+`axon symbol-communities`, `axon execution-flow [--max-depth=N]
+[--max-paths=N]`, `axon api-shape [--identity=qualified-key]`, and
+`axon data-trace <project-relative-file> [--symbol=name]`.
+
+`symbol_communities` returns deterministic connected components from indexed
+call/import relations and a `truncated` flag. `execution_flow` returns ordered
+paths from resolved HTTP, RPC and event entries to detected outputs. Each path
+has `edge_evidence` and `uncertain_edges`; indexed call targets and detected
+outputs are heuristic and remain uncertain. Defaults are eight edges and
+fifty paths, with a `truncated` flag when a bound is reached.
+
+`api_shape` accepts optional `identity` and reports `compatible`, `proven`,
+`possible` or `unknown` for literal TS/JS HTTP response fields and consumer
+accesses on confirmed links. `unavailable` lists registered indexes that could
+not be read; an empty finding list does not mean that no consumer exists.
+
+`trace_data_flow` requires a project-relative TS/JS `file`, with optional
+`symbol`. It performs experimental, on-demand intrafunction tracing from
+request inputs to static persistence or HTTP calls. `confirmed` means a
+straight-line path; dynamic calls and branches are `unknown`. It adds no
+persistent index. See [pilot evidence](../evidence/graph-and-data-trace-pilots-2026-09-30.md).
 
 ---
 
@@ -344,7 +386,7 @@ When running `axon web` or `axon serve --http`:
 | `GET` | `/api/symbol/<name>` | Symbol detail: `{name, kind, file, line, signature, caller_files}` |
 | `GET` | `/api/search?q=<query>` | Search: `{files[], symbols[]}` |
 | `GET` | `/api/observations?q=<text>&limit=N` | List observations (semantic search if embeddings enabled) |
-| `GET` | `/api/capsule?q=<text>&budget=N&pivots=path1,path2` | Assemble token-budget context capsule — `400` when `q` is missing, `503` when the DB or the embedding model is not ready |
+| `GET` | `/api/capsule?q=<text>&budget=N&retrieval_mode=hybrid&no_cache=true&pivots=path1,path2` | Assemble token-budget context capsule — `400` when `q` or the mode is invalid, `503` when the DB or embedding model is not ready |
 | `GET` | `/api/artifact/<artifact_id>` | Retrieve original content for a CCR artifact — `404` when unknown, `503` when the DB is not ready |
 | `GET` | `/api/metrics` | Request/token/cache/cost aggregates when telemetry is enabled, including per-layer savings; graph/cache summary otherwise |
 | `POST` | `/api/detect-changes` | Detect changed symbols/files (body: `{ref?}`) |
@@ -391,6 +433,8 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 {
   "capsule": {
     "query": "user authentication flow",
+    "retrieval_mode": "hybrid",
+    "selection": [{"symbol_id": 12, "file_id": 4, "semantic_rank": 3, "lexical_rank": 1, "fused_score": 0.08}],
     "pivot_files": [
       {
         "path": "src/auth/token.ts",
