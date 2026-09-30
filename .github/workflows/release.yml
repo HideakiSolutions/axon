@@ -24,12 +24,15 @@ jobs:
           - target: linux-x64
             os: ubuntu-22.04
             archive_ext: tar.gz
+            ggml_native: 'OFF'
           - target: macos-arm64
             os: macos-14
             archive_ext: tar.gz
+            ggml_native: 'ON'
           - target: windows-x64
             os: windows-2022
             archive_ext: zip
+            ggml_native: 'OFF'
     env:
       AXON_DUCKDB_VERSION: 1.2.2
     steps:
@@ -73,7 +76,15 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -GNinja -DGGML_NATIVE=${{ matrix.ggml_native }}
+
+      - name: Verify portable x64 CPU configuration
+        if: matrix.ggml_native == 'OFF'
+        shell: bash
+        run: |
+          grep -Fx 'GGML_NATIVE:BOOL=OFF' build/CMakeCache.txt
+          grep -Fx 'GGML_AVX2:BOOL=ON' build/CMakeCache.txt
+          grep -Fx 'GGML_AVX512:BOOL=OFF' build/CMakeCache.txt
 
       - name: Build
         run: cmake --build build --target axon -j 2
@@ -86,8 +97,18 @@ jobs:
         if: runner.os == 'Linux'
         run: cmake --build build -j 2
 
+      - name: Stage embedding model for release verification
+        if: runner.os == 'Linux'
+        run: |
+          model="${RUNNER_TEMP}/nomic-embed-text-v1.5.Q4_K_M.gguf"
+          curl --fail --location --retry 3 --output "${model}" \
+            'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q4_K_M.gguf'
+          echo "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac  ${model}" | sha256sum --check
+
       - name: Run context optimization release gate
         if: runner.os == 'Linux'
+        env:
+          AXON_EMBEDDING_MODEL: ${{ runner.temp }}/nomic-embed-text-v1.5.Q4_K_M.gguf
         run: ctest --test-dir build --output-on-failure
 
       - name: Build VS Code extension

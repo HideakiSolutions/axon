@@ -101,3 +101,47 @@ axon capsule 'compute_velocity' --no-cache
 
 The model used for this run was the [nomic-ai GGUF Q4_K_M release](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/blob/main/nomic-embed-text-v1.5.Q4_K_M.gguf), SHA-256
 `d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac`.
+
+## Answer support check (2026-09-29)
+
+The same 78-file index was queried through the MCP `get_context_capsule` tool
+with `no_cache=true` and an 8,000-token budget. Each percentage below compares
+the capsule's estimated tokens with `ceil(bytes/4)` for the **union of its
+selected pivot and support files**, not with the whole repository. The assessment
+asks whether the returned text alone supports a correct answer; the source files
+were then read to establish the reference behavior. It is a retrieval quality
+check, not an end-to-end language-model or billing measurement.
+
+| Question or search | Capsule / selected raw | Reduction | Answer support |
+| --- | ---: | ---: | --- |
+| Portuguese: how movement velocity is computed | 425 / 20,455 | 97.92% | Insufficient: `player.gd` contributes only an unrelated constant. |
+| Exact `compute_velocity` | 581 / 23,224 | 97.50% | Sufficient: the function body exposes camera-relative direction, diagonal normalization, acceleration, gravity, and floor handling. |
+| Portuguese: camera following and zoom | 695 / 19,130 | 96.37% | Insufficient: `camera_rig.gd` is absent. |
+| English: camera rig follow/zoom | 1,678 / 49,995 | 96.64% | Partial: `camera_rig.gd` is selected, but only `_zoom_progress` is shown. |
+| Exact `_advance_follow_state` | 2,029 / 50,778 | 96.00% | Partial: follow and anticipation appear, but the body is truncated before the manual-return behavior. |
+| Exact `_apply_zoom_and_overview` | 1,296 / 50,522 | 97.43% | Partial: distance and elevation appear, but the body is truncated. |
+| Portuguese: dialogue choices and consequences | 443 / 13,705 | 96.77% | Insufficient: no dialogue session or state logic is returned. |
+| English: dialogue choice/state/consequence | 2,511 / 47,232 | 94.68% | Partial: related files appear, but the commit/effect implementation does not. |
+| Exact `_apply_pending_option` | 1,124 / 52,677 | 97.87% | Sufficient for the effect: `collect` calls mission rules and persists only on a changed state. |
+| Portuguese: save and restore mission state | 331 / 15,525 | 97.87% | Insufficient: `save_local.gd` is absent. |
+| English: mission state save/load | 1,007 / 22,486 | 95.52% | Partial: the start of `save` appears, truncated before the write; `load` is absent. |
+| Exact `SaveLocal load` | 578 / 26,318 | 97.80% | Insufficient: only the `SaveLocal` class declaration appears. |
+
+The reference source confirms that `SaveLocal.load()` distinguishes empty and
+corrupt records, parses through notebook rules, and updates the last-written
+state only after validation. None of the tested save capsules supports that
+answer. Likewise, a correct dialogue answer needs `choose_option()` and
+`_apply_pending_option()` together; the broad capsules do not provide both.
+Across the four broad Portuguese questions, **zero** capsules contain enough
+code for a complete answer. Exact symbol searches improve movement and
+dialogue-effect coverage, but body truncation and missed symbol selection
+remain material limits. The compact context therefore cannot be treated as an
+equivalent replacement for source reading on these questions.
+
+The installed v1.4.0 Linux package was also exercised against this index. Its
+embedding path terminated with `SIGILL` on an Intel i7-8700K (AVX2, no AVX-512)
+before a capsule was returned. The quality check above used a local source
+build on the same host. The release-build compatibility defect is addressed in
+v1.4.1 by disabling ggml's host-native instruction selection for x64 packages;
+the final packaged binary must pass a model-loading smoke on this host before
+installation is considered verified.
