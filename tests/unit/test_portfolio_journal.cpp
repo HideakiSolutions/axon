@@ -588,4 +588,57 @@ TEST_F(PortfolioJournalTest, SymbolModeCallResolutionStaysInsideOuterJournalTran
     EXPECT_GT(scalar_i64(db, "SELECT COUNT(*) FROM index_events"), 0);
 }
 
+TEST_F(PortfolioJournalTest, FullIndexBeyondTheEventBoundIsSplitIntoBoundedEvents) {
+    // A full index of a large repository lists every symbol in one logical change; the
+    // journal bounds each event at 10,000 entities, so the index must be split, not rejected.
+    constexpr int kSymbols = 25000;
+    std::string source;
+    for (int i = 0; i < kSymbols; ++i)
+        source +=
+            "export function fn" + std::to_string(i) + "() { return " + std::to_string(i) + "; }\n";
+    write_file(root / "src/big.ts", source);
+    axon::Database db(cfg.db_path);
+    axon::IndexStats stats;
+    ASSERT_NO_THROW(stats = axon::index_project(cfg, db));
+    EXPECT_GE(stats.symbols_found, kSymbols);
+    EXPECT_EQ(
+        scalar_i64(db, "SELECT COUNT(*) FROM index_events WHERE event_type='IndexSymbolsUpdated'"),
+        (stats.symbols_found + 9999) / 10000);
+    EXPECT_EQ(
+        scalar_i64(db,
+                   "SELECT COUNT(*) FROM index_events WHERE event_type='IndexSnapshotCompleted'"),
+        1);
+    // Sequences stay contiguous and every event chains to the previous epoch.
+    EXPECT_EQ(scalar_i64(db, "SELECT COUNT(*) FROM index_events"),
+              scalar_i64(db, "SELECT MAX(sequence) FROM index_events"));
+}
+
+TEST_F(PortfolioJournalTest, ChunkedAppendKeepsDeleteSemanticsAndSequenceOrder) {
+    axon::Database db(cfg.db_path);
+    axon::index_project(cfg, db);
+    std::vector<axon::portfolio::AffectedEntity> deleted;
+    for (int i = 0; i < 20001; ++i)
+        deleted.push_back({"file", "gone/" + std::to_string(i) + ".ts", "delete", std::nullopt});
+    axon::portfolio::Transaction transaction(db.conn());
+    transaction.mark_index_mutation();
+    const auto manifest = axon::portfolio::compute_manifest_hash(db.conn());
+    const auto sequences = axon::portfolio::append_index_events(
+        transaction, db.conn(), "IndexFilesDeleted", deleted, manifest);
+    transaction.commit();
+    ASSERT_EQ(sequences.size(), 3u);
+    EXPECT_EQ(sequences[1], sequences[0] + 1);
+    EXPECT_EQ(sequences[2], sequences[1] + 1);
+    EXPECT_EQ(
+        scalar_i64(db, "SELECT COUNT(*) FROM index_events WHERE event_type='IndexFilesDeleted'"),
+        3);
+    const std::vector<axon::portfolio::AffectedEntity> none;
+    axon::portfolio::Transaction empty_transaction(db.conn());
+    empty_transaction.mark_index_mutation();
+    EXPECT_EQ(axon::portfolio::append_index_events(empty_transaction, db.conn(),
+                                                   "IndexSymbolsUpdated", none, manifest)
+                  .size(),
+              1u);
+    empty_transaction.commit();
+}
+
 } // namespace

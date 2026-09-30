@@ -1,6 +1,7 @@
 #pragma once
 
 #include <duckdb.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -57,6 +58,17 @@ uint64_t append_index_event(Transaction& transaction, duckdb::Connection& connec
                             const std::vector<AffectedEntity>& affected,
                             const std::string& manifest_hash,
                             const std::optional<std::string>& source_ref = std::nullopt);
+// Schema bound on affected entities per event (journal and projector both enforce it).
+constexpr std::size_t kMaxAffectedPerEvent = 10000;
+// Appends `affected` as consecutive events of the same type, each within
+// kMaxAffectedPerEvent, in the caller's transaction. A full index of a large repository
+// exceeds the per-event bound. Returns one sequence per event; entity i belongs to
+// sequences[i / kMaxAffectedPerEvent]. An empty set still appends a single event.
+std::vector<uint64_t>
+append_index_events(Transaction& transaction, duckdb::Connection& connection,
+                    const std::string& event_type, const std::vector<AffectedEntity>& affected,
+                    const std::string& manifest_hash,
+                    const std::optional<std::string>& source_ref = std::nullopt);
 void upsert_tombstone(duckdb::Connection& connection, const AffectedEntity& entity,
                       uint64_t deleted_sequence, const std::string& deleted_epoch);
 void clear_tombstone(duckdb::Connection& connection, const AffectedEntity& entity);
