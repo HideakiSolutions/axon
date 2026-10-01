@@ -194,10 +194,10 @@ Write-Host "[axon] v Settings: $settingsPath"
 
 # -- 5. Embedding model (optional) --------------------------------------------
 $ModelDir   = if ($env:AXON_MODEL_DIR) { $env:AXON_MODEL_DIR } else { Join-Path $AxonRoot "models" }
-$ModelName  = "nomic-embed-text-v1.5.Q4_K_M.gguf"
+$ModelName  = "Qwen3-Embedding-0.6B-Q8_0.gguf"
 $ModelPath  = Join-Path $ModelDir $ModelName
 $ModelUrl   = if ($env:AXON_EMBEDDING_MODEL_URL) { $env:AXON_EMBEDDING_MODEL_URL } `
-              else { "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/$ModelName" }
+              else { "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/$ModelName" }
 
 if (-not $env:AXON_EMBEDDING_MODEL -and -not (Test-Path $ModelPath)) {
     $download = $true
@@ -206,13 +206,24 @@ if (-not $env:AXON_EMBEDDING_MODEL -and -not (Test-Path $ModelPath)) {
     } elseif ($env:AXON_DOWNLOAD_MODEL -eq "1") {
         $download = $true
     } else {
-        $ans = Read-Host "[axon] Download embedding model (~80 MiB) to $ModelDir? [Y/n]"
+        $ans = Read-Host "[axon] Download embedding model (~640 MiB) to $ModelDir? [Y/n]"
         if ($ans -match '^[Nn]') { $download = $false }
     }
     if ($download) {
         New-Item -ItemType Directory -Force $ModelDir | Out-Null
         Write-Host "[axon] Downloading $ModelName ..."
         Invoke-WebRequest -Uri $ModelUrl -OutFile $ModelPath -UseBasicParsing
+        # The default model is pinned; a custom URL must bring its own hash.
+        $ExpectedHash = if ($env:AXON_EMBEDDING_MODEL_SHA256) { $env:AXON_EMBEDDING_MODEL_SHA256 } `
+                        elseif (-not $env:AXON_EMBEDDING_MODEL_URL) { "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439" } `
+                        else { "" }
+        if ($ExpectedHash) {
+            $actual = (Get-FileHash -Algorithm SHA256 $ModelPath).Hash.ToLower()
+            if ($actual -ne $ExpectedHash.ToLower()) {
+                Remove-Item -Force $ModelPath
+                throw "[axon] SHA-256 mismatch for $ModelName (expected $ExpectedHash, got $actual)"
+            }
+        }
         Write-Host "[axon] v Model: $ModelPath"
     } else {
         Write-Host "[axon] (skipped model -- set AXON_DOWNLOAD_MODEL=1 or AXON_EMBEDDING_MODEL=<path> to enable later)"

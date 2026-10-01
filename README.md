@@ -24,7 +24,7 @@
 - [What this does, in plain English](#what-this-does-in-plain-english)
 - [How it works](#how-it-works)
 - [Token reduction](#token-reduction)
-- [MCP Tools (33)](#mcp-tools-33)
+- [MCP Tools (46)](#mcp-tools-46)
 - [Dialogue Layer](#dialogue-layer)
 - [HTTP Mode & Axon Web](#http-mode--axon-web)
 - [Multi-repo Registry](#multi-repo-registry)
@@ -48,7 +48,7 @@
 
 Axon is a local MCP (Model Context Protocol) server written in C++20 that delivers **surgical context** for AI coding agents. Instead of dumping entire files into the context window, axon builds a precise dependency graph of your codebase and assembles a token-budget-aware "context capsule" — only the pivot files and the relevant signatures of their dependencies.
 
-It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 43 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
+It integrates directly with Claude Code via MCP, responding to `get_context_capsule`, `get_impact_graph`, and 44 other tools, all serving one goal: **let the agent see exactly what it needs, nothing more**.
 
 Axon also ships a native **Dialogue Layer** — structured conversation memory directly in the same DuckDB store. Threads, sessions, turns, and auto-anchors to code artifacts, all locally stored and semantically searchable. `get_context_capsule` can return relevant past conversations alongside code context in a single token budget.
 
@@ -117,6 +117,8 @@ Measured on real projects:
 | mcp-factory | Python | 22,480 | 1,389 | **93%** |
 | event-platform | Python | 42,546 | 2,353 | **94%** |
 
+**Retrieval quality is measured, not assumed.** `evals/retrieval/` holds held-out question sets per language (C++, TypeScript, C#, Java, GDScript) with the exact symbols that answer each question, plus a runner. With the default embedding model and `dense` packing, the gold function is delivered with its body for 82% of 76 questions at ~1,400 tokens per capsule on average, versus 37% at ~4,200 for the previous file-oriented selection. Those sets were written by an independent reviewer who only read the code; the sets used to tune the old selection are not used to judge the new one.
+
 Compression safety: `get_context_capsule` can enable `compression="body"` for oversized symbol bodies. Before lossy compression, Axon classifies the payload as source code, JSON, diff, log, Markdown, plain text, or binary-like data. Binary-like streams and impossible budgets pass through unchanged, compressed output is accepted only when the final token estimate is lower than the original, and lossy capsule body slices get CCR artifact IDs for exact recovery through `artifact_retrieve`. Structured capsule file entries include `source_ref` and `expand_command` so agents can trace and expand context through Axon tools before falling back to raw file reads.
 
 At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M input tokens):
@@ -129,11 +131,12 @@ At 1,000 calls/day with a typical TypeScript project (Claude Sonnet — $3/M inp
 
 ---
 
-## MCP Tools (33)
+## MCP Tools (46)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `retrieval_mode?`, `dialogue_budget?`, `no_cache?`, `compression?` | Token-efficient context capsule; `hybrid` is the default after the Godot retrieval gate and reports BM25/vector selection ranks; `semantic` remains available |
+| `get_context_capsule` | `query`, `pivot_files?`, `token_budget?`, `retrieval_mode?`, `include_selection?`, `dialogue_budget?`, `no_cache?`, `compression?` | Token-efficient context capsule; `dense` (default) delivers the top-K functions ranked by embedding similarity with complete bodies and signatures for the next K; `semantic` / `hybrid` keep the older file-oriented selection |
+| `get_symbol` | `name`, `file?`, `kind?`, `token_budget?` | One definition (signature, docs, body) by name — the cheap follow-up to a capsule instead of reading the whole file |
 | `get_overview` | `limit?` | Top files by coupling + top symbols — ideal for onboarding |
 | `get_impact_graph` | `files[]` | Which files depend on the given files (bidirectional BFS) |
 | `get_callers` | `symbol_name`, `file_path?`, `limit?` | Files that import the file defining a symbol |
@@ -472,8 +475,8 @@ Release tarballs are relocatable: Linux uses `$ORIGIN/../lib`, macOS uses `@exec
 
 ```bash
 pip install huggingface_hub
-huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF \
-    nomic-embed-text-v1.5.Q4_K_M.gguf \
+huggingface-cli download Qwen/Qwen3-Embedding-0.6B-GGUF \
+    Qwen3-Embedding-0.6B-Q8_0.gguf \
     --local-dir ./models/
 ```
 
@@ -606,7 +609,7 @@ src/
 ├── parser/
 │   └── parser.hpp/cpp    # Language dispatcher + symbol/import extraction (18 langs)
 └── mcp/
-    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 45 MCP tool handlers
+    ├── server.hpp/cpp    # stdio JSON-RPC 2.0 loop + all 46 MCP tool handlers
     ├── http_server.hpp/cpp # HTTP REST API + multi-repo graph aggregation
     └── protocol.hpp      # make_response / make_error / make_tool_result helpers
 third_party/
@@ -632,7 +635,7 @@ graph TD
     CLI --> HTTP[HTTP Server\nREST API]
     IDX --> PARSER[Parser\n19 languages via tree-sitter]
     IDX --> DB[(DuckDB\nfiles/symbols/edges/observations\nthreads/sessions/turns/anchors)]
-    IDX --> EMB[Embeddings\nllama.cpp + nomic-embed]
+    IDX --> EMB[Embeddings\nllama.cpp + Qwen3-Embedding]
     MCP --> CAPS[Capsule\nBFS + skeletonize]
     MCP --> GRAPH[Graph\nadjacency list]
     MCP --> REG[Registry\n~/.axon/registry.json]
@@ -695,7 +698,7 @@ Symbol-level edges activate the granular BFS in `assemble_capsule` — pivots ex
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| 45 MCP tools | ✅ Done | Code context, dialogue/handoff, CCR artifact retrieval, and portfolio capability tools |
+| 46 MCP tools | ✅ Done | Code context, dialogue/handoff, CCR artifact retrieval, and portfolio capability tools |
 | HTTP REST API + axon-web | ✅ Done | Force-directed graph, repo filter, file tree, symbol mode |
 | Multi-repo registry | ✅ Done | `~/.axon/registry.json`, groups, `--all` flag |
 | Symbol-granular edges (calls) | ✅ Done | `kind='calls'` edges populated via tree-sitter call graph extraction |
@@ -761,7 +764,7 @@ axon index /caminho/para/seu-projeto
 axon serve
 ```
 
-### Ferramentas MCP (33)
+### Ferramentas MCP (46)
 
 | Ferramenta | Descrição |
 |-----------|-----------|
@@ -811,7 +814,7 @@ axon web --port=7070 --all
 
 ### Arquitetura
 
-Axon usa tree-sitter para parsing de AST, DuckDB para armazenamento local do grafo e llama.cpp com nomic-embed-text para embeddings vetoriais (busca semântica). Tudo local, sem nuvem.
+Axon usa tree-sitter para parsing de AST, DuckDB para armazenamento local do grafo e llama.cpp com Qwen3-Embedding para embeddings vetoriais (busca semântica). Tudo local, sem nuvem.
 
 ### Licença
 

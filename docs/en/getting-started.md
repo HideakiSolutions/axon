@@ -94,8 +94,8 @@ Enables `search_memory` and semantic mode of `get_context_capsule`:
 
 ```bash
 pip install huggingface_hub
-huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF \
-    nomic-embed-text-v1.5.Q4_K_M.gguf \
+huggingface-cli download Qwen/Qwen3-Embedding-0.6B-GGUF \
+    Qwen3-Embedding-0.6B-Q8_0.gguf \
     --local-dir /path/to/axon/models/
 ```
 
@@ -137,7 +137,7 @@ Expected output:
 [axon] Indexing /path/to/your-project...
 [axon] Found 847 files (TypeScript: 612, Python: 235)
 [axon] Parsed 847 files, 12,431 symbols, 8,904 edges
-[axon] Embeddings: 12,431/12,431 (768-dim, nomic-embed)
+[axon] Embeddings: 12,431/12,431 (768-dim, Qwen3-Embedding)
 [axon] Done in 4.2s
 ```
 
@@ -221,7 +221,7 @@ curl -s "http://localhost:7070/api/graph?mode=symbol" | jq '.edges | length'
 ## What's Next
 
 - [Architecture](architecture.md) — how axon works internally
-- [API Reference](api-reference.md) — all 45 MCP tools with parameters
+- [API Reference](api-reference.md) — all 46 MCP tools with parameters
 - [Native memory operations](native-memory.md) — capture recovery, hybrid retrieval, and typed handoffs
 - [Axon-first context and shell filtering](axon-primary-rtk-optional.md) — keep RTK optional while Axon handles primary context and shell-output optimization
 - [FAQ](faq.md) — common questions

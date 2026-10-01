@@ -122,14 +122,14 @@ axon index /path/to/project --verbose
 **Diagnosis:**
 ```bash
 ls /path/to/axon/models/
-# Should show: nomic-embed-text-v1.5.Q4_K_M.gguf
+# Should show: Qwen3-Embedding-0.6B-Q8_0.gguf
 ```
 
 **Fix:** Download the model:
 ```bash
 pip install huggingface_hub
-huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF \
-    nomic-embed-text-v1.5.Q4_K_M.gguf \
+huggingface-cli download Qwen/Qwen3-Embedding-0.6B-GGUF \
+    Qwen3-Embedding-0.6B-Q8_0.gguf \
     --local-dir /path/to/axon/models/
 ```
 
