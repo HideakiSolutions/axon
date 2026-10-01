@@ -82,6 +82,9 @@ protected:
 
     int64_t insert_symbol_with_embedding(int64_t file_id, const std::string& name,
                                          const std::string& embed_text) {
+        // Production writes vectors through embed_pending_symbols, which records the model that
+        // produced them; do the same here so the capsule's model check passes.
+        axon::ensure_embedding_model(*db, *model);
         auto vec = model->embed(embed_text);
         std::ostringstream vs;
         vs << "[";
@@ -104,6 +107,8 @@ protected:
 // exceeds the remaining budget must not be appended by the symbol-mode
 // file-level augmentation (observed live: budget=8000, capsule=11693 because
 // a 44 KB signatures-only types.ts skeletonizes to ~10.9k tokens).
+// The support-skeleton augmentation belongs to the file-oriented selection; these tests pin it
+// with retrieval_mode="hybrid" now that the default is "dense".
 TEST_F(CapsuleBudgetTest, SymbolModeAugmentRespectsBudgetWithOversizedSupportSkeleton) {
     const int budget = 2000;
 
@@ -140,7 +145,7 @@ TEST_F(CapsuleBudgetTest, SymbolModeAugmentRespectsBudgetWithOversizedSupportSke
     graph.file_byte_size[big_fid] = (int64_t)big_src.size();
 
     auto capsule = axon::assemble_capsule("dispatch a task to a worker", {}, *db, *model, graph,
-                                          proj, budget, 0, axon::CapsuleCompression::Off);
+                                          proj, budget, 0, axon::CapsuleCompression::Off, "hybrid");
 
     ASSERT_FALSE(capsule.pivot_files.empty());
     EXPECT_LE(capsule.token_estimate, budget)
@@ -185,7 +190,7 @@ TEST_F(CapsuleBudgetTest, SupportSkeletonServedFromIndex) {
     fx.graph.file_byte_size[sup_fid] = (int64_t)fx.support_src.size();
 
     auto capsule = axon::assemble_capsule("dispatch a task to a worker", {}, *db, *model, fx.graph,
-                                          proj, 2000, 0, axon::CapsuleCompression::Off);
+                                          proj, 2000, 0, axon::CapsuleCompression::Off, "hybrid");
 
     const axon::CapsuleFile* sup = nullptr;
     for (const auto& f : capsule.support_files)
@@ -215,7 +220,7 @@ TEST_F(CapsuleBudgetTest, SupportSkeletonFallsBackWhenIndexEmpty) {
     fx.graph.file_byte_size[sup_fid] = (int64_t)fx.support_src.size();
 
     auto capsule = axon::assemble_capsule("dispatch a task to a worker", {}, *db, *model, fx.graph,
-                                          proj, 2000, 0, axon::CapsuleCompression::Off);
+                                          proj, 2000, 0, axon::CapsuleCompression::Off, "hybrid");
 
     const axon::CapsuleFile* sup = nullptr;
     for (const auto& f : capsule.support_files)
@@ -223,4 +228,47 @@ TEST_F(CapsuleBudgetTest, SupportSkeletonFallsBackWhenIndexEmpty) {
     ASSERT_NE(sup, nullptr) << "support file missing from the capsule";
     EXPECT_EQ(sup->content, axon::skeletonize(fx.support_src, axon::Language::TypeScript))
         << "empty index skeleton must fall back to the live skeletonize";
+}
+
+// ── dense packing: top-K functions with bodies, bounded, head+tail elision ───
+
+TEST_F(CapsuleBudgetTest, DenseModeDeliversRankedBodiesElidesLongOnesAndStaysInBudget) {
+    std::string long_body;
+    for (int i = 0; i < 150; ++i)
+        long_body += "  total += step" + std::to_string(i) + "(job);\n";
+    const std::string worker_src = "export function dispatchTask(job: string): number {\n"
+                                   "  let total = 0;\n" +
+                                   long_body + "  return total;\n}\n";
+    const std::string other_src = "export function renderChart(data: number[]): string {\n"
+                                  "  return data.join(',');\n}\n";
+    const int64_t worker_fid = insert_file("worker.ts", worker_src);
+    const int64_t other_fid = insert_file("chart.ts", other_src);
+    const int64_t worker_sym =
+        insert_symbol_with_embedding(worker_fid, "dispatchTask", "dispatch a task to a worker");
+    insert_symbol_with_embedding(other_fid, "renderChart", "render a chart from numbers");
+    db->conn().Query("UPDATE symbols SET end_line = " + std::to_string(154) +
+                     " WHERE name = 'dispatchTask'");
+
+    axon::DependencyGraph graph;
+    graph.id_to_path[worker_fid] = "worker.ts";
+    graph.id_to_path[other_fid] = "chart.ts";
+    graph.path_to_id["worker.ts"] = worker_fid;
+    graph.path_to_id["chart.ts"] = other_fid;
+
+    const int budget = 1200;
+    auto capsule = axon::assemble_capsule("dispatch a task to a worker", {}, *db, *model, graph,
+                                          proj, budget, 0, axon::CapsuleCompression::Off, "dense");
+
+    EXPECT_EQ(capsule.retrieval_mode, "dense");
+    ASSERT_FALSE(capsule.pivot_files.empty());
+    EXPECT_EQ(capsule.pivot_files.front().path, "worker.ts") << "best match comes first";
+    const std::string& content = capsule.pivot_files.front().content;
+    EXPECT_NE(content.find("=== dispatchTask (function)"), std::string::npos);
+    EXPECT_NE(content.find("lines elided"), std::string::npos)
+        << "long body is elided in the middle";
+    EXPECT_NE(content.find("return total;"), std::string::npos) << "tail (return path) survives";
+    EXPECT_LE(capsule.token_estimate, budget);
+    ASSERT_FALSE(capsule.selection.empty());
+    EXPECT_EQ(capsule.selection.front().symbol_id, worker_sym);
+    EXPECT_GT(capsule.selection.front().fused_score, 0.0);
 }
