@@ -199,7 +199,8 @@ void session_end(Database& db, int64_t session_id, EmbeddingModel* model, bool c
     std::string digest = build_digest(db, session_id);
 
     if (model) {
-        auto emb = model->embed(digest);
+        refresh_memory_model(db, *model);
+        auto emb = model->embed_documents({digest})[0];
         db.conn().Query("UPDATE sessions SET digest = '" + sq(digest) +
                         "', digest_embedding = " + vec_literal(emb, model->dims()) +
                         " WHERE id = " + std::to_string(session_id));
@@ -408,7 +409,8 @@ int64_t turn_add(Database& db, EmbeddingModel* model, int64_t session_id, const 
     int64_t tid = -1;
 
     if (model) {
-        auto emb = model->embed(content);
+        refresh_memory_model(db, *model);
+        auto emb = model->embed_documents({content})[0];
         auto ins =
             db.conn().Query("INSERT INTO turns (id, session_id, role, content, embedding) VALUES ("
                             "nextval('seq_id'), " +
@@ -531,7 +533,8 @@ std::vector<Anchor> turn_get_anchors(Database& db, int64_t turn_id) {
 
 std::vector<TurnHit> turn_search(Database& db, EmbeddingModel& model, const std::string& query,
                                  int limit, int64_t thread_id) {
-    auto qvec = model.embed(query);
+    refresh_memory_model(db, model);
+    auto qvec = model.embed_memory_query(query);
     std::string vec_str = vec_literal(qvec, model.dims());
 
     std::string where = thread_id >= 0 ? " AND s.thread_id = " + std::to_string(thread_id) : "";
@@ -586,7 +589,8 @@ std::vector<TurnHit> turns_for_files(Database& db, EmbeddingModel& model, const 
     }
 
     // Fetch turns anchored to these files, ordered by semantic similarity to query
-    auto qvec = model.embed(query);
+    refresh_memory_model(db, model);
+    auto qvec = model.embed_memory_query(query);
     std::string vec_str = vec_literal(qvec, model.dims());
 
     std::string sql =
@@ -649,7 +653,7 @@ int embed_pending_turns(Database& db, EmbeddingModel& model, int limit) {
         texts.push_back(res->GetValue(1, i).ToString());
     }
 
-    auto embeddings = model.embed_batch(texts);
+    auto embeddings = model.embed_documents(texts);
     int dims = model.dims();
 
     for (size_t i = 0; i < ids.size(); i++) {
@@ -657,6 +661,40 @@ int embed_pending_turns(Database& db, EmbeddingModel& model, int limit) {
                         " WHERE id = " + std::to_string(ids[i]));
     }
     return (int)ids.size();
+}
+
+// Memory text (turns, observations, session digests) is embedded on demand. After the embedding
+// model changes, ensure_embedding_model clears every vector; this refills the memory tables.
+int embed_pending_memory(Database& db, EmbeddingModel& model) {
+    int embedded = embed_pending_turns(db, model);
+    auto fill = [&](const char* select, const char* update_prefix) {
+        auto rows = db.conn().Query(select);
+        if (rows->HasError() || rows->RowCount() == 0) return;
+        std::vector<int64_t> ids;
+        std::vector<std::string> texts;
+        for (duckdb::idx_t i = 0; i < rows->RowCount(); i++) {
+            ids.push_back(rows->GetValue<int64_t>(0, i));
+            texts.push_back(rows->GetValue(1, i).ToString());
+        }
+        auto vectors = model.embed_documents(texts);
+        for (size_t i = 0; i < ids.size(); i++) {
+            db.conn().Query(std::string(update_prefix) + vec_literal(vectors[i], model.dims()) +
+                            " WHERE id = " + std::to_string(ids[i]));
+            ++embedded;
+        }
+    };
+    fill("SELECT id, content FROM observations WHERE embedding IS NULL",
+         "UPDATE observations SET embedding = ");
+    fill("SELECT id, digest FROM sessions WHERE digest_embedding IS NULL AND digest IS NOT NULL "
+         "AND digest <> ''",
+         "UPDATE sessions SET digest_embedding = ");
+    return embedded;
+}
+
+bool refresh_memory_model(Database& db, EmbeddingModel& model) {
+    const bool changed = ensure_embedding_model(db, model);
+    if (changed) embed_pending_memory(db, model);
+    return changed;
 }
 
 // ── Symbol name cache ─────────────────────────────────────────────────────────

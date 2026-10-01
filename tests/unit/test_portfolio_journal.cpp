@@ -1,5 +1,6 @@
 #include "core/config.hpp"
 #include "core/db.hpp"
+#include "core/symbol_reader.hpp"
 #include "core/indexer.hpp"
 #include "core/routes.hpp"
 #include "portfolio/domain/index_journal.hpp"
@@ -658,6 +659,33 @@ TEST_F(PortfolioJournalTest, LegacyWindows1252SourceDoesNotAbortIndexing) {
         scalar_i64(db, "SELECT COUNT(*) FROM symbols WHERE docstring LIKE '%servi\xC3\xA7os%'"), 1);
     // Incremental re-index of the same file must also succeed.
     ASSERT_NO_THROW(axon::index_files(cfg, db, {root / "src/Serializador.cs"}, false));
+}
+
+TEST_F(PortfolioJournalTest, ReadSymbolReturnsDefinitionAndElidesLongBodies) {
+    std::string body;
+    for (int i = 0; i < 120; ++i)
+        body += "    total += compute_step(" + std::to_string(i) + ");\n";
+    write_file(root / "src/long.ts",
+               "export function bigWorker(): number {\n    let total = 0;\n" + body +
+                   "    return total;\n}\nexport function smallWorker() { return 1; }\n");
+    axon::Database db(cfg.db_path);
+    axon::index_project(cfg, db);
+
+    auto big = axon::read_symbols(db, root, "bigWorker", "", "", 400);
+    ASSERT_EQ(big.size(), 1u);
+    EXPECT_EQ(big[0].path, "src/long.ts");
+    EXPECT_TRUE(big[0].elided);
+    EXPECT_NE(big[0].content.find("function bigWorker"), std::string::npos) << "head kept";
+    EXPECT_NE(big[0].content.find("return total;"), std::string::npos) << "tail kept";
+    EXPECT_NE(big[0].content.find("lines elided"), std::string::npos);
+    EXPECT_LE(big[0].token_estimate, 500);
+
+    auto small = axon::read_symbols(db, root, "Module.smallWorker", "long.ts", "function", 400);
+    ASSERT_EQ(small.size(), 1u) << "qualified names resolve by their last component";
+    EXPECT_FALSE(small[0].elided);
+
+    EXPECT_TRUE(axon::read_symbols(db, root, "smallWorker", "other.ts", "", 400).empty());
+    EXPECT_TRUE(axon::read_symbols(db, root, "doesNotExist", "", "", 400).empty());
 }
 
 } // namespace

@@ -213,6 +213,7 @@ add_executable(test_objectives unit/test_objectives.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/symbol_reader.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
     ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
     ${CMAKE_SOURCE_DIR}/src/core/shell_filter.cpp
@@ -257,6 +258,7 @@ add_test(NAME test_registry COMMAND test_registry)
 
 # Portfolio journal: real DuckDB, real parser, transactional fault injection.
 add_executable(test_portfolio_journal unit/test_portfolio_journal.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/symbol_reader.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
@@ -485,6 +487,7 @@ add_executable(test_capsule_budget unit/test_capsule_budget.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/symbol_reader.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
     ${CMAKE_SOURCE_DIR}/src/core/compress.cpp
     ${CMAKE_SOURCE_DIR}/src/core/shell_filter.cpp

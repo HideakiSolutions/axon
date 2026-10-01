@@ -1019,7 +1019,8 @@ static std::string handle_request(const std::string& method, const std::string& 
             int limit = limit_str.empty() ? 10 : std::stoi(limit_str);
 
             if (!q.empty() && ctx.model_ready()) {
-                auto emb = ctx.model->embed(q);
+                refresh_memory_model(*ctx.db, *ctx.model);
+                auto emb = ctx.model->embed_memory_query(q);
                 std::ostringstream vs;
                 vs << "[";
                 for (size_t i = 0; i < emb.size(); i++) {
@@ -1061,10 +1062,11 @@ static std::string handle_request(const std::string& method, const std::string& 
     if (method == "GET" && path == "/api/capsule") {
         std::string q = url_decode(get_query_param(query, "q"));
         std::string retrieval_mode = get_query_param(query, "retrieval_mode");
-        if (retrieval_mode.empty()) retrieval_mode = "hybrid";
-        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid") {
+        if (retrieval_mode.empty()) retrieval_mode = "dense";
+        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid" &&
+            retrieval_mode != "dense") {
             http_status = 400;
-            return json{{"error", "retrieval_mode must be semantic or hybrid"}}.dump();
+            return json{{"error", "retrieval_mode must be dense, semantic or hybrid"}}.dump();
         }
         std::string budget_str = get_query_param(query, "budget");
         const std::string no_cache_arg = get_query_param(query, "no_cache");

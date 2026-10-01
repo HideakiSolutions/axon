@@ -116,8 +116,17 @@ static json tools_list() {
                    {"pivot_files", {{"type", "array"}, {"items", {{"type", "string"}}}}},
                    {"token_budget", {{"type", "integer"}, {"default", 8000}}},
                    {"retrieval_mode",
-                    {{"type", "string"}, {"enum", {"semantic", "hybrid"}}, {"default", "hybrid"}}},
+                    {{"type", "string"},
+                     {"enum", {"dense", "semantic", "hybrid"}},
+                     {"default", "dense"},
+                     {"description",
+                      "dense (default): top-K functions ranked by embedding similarity with "
+                      "complete bodies; semantic/hybrid: legacy file-oriented selection"}}},
                    {"dialogue_budget", {{"type", "integer"}, {"default", 0}}},
+                   {"include_selection",
+                    {{"type", "boolean"},
+                     {"default", false},
+                     {"description", "add per-symbol ranking evidence (omitted by default)"}}},
                    {"no_cache", {{"type", "boolean"}, {"default", false}}},
                    {"compression",
                     {{"type", "string"},
@@ -141,6 +150,20 @@ static json tools_list() {
                  {"required", {"files"}},
                  {"properties",
                   {{"files", {{"type", "array"}, {"items", {{"type", "string"}}}}}}}}}},
+              {{"name", "get_symbol"},
+               {"description",
+                "Return the definition (signature, docs and body) of a symbol by name, e.g. "
+                "after get_context_capsule listed it as a signature. Far cheaper than reading "
+                "the whole file. Optional file suffix and kind narrow ambiguous names; long "
+                "bodies keep their head and tail."},
+               {"inputSchema",
+                {{"type", "object"},
+                 {"required", {"name"}},
+                 {"properties",
+                  {{"name", {{"type", "string"}}},
+                   {"file", {{"type", "string"}, {"description", "path suffix filter"}}},
+                   {"kind", {{"type", "string"}, {"description", "function, method, class, ..."}}},
+                   {"token_budget", {{"type", "integer"}, {"default", 1500}}}}}}}},
               {{"name", "search_memory"},
                {"description",
                 "Hybrid semantic and lexical search over saved observations. Results use "
@@ -747,6 +770,61 @@ static json db_unavailable_result(const ServerContext& ctx) {
         true);
 }
 
+// Wire format of a capsule for MCP clients. Everything an agent does not need is omitted: empty
+// sections, zeroed compression counters, per-file expand commands (one hint instead) and, unless
+// asked for, the ranking evidence. Measured overhead of the verbose form was +46..61% tokens over
+// the code itself.
+static json capsule_json(const axon::ContextCapsule& c, const char* cache_state,
+                         bool include_selection) {
+    auto file_json = [](const axon::CapsuleFile& f) {
+        json item = {{"path", f.path}, {"source_ref", f.source_ref}, {"content", f.content}};
+        if (f.is_skeleton) item["signatures"] = true;
+        return item;
+    };
+    json out = {{"query", c.query},
+                {"retrieval_mode", c.retrieval_mode},
+                {"token_estimate", c.token_estimate},
+                {"cache", cache_state}};
+    json pivots = json::array();
+    for (const auto& f : c.pivot_files)
+        pivots.push_back(file_json(f));
+    out["pivot_files"] = std::move(pivots);
+    if (!c.support_files.empty()) {
+        json support = json::array();
+        for (const auto& f : c.support_files)
+            support.push_back(file_json(f));
+        out["support_files"] = std::move(support);
+    }
+    if (!c.related_turns.empty()) {
+        json turns = json::array();
+        for (const auto& t : c.related_turns)
+            turns.push_back({{"role", t.role},
+                             {"content", t.content},
+                             {"session", t.session_label},
+                             {"thread", t.thread_name},
+                             {"ts", t.ts}});
+        out["related_turns"] = std::move(turns);
+    }
+    if (c.compression_tokens_saved > 0)
+        out["compression"] = {{"input_tokens", c.compression_input_tokens},
+                              {"output_tokens", c.compression_output_tokens},
+                              {"tokens_saved", c.compression_tokens_saved}};
+    if (!c.ccr_artifact_ids.empty()) out["ccr_artifact_ids"] = c.ccr_artifact_ids;
+    if (include_selection) {
+        json selection = json::array();
+        for (const auto& s : c.selection)
+            selection.push_back({{"symbol_id", s.symbol_id},
+                                 {"file_id", s.file_id},
+                                 {"semantic_rank", s.semantic_rank},
+                                 {"lexical_rank", s.lexical_rank},
+                                 {"score", s.fused_score}});
+        out["selection"] = std::move(selection);
+    }
+    out["expand"] = "get_symbol{name,file} reads one definition; get_skeleton{files} lists "
+                    "signatures; entries marked signatures:true list neighbours only";
+    return out;
+}
+
 static json handle_tool(const std::string& name, const json& args, ServerContext& ctx) {
     ensure_db_open(ctx, name == "run_pipeline");
 
@@ -884,9 +962,11 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
         std::string query = args.value("query", "");
-        std::string retrieval_mode = args.value("retrieval_mode", "hybrid");
-        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid")
-            return make_tool_result({{"error", "retrieval_mode must be semantic or hybrid"}}, true);
+        std::string retrieval_mode = args.value("retrieval_mode", "dense");
+        const bool include_selection = args.value("include_selection", false);
+        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid" && retrieval_mode != "dense")
+            return make_tool_result({{"error", "retrieval_mode must be dense, semantic or hybrid"}},
+                                    true);
         int budget = args.value("token_budget", 8000);
         int dialogue_budget = args.value("dialogue_budget", 0);
         bool no_cache = args.value("no_cache", false);
@@ -916,46 +996,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         if (eligible_for_cache) {
             cache_key =
                 compute_capsule_cache_key(query, budget, epoch, axon::VERSION, retrieval_mode);
-            if (auto hit = capsule_cache_lookup(*ctx.db, cache_key, epoch)) {
-                json pf = json::array();
-                for (const auto& f : hit->pivot_files)
-                    pf.push_back({{"path", f.path},
-                                  {"source_ref", f.source_ref},
-                                  {"expand_command", f.expand_command},
-                                  {"content", f.content},
-                                  {"tokens", f.token_estimate}});
-                json sf = json::array();
-                for (const auto& f : hit->support_files)
-                    sf.push_back({{"path", f.path},
-                                  {"source_ref", f.source_ref},
-                                  {"expand_command", f.expand_command},
-                                  {"content", f.content},
-                                  {"tokens", f.token_estimate}});
-                return make_tool_result({{"query", hit->query},
-                                         {"retrieval_mode", hit->retrieval_mode},
-                                         {"selection",
-                                          [&] {
-                                              json a = json::array();
-                                              for (const auto& s : hit->selection)
-                                                  a.push_back({{"symbol_id", s.symbol_id},
-                                                               {"file_id", s.file_id},
-                                                               {"semantic_rank", s.semantic_rank},
-                                                               {"lexical_rank", s.lexical_rank},
-                                                               {"fused_score", s.fused_score}});
-                                              return a;
-                                          }()},
-                                         {"pivot_files", pf},
-                                         {"support_files", sf},
-                                         {"related_turns", json::array()},
-                                         {"token_estimate", hit->token_estimate},
-                                         {"total_files_indexed", hit->total_files},
-                                         {"compression",
-                                          {{"input_tokens", hit->compression_input_tokens},
-                                           {"output_tokens", hit->compression_output_tokens},
-                                           {"tokens_saved", hit->compression_tokens_saved}}},
-                                         {"ccr_artifact_ids", hit->ccr_artifact_ids},
-                                         {"cache", "hit"}});
-            }
+            if (auto hit = capsule_cache_lookup(*ctx.db, cache_key, epoch))
+                return make_tool_result(capsule_json(*hit, "hit", include_selection));
         }
 
         // Miss path needs the embedding model; defer the readiness check until
@@ -982,53 +1024,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
                                     capsule.compression_tokens_saved, false, "compression"});
         }
 
-        json pf = json::array();
-        for (const auto& f : capsule.pivot_files)
-            pf.push_back({{"path", f.path},
-                          {"source_ref", f.source_ref},
-                          {"expand_command", f.expand_command},
-                          {"content", f.content},
-                          {"tokens", f.token_estimate}});
-        json sf = json::array();
-        for (const auto& f : capsule.support_files)
-            sf.push_back({{"path", f.path},
-                          {"source_ref", f.source_ref},
-                          {"expand_command", f.expand_command},
-                          {"content", f.content},
-                          {"tokens", f.token_estimate}});
-        json rt = json::array();
-        for (const auto& t : capsule.related_turns)
-            rt.push_back({{"role", t.role},
-                          {"content", t.content},
-                          {"session", t.session_label},
-                          {"thread", t.thread_name},
-                          {"ts", t.ts},
-                          {"tokens", t.token_estimate}});
-
-        return make_tool_result({{"query", capsule.query},
-                                 {"retrieval_mode", capsule.retrieval_mode},
-                                 {"selection",
-                                  [&] {
-                                      json a = json::array();
-                                      for (const auto& s : capsule.selection)
-                                          a.push_back({{"symbol_id", s.symbol_id},
-                                                       {"file_id", s.file_id},
-                                                       {"semantic_rank", s.semantic_rank},
-                                                       {"lexical_rank", s.lexical_rank},
-                                                       {"fused_score", s.fused_score}});
-                                      return a;
-                                  }()},
-                                 {"pivot_files", pf},
-                                 {"support_files", sf},
-                                 {"related_turns", rt},
-                                 {"token_estimate", capsule.token_estimate},
-                                 {"total_files_indexed", capsule.total_files},
-                                 {"compression",
-                                  {{"input_tokens", capsule.compression_input_tokens},
-                                   {"output_tokens", capsule.compression_output_tokens},
-                                   {"tokens_saved", capsule.compression_tokens_saved}}},
-                                 {"ccr_artifact_ids", capsule.ccr_artifact_ids},
-                                 {"cache", "miss"}});
+        return make_tool_result(capsule_json(capsule, "miss", include_selection));
     }
 
     if (name == "get_impact_graph") {
@@ -1050,6 +1046,43 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
             result.push_back({{"file", path}, {"depended_on_by", dependents}});
         }
         return make_tool_result(result);
+    }
+
+    if (name == "get_symbol") {
+        if (!ctx.db_ready()) return db_unavailable_result(ctx);
+        const std::string symbol_name = arg_str(args, "name", "");
+        if (symbol_name.empty()) return make_tool_result({{"error", "name is required"}}, true);
+        const int budget = static_cast<int>(
+            std::clamp<int64_t>(arg_int64(args, "token_budget", 1500), 200, 20000));
+        std::vector<axon::SymbolMatch> matches;
+        try {
+            matches =
+                axon::read_symbols(*ctx.db, ctx.cfg.project_root, symbol_name,
+                                   arg_str(args, "file", ""), arg_str(args, "kind", ""), budget);
+        } catch (const std::exception& e) {
+            return make_tool_result({{"error", e.what()}}, true);
+        }
+        json out = json::array();
+        for (const auto& m : matches) {
+            json item = {{"path", m.path},
+                         {"name", m.name},
+                         {"kind", m.kind},
+                         {"lines", std::to_string(m.start_line) + "-" + std::to_string(m.end_line)},
+                         {"signature", m.signature}};
+            if (!m.docstring.empty()) item["docs"] = m.docstring.substr(0, 400);
+            if (!m.content.empty()) {
+                item["content"] = m.content;
+                item["tokens"] = m.token_estimate;
+                if (m.elided) item["elided"] = true;
+            }
+            out.push_back(std::move(item));
+        }
+        if (matches.empty())
+            return make_tool_result({{"matches", out},
+                                     {"hint", "No symbol with that exact name. Use "
+                                              "get_context_capsule for a description-based "
+                                              "search."}});
+        return make_tool_result({{"matches", out}});
     }
 
     if (name == "get_skeleton") {
@@ -1168,7 +1201,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         const int candidate_limit = std::min(500, std::max(20, limit * 4));
         const auto tags = normalized_tags(args);
         const auto lexical_terms = memory_lexical_terms(q);
-        auto qvec = ctx.model->embed(q);
+        refresh_memory_model(*ctx.db, *ctx.model);
+        auto qvec = ctx.model->embed_memory_query(q);
 
         std::ostringstream vs;
         vs << "[";
@@ -1298,7 +1332,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         };
 
         if (ctx.model_ready()) {
-            auto emb = ctx.model->embed(content);
+            refresh_memory_model(*ctx.db, *ctx.model);
+            auto emb = ctx.model->embed_documents({content})[0];
             std::ostringstream vs;
             vs << "[";
             for (size_t i = 0; i < emb.size(); i++) {

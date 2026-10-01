@@ -70,7 +70,7 @@ Usage:
   axon watch [path] [--interval-ms=1000] [--debounce-ms=500] [--backend=auto|native|poll]
                                         Watch for external edits and incrementally reindex
                                         (native inotify/FSEvents with automatic poll fallback)
-  axon capsule <query> [--no-cache] [--retrieval-mode=semantic|hybrid]
+  axon capsule <query> [--no-cache] [--retrieval-mode=dense|semantic|hybrid]
   axon symbol-communities
   axon execution-flow [--max-depth=N] [--max-paths=N]
   axon api-shape [--identity=qualified-contract-key]
@@ -494,16 +494,61 @@ static int axon_main(int argc, char* argv[]) {
         }
     }
 
+    // ── axon symbol <name> [--file <suffix>] [--kind <kind>] [--budget N] ──────
+    if (cmd == "symbol") {
+        std::string name, file_filter, kind_filter;
+        int budget = 1500;
+        for (int i = 2; i < argc; i++) {
+            std::string a = argv[i];
+            if (a == "--file" && i + 1 < argc)
+                file_filter = argv[++i];
+            else if (a == "--kind" && i + 1 < argc)
+                kind_filter = argv[++i];
+            else if (a.rfind("--budget=", 0) == 0)
+                budget = std::clamp(std::stoi(a.substr(9)), 200, 20000);
+            else if (name.empty())
+                name = a;
+        }
+        if (name.empty()) {
+            std::cerr << "Usage: axon symbol <name> [--file <path-suffix>] [--kind <kind>] "
+                         "[--budget=N]\n";
+            return 1;
+        }
+        auto cfg = load_config();
+        if (!fs::exists(cfg.db_path)) {
+            std::cerr << "No index found. Run `axon index` first.\n";
+            return 1;
+        }
+        auto db = open_database_or_report(cfg.db_path);
+        if (!db) return 1;
+        auto matches =
+            axon::read_symbols(*db, cfg.project_root, name, file_filter, kind_filter, budget);
+        nlohmann::json out = nlohmann::json::array();
+        for (const auto& m : matches) {
+            nlohmann::json item = {
+                {"path", m.path},
+                {"name", m.name},
+                {"kind", m.kind},
+                {"lines", std::to_string(m.start_line) + "-" + std::to_string(m.end_line)},
+                {"signature", m.signature}};
+            if (!m.content.empty()) item["content"] = m.content;
+            if (m.elided) item["elided"] = true;
+            out.push_back(std::move(item));
+        }
+        std::cout << out.dump(2) << '\n';
+        return matches.empty() ? 1 : 0;
+    }
+
     // ── axon capsule <query> [--no-cache] ──────────────────────────────────
     if (cmd == "capsule") {
         if (argc < 3) {
-            std::cerr
-                << "Usage: axon capsule <query> [--no-cache] [--retrieval-mode=semantic|hybrid]\n";
+            std::cerr << "Usage: axon capsule <query> [--no-cache] "
+                         "[--retrieval-mode=dense|semantic|hybrid]\n";
             return 1;
         }
         std::string query;
         bool no_cache = false;
-        std::string retrieval_mode = "hybrid";
+        std::string retrieval_mode = "dense";
         for (int i = 2; i < argc; i++) {
             std::string a = argv[i];
             if (a == "--no-cache") {
@@ -517,8 +562,9 @@ static int axon_main(int argc, char* argv[]) {
             if (!query.empty()) query += " ";
             query += a;
         }
-        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid") {
-            std::cerr << "retrieval_mode must be semantic or hybrid\n";
+        if (retrieval_mode != "semantic" && retrieval_mode != "hybrid" &&
+            retrieval_mode != "dense") {
+            std::cerr << "retrieval_mode must be dense, semantic or hybrid\n";
             return 1;
         }
 
