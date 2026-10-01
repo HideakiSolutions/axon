@@ -1,0 +1,168 @@
+[
+ {
+  "id": "cpp01",
+  "lang": "pt",
+  "query": "Como a saída longa de uma execução de testes é resumida para caber em um orçamento de tokens?",
+  "gold": [
+   {
+    "file": "src/core/shell_filter.cpp",
+    "symbol": "filter_test_output"
+   }
+  ]
+ },
+ {
+  "id": "cpp02",
+  "lang": "pt",
+  "query": "Como são gerados os vetores semânticos para os símbolos que ainda não possuem representação numérica?",
+  "gold": [
+   {
+    "file": "src/core/embeddings.cpp",
+    "symbol": "embed_pending_symbols"
+   }
+  ]
+ },
+ {
+  "id": "cpp03",
+  "lang": "pt",
+  "query": "Como as chamadas de código são ligadas aos seus alvos reais, levando em conta o número de argumentos?",
+  "gold": [
+   {
+    "file": "src/core/call_resolver.cpp",
+    "symbol": "resolve_call_edges"
+   }
+  ]
+ },
+ {
+  "id": "cpp04",
+  "lang": "pt",
+  "query": "Como o sistema levanta evidências de contratos de API (especificações, schemas) em um repositório?",
+  "gold": [
+   {
+    "file": "src/core/contracts.cpp",
+    "symbol": "extract_contracts"
+   }
+  ]
+ },
+ {
+  "id": "cpp05",
+  "lang": "pt",
+  "query": "Como um agente assume a responsabilidade por uma passagem de trabalho pendente entre agentes?",
+  "gold": [
+   {
+    "file": "src/core/dialogue.cpp",
+    "symbol": "handoff_claim"
+   }
+  ]
+ },
+ {
+  "id": "cpp06",
+  "lang": "pt",
+  "query": "Como as rotas de frameworks web são descobertas e gravadas no banco do índice?",
+  "gold": [
+   {
+    "file": "src/core/routes.cpp",
+    "symbol": "index_routes"
+   }
+  ]
+ },
+ {
+  "id": "cpp07",
+  "lang": "pt",
+  "query": "Como apenas os arquivos modificados são reprocessados no índice depois de edições?",
+  "gold": [
+   {
+    "file": "src/core/indexer.cpp",
+    "symbol": "index_files"
+   },
+   {
+    "file": "src/core/indexer.cpp",
+    "symbol": "sync_project"
+   }
+  ]
+ },
+ {
+  "id": "cpp08",
+  "lang": "en",
+  "query": "How is the context bundle for a natural-language question assembled within a token budget?",
+  "gold": [
+   {
+    "file": "src/core/capsule.cpp",
+    "symbol": "assemble_capsule"
+   }
+  ]
+ },
+ {
+  "id": "cpp09",
+  "lang": "en",
+  "query": "How are compressed outputs stored and later recovered by an identifier so nothing is lost?",
+  "gold": [
+   {
+    "file": "src/core/ccr.cpp",
+    "symbol": "ccr_store_artifact"
+   },
+   {
+    "file": "src/core/ccr.cpp",
+    "symbol": "ccr_retrieve_artifact"
+   }
+  ]
+ },
+ {
+  "id": "cpp10",
+  "lang": "en",
+  "query": "How does the tool follow untrusted input from its origin to dangerous operations inside a function?",
+  "gold": [
+   {
+    "file": "src/core/data_trace.cpp",
+    "symbol": "trace_data_flow"
+   }
+  ]
+ },
+ {
+  "id": "cpp11",
+  "lang": "en",
+  "query": "How does it find the top-level project directory starting from a nested folder?",
+  "gold": [
+   {
+    "file": "src/core/config.cpp",
+    "symbol": "find_project_root"
+   }
+  ]
+ },
+ {
+  "id": "cpp12",
+  "lang": "en",
+  "query": "How are occurrences of an identifier located and then substituted in files during a refactor?",
+  "gold": [
+   {
+    "file": "src/core/rename.cpp",
+    "symbol": "collect_rename_edits"
+   },
+   {
+    "file": "src/core/rename.cpp",
+    "symbol": "apply_rename_edits"
+   }
+  ]
+ },
+ {
+  "id": "cpp13",
+  "lang": "en",
+  "query": "How is the closeness between two embedding vectors measured?",
+  "gold": [
+   {
+    "file": "src/core/embeddings.cpp",
+    "symbol": "cosine_similarity"
+   }
+  ]
+ },
+ {
+  "id": "cpp14",
+  "lang": "en",
+  "query": "How is the repository registry file checked against the expected JSON structure?",
+  "gold": [
+   {
+    "file": "src/core/registry.cpp",
+    "symbol": "validate_registry_json_shape"
+   }
+  ]
+ }
+]
