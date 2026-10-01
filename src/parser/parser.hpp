@@ -8,6 +8,7 @@ namespace axon {
 
 enum class Language {
     TypeScript,
+    Tsx, // TypeScript with JSX; stored as "typescript"
     JavaScript,
     Python,
     Rust,

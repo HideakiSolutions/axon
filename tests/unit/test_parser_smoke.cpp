@@ -296,6 +296,67 @@ async function loadAll() { return []; }
     EXPECT_NE(svc->docstring->find("@Injectable"), std::string::npos);
 }
 
+TEST(ParserTypeScript, ModuleLevelConstFunctionsHooksComponentsAndDefaultExports) {
+    auto p = write_temp("tsx", R"TS(
+import React from 'react';
+/** Doubles a number. */
+export const arrowConst = (a: number): number => a * 2;
+export const useAuth = () => { const handler = () => 1; return { handler }; };
+export default function PageComponent() { return <div/>; }
+export const Card = React.memo(({ title }: { title: string }) => <h1>{title}</h1>);
+export const api = { get: (u: string) => fetch(u) };
+const internalHelper = async (id: string) => id;
+abstract class Base { abstract run(): void; }
+class Svc { cancel = () => 1; async load(id: string) { return id; } }
+function plain() { const localArrow = () => 2; return localArrow; }
+export const useStore = create<State>()((set) => ({ n: 0, inc: () => set(1) }));
+const client = axios.create({ baseURL: '/x' });
+export const billing = {
+  changePlan: async (id: number) => id,
+  nested: { cancel: (id: number) => id },
+};
+)TS");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+
+    for (const char* name :
+         {"arrowConst", "useAuth", "PageComponent", "Card", "api", "internalHelper", "Base",
+          "cancel", "load", "plain", "useStore", "client", "billing", "changePlan"})
+        EXPECT_NE(find_named(pf->symbols, name), nullptr) << name << " not indexed";
+    // Locals inside function bodies are noise, not module symbols.
+    EXPECT_EQ(find_named(pf->symbols, "handler"), nullptr);
+    EXPECT_EQ(find_named(pf->symbols, "localArrow"), nullptr);
+
+    auto* arrow = find_named(pf->symbols, "arrowConst");
+    ASSERT_NE(arrow, nullptr);
+    EXPECT_EQ(arrow->kind, "function");
+    ASSERT_TRUE(arrow->signature.has_value());
+    EXPECT_NE(arrow->signature->find("export const arrowConst"), std::string::npos);
+    ASSERT_TRUE(arrow->docstring.has_value());
+    EXPECT_NE(arrow->docstring->find("Doubles"), std::string::npos);
+    auto kind_of = [&](const char* name) {
+        auto* found = find_named(pf->symbols, name);
+        return found ? found->kind : std::string("<missing>");
+    };
+    EXPECT_EQ(kind_of("internalHelper"), "async_function");
+    EXPECT_EQ(kind_of("api"), "constant");
+    EXPECT_EQ(kind_of("cancel"), "method");
+}
+
+TEST(ParserJavaScript, CommonJsExportsAndModuleLevelArrows) {
+    auto p = write_temp("js", R"JS(
+exports.handler = async (event) => { return event; };
+module.exports.run = function () { return 1; };
+const compute = (x) => x + 1;
+)JS");
+    auto pf = axon::parse_file(p, p.parent_path());
+    fs::remove(p);
+    ASSERT_TRUE(pf.has_value());
+    for (const char* name : {"handler", "run", "compute"})
+        EXPECT_NE(find_named(pf->symbols, name), nullptr) << name << " not indexed";
+}
+
 TEST(ParserTypeScript, CallSitesCaptureQualifierAndArgumentCount) {
     auto p = write_temp("ts", R"TS(
 class Beta {

@@ -3,6 +3,7 @@
 #include <tree_sitter/api.h>
 #include <cstdio>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <unordered_set>
 #include <utility>
@@ -12,6 +13,7 @@
 // Grammar declarations (C linkage)
 extern "C" {
 TSLanguage* tree_sitter_typescript();
+TSLanguage* tree_sitter_tsx();
 TSLanguage* tree_sitter_javascript();
 TSLanguage* tree_sitter_python();
 TSLanguage* tree_sitter_rust();
@@ -35,7 +37,8 @@ TSLanguage* tree_sitter_gdscript();
 namespace axon {
 
 std::optional<Language> language_from_extension(const std::string& ext) {
-    if (ext == "ts" || ext == "tsx") return Language::TypeScript;
+    if (ext == "ts") return Language::TypeScript;
+    if (ext == "tsx") return Language::Tsx;
     if (ext == "js" || ext == "jsx" || ext == "mjs" || ext == "cjs") return Language::JavaScript;
     if (ext == "py") return Language::Python;
     if (ext == "rs") return Language::Rust;
@@ -61,6 +64,7 @@ std::optional<Language> language_from_extension(const std::string& ext) {
 std::string language_name(Language lang) {
     switch (lang) {
     case Language::TypeScript:
+    case Language::Tsx:
         return "typescript";
     case Language::JavaScript:
         return "javascript";
@@ -118,6 +122,8 @@ static TSLanguage* get_ts_language(Language lang) {
     switch (lang) {
     case Language::TypeScript:
         return tree_sitter_typescript();
+    case Language::Tsx:
+        return tree_sitter_tsx();
     case Language::JavaScript:
         return tree_sitter_javascript();
     case Language::Python:
@@ -507,9 +513,13 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
     std::string kind = ts_node_type(node);
     Symbol sym;
     bool is_symbol = false;
+    // Node whose range, leading comment and signature describe the symbol. Usually the visited
+    // node; for `export const f = () => {}` it is the whole declaration statement.
+    TSNode symbol_node = node;
 
     // TypeScript / JavaScript
-    if (ctx.lang == Language::TypeScript || ctx.lang == Language::JavaScript) {
+    if (ctx.lang == Language::TypeScript || ctx.lang == Language::Tsx ||
+        ctx.lang == Language::JavaScript) {
         // TS decorators have two emission shapes depending on grammar version:
         //   1. Direct children of the declaration (plain `@Foo class X {}`)
         //   2. Siblings under `export_statement` for `@Foo export class X {}`
@@ -547,7 +557,7 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
-        } else if (kind == "class_declaration") {
+        } else if (kind == "class_declaration" || kind == "abstract_class_declaration") {
             sym.kind = "class";
             TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
@@ -587,6 +597,159 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
             if (!ts_node_is_null(name_node)) sym.name = node_text(name_node, ctx.src);
             sym.signature = first_line(node, ctx.src);
             is_symbol = !sym.name.empty();
+        } else if (kind == "variable_declarator" || kind == "pair") {
+            // Modern TS/JS defines most behavior as module-level `const` bindings: arrow
+            // functions, hooks, components (also wrapped in memo/forwardRef/HOCs or curried
+            // factories such as zustand's `create<S>()(...)`), singleton clients
+            // (`axios.create(...)`) and service objects whose members are arrow functions.
+            // Only module-level declarations are indexed; locals inside function bodies would
+            // flood the index with handlers.
+            auto function_value = [&](TSNode v) {
+                const std::string k = ts_node_type(v);
+                return k == "arrow_function" || k == "function_expression" || k == "function" ||
+                       k == "generator_function";
+            };
+            std::function<bool(TSNode, int)> call_has_function = [&](TSNode call, int depth_left) {
+                if (depth_left < 0 || ts_node_is_null(call) ||
+                    std::string(ts_node_type(call)) != "call_expression")
+                    return false;
+                TSNode arguments = ts_node_child_by_field_name(call, "arguments", 9);
+                if (!ts_node_is_null(arguments)) {
+                    const uint32_t n = ts_node_named_child_count(arguments);
+                    for (uint32_t i = 0; i < n; ++i)
+                        if (function_value(ts_node_named_child(arguments, i))) return true;
+                }
+                return call_has_function(ts_node_child_by_field_name(call, "function", 8),
+                                         depth_left - 1);
+            };
+            // Resolves a declarator to its module-level statement (export_statement or
+            // declaration); false when it is a local or sits inside a namespace/function.
+            auto module_statement = [&](TSNode declarator, TSNode& statement, bool& exported) {
+                TSNode declaration = ts_node_parent(declarator);
+                if (ts_node_is_null(declaration)) return false;
+                TSNode outer = ts_node_parent(declaration);
+                const std::string outer_kind = ts_node_is_null(outer) ? "" : ts_node_type(outer);
+                statement = declaration;
+                exported = false;
+                if (outer_kind == "program") return true;
+                if (outer_kind == "export_statement") {
+                    TSNode top = ts_node_parent(outer);
+                    statement = outer;
+                    exported = true;
+                    return !ts_node_is_null(top) && std::string(ts_node_type(top)) == "program";
+                }
+                return false;
+            };
+            if (kind == "variable_declarator") {
+                TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+                TSNode value = ts_node_child_by_field_name(node, "value", 5);
+                TSNode statement = node;
+                bool exported = false;
+                if (module_statement(node, statement, exported) && !ts_node_is_null(name_node) &&
+                    !ts_node_is_null(value) &&
+                    std::string(ts_node_type(name_node)) == "identifier") {
+                    const std::string value_kind = ts_node_type(value);
+                    const bool is_function = function_value(value) || call_has_function(value, 3);
+                    const bool is_constant = !is_function && (value_kind == "object" ||
+                                                              value_kind == "call_expression" ||
+                                                              value_kind == "new_expression");
+                    if (is_function || is_constant) {
+                        sym.kind = is_function ? "function" : "constant";
+                        if (is_function && ts_node_child_count(value) > 0 &&
+                            std::string(ts_node_type(ts_node_child(value, 0))) == "async")
+                            sym.kind = "async_function";
+                        sym.name = node_text(name_node, ctx.src);
+                        sym.signature = first_line(statement, ctx.src);
+                        symbol_node = statement;
+                        is_symbol = !sym.name.empty();
+                    }
+                }
+            } else {
+                // `{ changePlan: async (...) => {...} }` inside a module-level object.
+                TSNode key = ts_node_child_by_field_name(node, "key", 3);
+                TSNode value = ts_node_child_by_field_name(node, "value", 5);
+                if (!ts_node_is_null(key) && !ts_node_is_null(value) && function_value(value)) {
+                    TSNode cursor = ts_node_parent(node); // object
+                    int hops = 0;
+                    while (!ts_node_is_null(cursor) && hops < 3) {
+                        const std::string ck = ts_node_type(cursor);
+                        if (ck == "variable_declarator") break;
+                        if (ck != "object" && ck != "pair" && ck != "satisfies_expression" &&
+                            ck != "as_expression")
+                            cursor = TSNode{};
+                        else
+                            cursor = ts_node_parent(cursor);
+                        ++hops;
+                    }
+                    TSNode statement = node;
+                    bool exported = false;
+                    if (!ts_node_is_null(cursor) &&
+                        std::string(ts_node_type(cursor)) == "variable_declarator" &&
+                        module_statement(cursor, statement, exported)) {
+                        sym.kind = "method";
+                        std::string name = node_text(key, ctx.src);
+                        if (name.size() >= 2 && (name.front() == '"' || name.front() == '\''))
+                            name = name.substr(1, name.size() - 2);
+                        sym.name = name;
+                        sym.signature = first_line(node, ctx.src);
+                        is_symbol = !sym.name.empty();
+                    }
+                }
+            }
+        } else if ((kind == "function_expression" || kind == "function" ||
+                    kind == "generator_function" || kind == "class") &&
+                   !ts_node_is_null(ts_node_parent(node)) &&
+                   std::string(ts_node_type(ts_node_parent(node))) == "export_statement") {
+            // `export default function Page() {}` / `export default class Foo {}`
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (!ts_node_is_null(name_node)) {
+                sym.kind = kind == "class" ? "class" : "function";
+                sym.name = node_text(name_node, ctx.src);
+                sym.signature = first_line(ts_node_parent(node), ctx.src);
+                symbol_node = ts_node_parent(node);
+                is_symbol = !sym.name.empty();
+            }
+        } else if (kind == "public_field_definition" || kind == "field_definition") {
+            // `handle = () => {}` class properties behave as methods.
+            TSNode value = ts_node_child_by_field_name(node, "value", 5);
+            TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+            if (ts_node_is_null(name_node))
+                name_node = ts_node_child_by_field_name(node, "property", 8);
+            if (!ts_node_is_null(value) && !ts_node_is_null(name_node)) {
+                const std::string value_kind = ts_node_type(value);
+                if (value_kind == "arrow_function" || value_kind == "function_expression" ||
+                    value_kind == "function") {
+                    sym.kind = "method";
+                    sym.name = node_text(name_node, ctx.src);
+                    sym.signature = first_line(node, ctx.src);
+                    is_symbol = !sym.name.empty();
+                }
+            }
+        } else if (kind == "assignment_expression") {
+            // CommonJS: `exports.handler = async () => {}` / `module.exports.run = function () {}`
+            TSNode left = ts_node_child_by_field_name(node, "left", 4);
+            TSNode right = ts_node_child_by_field_name(node, "right", 5);
+            TSNode statement = ts_node_parent(node);
+            if (!ts_node_is_null(left) && !ts_node_is_null(right) && !ts_node_is_null(statement) &&
+                std::string(ts_node_type(statement)) == "expression_statement" &&
+                std::string(ts_node_type(left)) == "member_expression") {
+                const std::string right_kind = ts_node_type(right);
+                const std::string left_text = node_text(left, ctx.src);
+                const bool exports_target = left_text.rfind("exports.", 0) == 0 ||
+                                            left_text.rfind("module.exports.", 0) == 0;
+                if (exports_target &&
+                    (right_kind == "arrow_function" || right_kind == "function_expression" ||
+                     right_kind == "function")) {
+                    TSNode property = ts_node_child_by_field_name(left, "property", 8);
+                    if (!ts_node_is_null(property)) {
+                        sym.kind = "function";
+                        sym.name = node_text(property, ctx.src);
+                        sym.signature = first_line(statement, ctx.src);
+                        symbol_node = statement;
+                        is_symbol = !sym.name.empty();
+                    }
+                }
+            }
         } else if (kind == "import_statement" || kind == "import_declaration") {
             // Extract import specifier
             TSNode src_node = ts_node_child_by_field_name(node, "source", 6);
@@ -1734,14 +1897,14 @@ static void visit_node(TSNode node, ParseContext& ctx, int depth = 0) {
     }
 
     if (is_symbol) {
-        sym.start_line = (int)ts_node_start_point(node).row + 1;
-        sym.end_line = (int)ts_node_end_point(node).row + 1;
-        sym.start_byte = (int)ts_node_start_byte(node);
-        sym.end_byte = (int)ts_node_end_byte(node);
+        sym.start_line = (int)ts_node_start_point(symbol_node).row + 1;
+        sym.end_line = (int)ts_node_end_point(symbol_node).row + 1;
+        sym.start_byte = (int)ts_node_start_byte(symbol_node);
+        sym.end_byte = (int)ts_node_end_byte(symbol_node);
         if (!sym.docstring) {
             // Extract leading comment/docstring (searches up to 3 siblings back)
             TSNode root_dummy = {}; // root param unused in new impl
-            sym.docstring = extract_docstring(node, ctx.src, root_dummy);
+            sym.docstring = extract_docstring(symbol_node, ctx.src, root_dummy);
         }
         ctx.symbols.push_back(std::move(sym));
     }

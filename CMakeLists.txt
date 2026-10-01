@@ -66,9 +66,13 @@ target_include_directories(tree_sitter_lib PUBLIC
 # ── tree-sitter language grammars ────────────────────────────────────────────
 set(TS_INCLUDE third_party/tree-sitter/lib/include)
 
+# The TypeScript grammar cannot parse JSX; .tsx files need the separate TSX grammar. Both live in
+# one library (their external-scanner symbols are prefixed per grammar, so they do not clash).
 add_library(ts_typescript STATIC
     third_party/tree-sitter-typescript/typescript/src/parser.c
     third_party/tree-sitter-typescript/typescript/src/scanner.c
+    third_party/tree-sitter-typescript/tsx/src/parser.c
+    third_party/tree-sitter-typescript/tsx/src/scanner.c
 )
 target_include_directories(ts_typescript PUBLIC ${TS_INCLUDE}
     third_party/tree-sitter-typescript/typescript/src)
