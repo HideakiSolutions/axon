@@ -1,6 +1,6 @@
 # API Reference — axon MCP Tools
 
-All 45 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
+All 46 MCP tools exposed by `axon serve` via stdio JSON-RPC 2.0.
 
 ---
 
@@ -14,15 +14,22 @@ Token-efficient context: pivot files in full + support files skeletonized. Optio
 |-----------|------|----------|-------------|
 | `query` | string | No | Natural language query to guide pivot selection |
 | `pivot_files` | string[] | No | Force specific files as pivots |
-| `token_budget` | number | No | Max tokens for the capsule (default: 8000) |
-| `retrieval_mode` | string | No | `hybrid` (default after the Godot gate) or `semantic`; older indexes without lexical documents need `axon index --force` |
+| `token_budget` | number | No | Max tokens for the capsule (default: 8000; `dense` rarely needs more than ~1,500) |
+| `retrieval_mode` | string | No | `dense` (default): the top-K functions ranked by embedding similarity, with complete bodies. `semantic` / `hybrid`: the older file-oriented selection, kept for comparison |
+| `include_selection` | boolean | No | Add per-symbol ranking evidence to the response (omitted by default; saves tokens) |
 | `dialogue_budget` | number | No | Token budget for `related_turns[]` from dialogue history (default: 0 = disabled) |
 | `no_cache` | boolean | No | Bypass the query-hash cache and force a fresh assembly (default: false) |
 | `compression` | string | No | `off` or `body`; `body` classifies oversized payloads before lossy compression and only returns compressed output when it saves tokens |
 
 `compression="body"` classifies content as source code, JSON, diff, log, Markdown, plain text, or binary-like before applying any lossy reduction. Binary-like content and impossible budgets pass through unchanged. Responses include a `compression` object with `input_tokens`, `output_tokens`, and `tokens_saved`; nonzero body-compression savings are also recorded in the `compression` telemetry layer. Recoverable lossy slices include CCR markers in content and their IDs in `ccr_artifact_ids`; call `artifact_retrieve` with one of those IDs to recover the original slice.
 
-Responses also include `retrieval_mode` and `selection[]` with symbol/file IDs, semantic and lexical ranks, and fused scores. Cache entries are separate for each mode. CLI: `axon capsule "query" --retrieval-mode=hybrid --no-cache`.
+**`dense` packing.** Symbols are ranked by embedding similarity alone (fusing BM25 on top of a strong dense model measurably lowered recall in our evaluation), and the first `K` (default 10, `AXON_CAPSULE_TOP_K`) are delivered with their complete bodies. A body longer than its share of the budget keeps its head (declaration, early control flow) and tail (the return path) and replaces the middle with `// … N lines elided …`; use `get_symbol` to read it whole. The next `K` symbols appear as signatures only, inside the same file entry under `// related (signatures):`. An identifier written exactly as in the code (`snake_case`, `camelCase`) is looked up directly and placed first.
+
+**Response format.** MCP responses are compact: `path`, `source_ref` and `content` per file, `token_estimate`, `cache`, and one `expand` hint. Empty sections (`related_turns`, compression counters, `ccr_artifact_ids`) are omitted, as are per-file expand commands and, unless `include_selection` is set, the ranking evidence. `signatures: true` marks an entry that lists neighbours only. The HTTP API keeps the verbose shape shown below.
+
+Cache entries are separate for each mode. CLI: `axon capsule "query" --retrieval-mode=dense --no-cache`.
+
+> **Embedding model changes.** The index records which model produced its vectors. After switching models (or upgrading from a pre-1.7 index) the next `axon index` / `run_pipeline` clears the old vectors and rebuilds them; until then query tools return an error asking for that. Vectors are always stored 768-wide: wider Matryoshka models (Qwen3-Embedding) are truncated and re-normalized.
 
 ---
 
@@ -82,6 +89,21 @@ Signatures-only view (no function bodies) of one or more files.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `files` | string[] | **Yes** | File paths to skeletonize |
+
+---
+
+### `get_symbol`
+
+The definition of a symbol by name — signature, documentation and body — without opening the file. Typically a few hundred tokens instead of thousands, which makes it the follow-up to a capsule entry listed as a signature.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | **Yes** | Symbol name. For `Class.method` / `ns::name` the last component is used |
+| `file` | string | No | Path suffix to disambiguate (`auth/token.ts`) |
+| `kind` | string | No | `function`, `method`, `class`, … |
+| `token_budget` | number | No | Default 1,500, split across up to 3 bodies; long bodies keep head and tail and set `elided: true` |
+
+Returns `matches[]` with `path`, `name`, `kind`, `lines`, `signature`, optional `docs`, `content` and `tokens`. Further matches beyond the first three are listed without bodies. CLI: `axon symbol <name> [--file <suffix>] [--kind <kind>] [--budget=N]`.
 
 ---
 
@@ -482,7 +504,9 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LD_LIBRARY_PATH` | — | Only needed for source-tree runs if the binary cannot find DuckDB; release packages set RPATH/RUNPATH |
-| `AXON_EMBEDDING_MODEL` | `./models/nomic-embed-text-v1.5.Q4_K_M.gguf` | Path to the embedding model |
+| `AXON_EMBEDDING_MODEL` | `~/.axon/models/Qwen3-Embedding-0.6B-Q8_0.gguf` | Path to the embedding model. Search order: `<package>/models/`, then `~/.axon/models/`, Qwen3-Embedding first and `nomic-embed-text-v1.5.Q4_K_M.gguf` as the legacy fallback |
+| `AXON_EMBEDDING_THREADS` | half the logical CPUs, 4–8 | CPU threads used while embedding |
+| `AXON_CAPSULE_TOP_K` | `10` | Number of functions `dense` capsules deliver with bodies (1–40) |
 | `AXON_EMBEDDING_DEVICE` | `auto` | `auto` uses an available GPU and falls back to CPU; `cpu` forces CPU; `gpu` requires a usable GPU backend/device and fails clearly if unavailable. The Linux release includes Vulkan; macOS uses Metal. The Windows package currently supports CPU only. |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
 | `AXON_REGISTRY_DIR` | `~/.axon` | Directory holding the multi-repo `registry.json`; tests and sandboxes point it at a scratch dir so runs never touch the real registry |

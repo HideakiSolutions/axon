@@ -107,7 +107,7 @@ Config make_config(const fs::path& root) {
     return cfg;
 }
 
-fs::path find_model(const fs::path& binary_dir) {
+fs::path find_model(const fs::path& binary_dir, const std::string& index_model_hint) {
     // 1. Honor AXON_EMBEDDING_MODEL (absolute or relative path to .gguf)
     if (const char* env_model = std::getenv("AXON_EMBEDDING_MODEL")) {
         fs::path p(env_model);
@@ -118,12 +118,20 @@ fs::path find_model(const fs::path& binary_dir) {
     // 2. Default search order: install/build-relative models/, then ~/.axon/models/.
     // Note: the *project's* ./models is only found for build-tree binaries
     // (build/../models); installed binaries look next to their own package.
-    std::vector<fs::path> candidates = {
-        binary_dir / "../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
-        binary_dir / "../../models/nomic-embed-text-v1.5.Q4_K_M.gguf",
-        fs::path(std::getenv("HOME") ? std::getenv("HOME") : "") /
-            ".axon/models/nomic-embed-text-v1.5.Q4_K_M.gguf",
-    };
+    // Qwen3-Embedding is the default; nomic stays supported for existing installs.
+    const char* qwen_file = "Qwen3-Embedding-0.6B-Q8_0.gguf";
+    const char* nomic_file = "nomic-embed-text-v1.5.Q4_K_M.gguf";
+    const bool index_is_legacy =
+        index_model_hint == "legacy" || index_model_hint.rfind("nomic", 0) == 0;
+    const char* model_files[] = {index_is_legacy ? nomic_file : qwen_file,
+                                 index_is_legacy ? qwen_file : nomic_file};
+    const fs::path home = fs::path(std::getenv("HOME") ? std::getenv("HOME") : "");
+    std::vector<fs::path> candidates;
+    for (const char* file : model_files) {
+        candidates.push_back(binary_dir / "../models" / file);
+        candidates.push_back(binary_dir / "../../models" / file);
+        candidates.push_back(home / ".axon/models" / file);
+    }
     for (const auto& p : candidates) {
         if (fs::exists(p)) return fs::canonical(p);
     }
@@ -132,8 +140,8 @@ fs::path find_model(const fs::path& binary_dir) {
         "or download to a location on the search path (~/.axon/models/ works for "
         "any install; <package>/models/ sits next to the binary's bin/ dir):\n"
         "  pip install huggingface_hub\n"
-        "  huggingface-cli download nomic-ai/nomic-embed-text-v1.5-GGUF "
-        "nomic-embed-text-v1.5.Q4_K_M.gguf --local-dir ~/.axon/models/");
+        "  huggingface-cli download Qwen/Qwen3-Embedding-0.6B-GGUF "
+        "Qwen3-Embedding-0.6B-Q8_0.gguf --local-dir ~/.axon/models/");
 }
 
 } // namespace axon

@@ -1,0 +1,160 @@
+[
+ {
+  "id": "cs01",
+  "lang": "pt",
+  "query": "Como é calculado o dígito verificador que acompanha o código do cliente de uma corretora, usando pesos sobre os dígitos?",
+  "gold": [
+   {
+    "file": "BackOffice/Modal.BackOffice/Account/AccountDigit.cs",
+    "symbol": "CalculaDV"
+   }
+  ]
+ },
+ {
+  "id": "cs02",
+  "lang": "en",
+  "query": "How does the cron-like scheduler decide which configured jobs are due to run at a given moment?",
+  "gold": [
+   {
+    "file": "Core/Core.Library/CronStyleScheduler.cs",
+    "symbol": "doCrontab"
+   }
+  ]
+ },
+ {
+  "id": "cs03",
+  "lang": "pt",
+  "query": "De que forma uma mensagem recebida passa pela cadeia de regras de validação e gera as críticas retornadas?",
+  "gold": [
+   {
+    "file": "Core/Modal.Core.Mensageria/ServicoValidacao.cs",
+    "symbol": "ValidarMensagem"
+   }
+  ]
+ },
+ {
+  "id": "cs04",
+  "lang": "en",
+  "query": "Where is a dynamic LINQ predicate assembled from a list of user-defined field filters and operations?",
+  "gold": [
+   {
+    "file": "Utils/Utils/Filter/ExpressionBuilder.cs",
+    "symbol": "GetExpression"
+   }
+  ]
+ },
+ {
+  "id": "cs05",
+  "lang": "pt",
+  "query": "Como um serviço é cadastrado no diretório de serviços e propagado para as outras instâncias do localizador?",
+  "gold": [
+   {
+    "file": "Core/Core.Library/Servicos/ServicoLocalizador.cs",
+    "symbol": "Register"
+   },
+   {
+    "file": "Core/Core.Library/Servicos/ServicoLocalizador.cs",
+    "symbol": "ReplicateService"
+   }
+  ]
+ },
+ {
+  "id": "cs06",
+  "lang": "en",
+  "query": "How are files matching given name patterns downloaded from a remote secure FTP directory into a local folder?",
+  "gold": [
+   {
+    "file": "BackOffice/Modal.BackOffice.Lib/SFTP/SFtpClient.cs",
+    "symbol": "TransferirArquivos"
+   }
+  ]
+ },
+ {
+  "id": "cs07",
+  "lang": "pt",
+  "query": "Qual rotina converte um relatório em texto puro para um arquivo PDF, podendo anexar a um já existente?",
+  "gold": [
+   {
+    "file": "BackOffice/Modal.BackOffice.Lib/Pdf/Txt2Pdf.cs",
+    "symbol": "ConvertTxt2Pdf"
+   }
+  ]
+ },
+ {
+  "id": "cs08",
+  "lang": "en",
+  "query": "How is the dividends report file broken apart into separate per-client output files?",
+  "gold": [
+   {
+    "file": "BackOffice/Modal.BackOffice/Processor/ColdFilesSplitter.cs",
+    "symbol": "SplitArquivoDividendo"
+   }
+  ]
+ },
+ {
+  "id": "cs09",
+  "lang": "pt",
+  "query": "Como o canal de comunicação local por named pipe é protegido para que apenas certos usuários ou grupos do Windows possam conectar?",
+  "gold": [
+   {
+    "file": "Core/Core.Library/Bindings/AclSecuredNamedPipeBinding.cs",
+    "symbol": "AddUserOrGroup"
+   }
+  ]
+ },
+ {
+  "id": "cs10",
+  "lang": "en",
+  "query": "How can a complete independent copy of an arbitrary object be made through serialization?",
+  "gold": [
+   {
+    "file": "Core/Core.Library/Serializador.cs",
+    "symbol": "ClonarObjeto"
+   }
+  ]
+ },
+ {
+  "id": "cs11",
+  "lang": "pt",
+  "query": "Qual loop em segundo plano retira e-mails pendentes da fila e os entrega para processamento, aguardando quando não há nada?",
+  "gold": [
+   {
+    "file": "BackOffice/Modal.BackOffice/Email/EmailManager.cs",
+    "symbol": "_queueEmail"
+   }
+  ]
+ },
+ {
+  "id": "cs12",
+  "lang": "en",
+  "query": "How does the mail service send a message built from a template with placeholder substitution?",
+  "gold": [
+   {
+    "file": "Email/Email/ServicoEmail.cs",
+    "symbol": "EnviarComTemplate"
+   }
+  ]
+ },
+ {
+  "id": "cs13",
+  "lang": "pt",
+  "query": "Como um objeto de domínio é gravado no armazenamento em arquivo, identificado por uma chave gerada a partir da entidade?",
+  "gold": [
+   {
+    "file": "Core/Modal.Core.Persistencia/PersistenciaArquivo.cs",
+    "symbol": "SalvarObjeto"
+   }
+  ]
+ },
+ {
+  "id": "cs14",
+  "lang": "en",
+  "query": "How is an object cached in Redis under a key and a hash attribute?",
+  "gold": [
+   {
+    "file": "Core/Modal.Core.RedisUtilities/RedisUtils.cs",
+    "symbol": "SetRedis"
+   }
+  ]
+ }
+]

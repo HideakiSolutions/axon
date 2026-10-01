@@ -6,6 +6,7 @@
 
 extern "C" {
 TSLanguage* tree_sitter_typescript();
+TSLanguage* tree_sitter_tsx();
 TSLanguage* tree_sitter_javascript();
 TSLanguage* tree_sitter_python();
 TSLanguage* tree_sitter_rust();
@@ -32,6 +33,8 @@ static TSLanguage* get_ts_language(Language lang) {
     switch (lang) {
     case Language::TypeScript:
         return tree_sitter_typescript();
+    case Language::Tsx:
+        return tree_sitter_tsx();
     case Language::JavaScript:
         return tree_sitter_javascript();
     case Language::Python:

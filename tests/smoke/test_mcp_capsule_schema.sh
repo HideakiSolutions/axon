@@ -10,11 +10,15 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 binary_dir="$(cd "$(dirname "$axon_bin")" && pwd)"
-model_name="nomic-embed-text-v1.5.Q4_K_M.gguf"
-if [[ ! -f "$binary_dir/../models/$model_name" &&
-      ! -f "$binary_dir/../../models/$model_name" &&
-      ! -f "${HOME:-}/.axon/models/$model_name" &&
-      -z "${AXON_EMBEDDING_MODEL:-}" ]]; then
+have_model=0
+for model_name in Qwen3-Embedding-0.6B-Q8_0.gguf nomic-embed-text-v1.5.Q4_K_M.gguf; do
+  if [[ -f "$binary_dir/../models/$model_name" ||
+        -f "$binary_dir/../../models/$model_name" ||
+        -f "${HOME:-}/.axon/models/$model_name" ]]; then
+    have_model=1
+  fi
+done
+if [[ "$have_model" = 0 && -z "${AXON_EMBEDDING_MODEL:-}" ]]; then
   echo "SKIP: embedding model not available for MCP capsule smoke"
   exit 0
 fi

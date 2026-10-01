@@ -1,0 +1,172 @@
+[
+ {
+  "id": "ts01",
+  "lang": "pt",
+  "query": "Como o front-end decide a cor e o rótulo de severidade exibidos para a pontuação de risco de uma verificação de conformidade?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/services/compliance.ts",
+    "symbol": "getRiskScoreColor"
+   },
+   {
+    "file": "apps/platform-web/src/services/compliance.ts",
+    "symbol": "getRiskScoreLabel"
+   }
+  ]
+ },
+ {
+  "id": "ts02",
+  "lang": "pt",
+  "query": "Onde é guardado o estado de login do usuário e como a sessão é limpa ao sair, mantendo o armazenamento local sincronizado?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/hooks/useAuth.ts",
+    "symbol": "useAuth"
+   }
+  ]
+ },
+ {
+  "id": "ts03",
+  "lang": "pt",
+  "query": "Como uma rota é bloqueada quando o usuário não está autenticado ou não tem o perfil exigido, deixando o administrador passar sempre?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/components/ProtectedRoute.tsx",
+    "symbol": "ProtectedRoute"
+   }
+  ]
+ },
+ {
+  "id": "ts04",
+  "lang": "pt",
+  "query": "De que forma a linha do tempo de uma operação é transformada em um diagrama com raias por tipo de entidade e setas ligando os passos em ordem cronológica?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/pages/Operations/OperationDetails.tsx",
+    "symbol": "buildFlow"
+   }
+  ]
+ },
+ {
+  "id": "ts05",
+  "lang": "pt",
+  "query": "Como o sistema descobre se um lançamento contábil veio do cálculo de taxas ou da saga de liquidação da negociação, a partir da descrição e do tipo de origem?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/pages/Operations/OperationDetails.tsx",
+    "symbol": "inferLedgerOrigin"
+   }
+  ]
+ },
+ {
+  "id": "ts06",
+  "lang": "pt",
+  "query": "Como o modelo de lançamento do diário de uma regra de evento é lido quando o dado vem em formatos diferentes, como texto JSON, lista ou objeto com entradas?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/pages/Configuration/EventRules.tsx",
+    "symbol": "getJournalTemplateEntries"
+   },
+   {
+    "file": "apps/platform-web/src/pages/Configuration/EventRules.tsx",
+    "symbol": "parseTemplateInput"
+   }
+  ]
+ },
+ {
+  "id": "ts07",
+  "lang": "pt",
+  "query": "Como o cliente HTTP anexa o token de autorização às requisições e o que acontece quando o servidor responde que a sessão não é válida?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/services/api.ts",
+    "symbol": "api"
+   }
+  ]
+ },
+ {
+  "id": "ts08",
+  "lang": "en",
+  "query": "How does the UI receive live events over a socket connection and keep only the most recent hundred of them?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/hooks/useWebSocket.ts",
+    "symbol": "useWebSocket"
+   }
+  ]
+ },
+ {
+  "id": "ts09",
+  "lang": "en",
+  "query": "How is the account balance response normalized so that missing or differently named fields fall back to sensible numeric values?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/services/ledger.ts",
+    "symbol": "getBalance"
+   }
+  ]
+ },
+ {
+  "id": "ts10",
+  "lang": "en",
+  "query": "Where does the client let a user change a subscription to a different plan with optional proration, or cancel it immediately?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/services/billing.ts",
+    "symbol": "changePlan"
+   },
+   {
+    "file": "apps/platform-web/src/services/billing.ts",
+    "symbol": "cancel"
+   }
+  ]
+ },
+ {
+  "id": "ts11",
+  "lang": "en",
+  "query": "How does the new trade form validate the free-form metadata and submit the trade together with the chosen compliance check types?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/pages/Trades/NewTrade.tsx",
+    "symbol": "NewTrade"
+   }
+  ]
+ },
+ {
+  "id": "ts12",
+  "lang": "en",
+  "query": "How does the webhook dashboard let an operator retry sending a failed delivery to a subscriber endpoint?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/pages/Webhooks/index.tsx",
+    "symbol": "WebhooksDashboard"
+   },
+   {
+    "file": "apps/platform-web/src/services/webhooks.ts",
+    "symbol": "resendDelivery"
+   }
+  ]
+ },
+ {
+  "id": "ts13",
+  "lang": "en",
+  "query": "How does the audit trail screen compute its success rate and filter entries by the kind of entity affected?",
+  "gold": [
+   {
+    "file": "apps/platform-web/src/pages/Analytics/AuditTrail.tsx",
+    "symbol": "AuditTrail"
+   }
+  ]
+ },
+ {
+  "id": "ts14",
+  "lang": "en",
+  "query": "How does the demo dashboard present failed messages in the dead letter queue and let a user retry or discard them?",
+  "gold": [
+   {
+    "file": "event-engine/demo/dashboard/src/App.tsx",
+    "symbol": "DlqSection"
+   }
+  ]
+ }
+]

@@ -5,6 +5,64 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-10-01
+
+Retrieval quality release. Measured on held-out questions written by an independent reviewer
+(5 corpora: GDScript, C++, TypeScript, C#, Java; 76 questions with the exact symbols that answer
+them; `evals/retrieval/`): the gold function is delivered with its body for **83% (63/76)**
+of the questions, against 24% (18/76) for 1.6.1, at ~1,800 instead of ~4,000 estimated tokens per
+capsule. In a blind answer-quality check (10 questions, independent judge) answers from a `dense`
+capsule scored 2.00/2, the same as answers written from the whole files (65k tokens against 17k).
+
+### Changed — reindex to benefit
+- **The default embedding model is now Qwen3-Embedding-0.6B** (GGUF Q8_0, ~640 MB, downloaded
+  by the installers with a pinned SHA-256). nomic-embed-text-v1.5 (no task prefixes, name +
+  signature only) found the right file for 6 of 20 held-out questions; the new model with
+  enriched symbol text found it for 19. Vectors stay 768-wide (Qwen3 is truncated and
+  re-normalized, Matryoshka-trained), so the schema is unchanged. nomic remains supported.
+- The index records which model produced its vectors, and **existing projects keep working
+  after the upgrade**: queries, the MCP server and incremental updates (editor hooks run
+  `index-paths` after every edit) use the model that built the vectors already in the index
+  (nomic for indexes created before 1.7.0) as long as its file is present. Only an explicit
+  `axon index` or `run_pipeline` switches the index to the new default: it clears the old
+  vectors — symbols, turns, observations, session digests — and rebuilds them, and a query that
+  meets vectors from a different model returns an error saying so instead of comparing
+  different spaces. **Expect that rebuild to be several times slower than nomic on CPU** (~0.4 s
+  per symbol with 4-6 threads); a GPU backend (Vulkan on Linux, Metal on macOS) removes most of
+  that. `AXON_EMBEDDING_THREADS` tunes CPU threads.
+- `get_context_capsule` defaults to `retrieval_mode=dense`: the top-K functions (default 10,
+  `AXON_CAPSULE_TOP_K`) ranked by embedding similarity alone, with complete bodies; long bodies
+  keep head and tail and replace the middle with `// … N lines elided …`; the next K symbols
+  are listed as signatures in the same file entry. Fusing BM25 into the ranking (RRF, the old
+  `hybrid`) lowered recall on held-out questions once the dense model was strong (right file in
+  the capsule for 6 of 20 GDScript questions, against 18 of 20 for dense similarity alone), so
+  `semantic` / `hybrid` remain only as the older file-oriented selection. A small lexical bonus
+  inside the dense candidates (`AXON_LEXICAL_WEIGHT`) is available but off: calibrated on one
+  split, it did not help on the other.
+- MCP capsule responses are compact: empty sections, per-file expand commands, token counts and
+  (unless `include_selection`) ranking evidence are omitted, with one `expand` hint instead.
+  The measured overhead of the verbose form was +46–61% tokens over the code. The HTTP API keeps
+  its shape.
+- Only code-like symbols are embedded (functions, methods, classes, interfaces, ...); variables,
+  constants (outside TS/JS), signals and namespaces remain in the lexical index.
+
+### Added
+- `get_symbol` MCP tool and `axon symbol <name> [--file] [--kind] [--budget]`: one definition by
+  name (signature, docs, body) instead of reading a whole file.
+- TypeScript/JavaScript/TSX coverage: module-level `const` arrow/function bindings, hooks,
+  components (also wrapped in `memo`/`forwardRef` or curried factories), singleton clients,
+  exported objects, service-object methods, `export default function`, abstract classes, class
+  property arrows and CommonJS exports. `.tsx` files now use the TSX grammar — the TypeScript
+  grammar cannot parse JSX and corrupted everything after the first JSX expression. On a real
+  185-file codebase: 179 → 578 symbols; 4 of 14 reference symbols were indexed before, now 14.
+- `evals/retrieval/`: held-out question sets per language and a reproducible runner.
+
+### Fixed
+- `axon index` embedded at most 10,000 symbols per run, leaving the rest without vectors until a
+  later run. It now embeds in batches until nothing is pending.
+- Memory vectors (turns, observations, digests) are rebuilt on a model change instead of silently
+  mixing embedding spaces.
+
 ## [1.6.2] — 2026-09-30
 
 ### Fixed

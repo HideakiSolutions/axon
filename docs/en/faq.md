@@ -3,7 +3,7 @@
 ## Getting Started
 
 **Q: Do I need the embedding model to use axon?**
-No. Most of the 45 MCP tools work without it. The embedding model enables `search_memory`, `turn_search`, `dialogue_context` and the semantic-query path of `get_context_capsule`. Without it, `get_context_capsule` falls back to graph-based pivot selection.
+No. Most of the 46 MCP tools work without it. The embedding model enables `search_memory`, `turn_search`, `dialogue_context` and the semantic-query path of `get_context_capsule`. Without it, `get_context_capsule` falls back to graph-based pivot selection.
 
 **Q: Can I use axon with editors other than Claude Code?**
 Yes. Axon speaks stdio JSON-RPC 2.0 (the MCP protocol). Any MCP-compatible client works. HTTP mode also exposes a plain REST API.
@@ -72,7 +72,7 @@ git submodule update --init --recursive
 ```
 
 **Q: `search_memory` returns nothing**
-The embedding model is not loaded. Check that `models/nomic-embed-text-v1.5.Q4_K_M.gguf` exists and `AXON_EMBEDDING_MODEL` points to it when using a custom path.
+The embedding model is not loaded. Check that `~/.axon/models/Qwen3-Embedding-0.6B-Q8_0.gguf` exists and `AXON_EMBEDDING_MODEL` points to it when using a custom path.
 
 **Q: Claude Code shows axon as disconnected**
 1. If running from a source tree, check `LD_LIBRARY_PATH` is set in the MCP `env` block in `~/.claude.json`

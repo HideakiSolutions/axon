@@ -52,6 +52,8 @@ public:
 
     void run_migrations();
 
+    const std::filesystem::path& path() const { return db_path_; }
+
 private:
     std::filesystem::path db_path_;
     duckdb::DuckDB db_;

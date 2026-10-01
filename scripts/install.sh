@@ -221,8 +221,13 @@ echo "[axon] ✓ Settings: $SETTINGS"
 # Default                              → only download when model is absent
 #                                        AND the user is interactive (TTY).
 MODEL_DIR="${AXON_MODEL_DIR:-$AXON_ROOT/models}"
-DEFAULT_MODEL_NAME="nomic-embed-text-v1.5.Q4_K_M.gguf"
-DEFAULT_MODEL_URL="${AXON_EMBEDDING_MODEL_URL:-https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/$DEFAULT_MODEL_NAME}"
+DEFAULT_MODEL_NAME="Qwen3-Embedding-0.6B-Q8_0.gguf"
+DEFAULT_MODEL_URL="${AXON_EMBEDDING_MODEL_URL:-https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/$DEFAULT_MODEL_NAME}"
+# SHA-256 of the default model, verified unless the caller supplies a different URL or hash.
+DEFAULT_MODEL_SHA256="06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439"
+if [ -z "${AXON_EMBEDDING_MODEL_SHA256:-}" ] && [ -z "${AXON_EMBEDDING_MODEL_URL:-}" ]; then
+  AXON_EMBEDDING_MODEL_SHA256="$DEFAULT_MODEL_SHA256"
+fi
 
 if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME" ]; then
   do_download=1
@@ -231,7 +236,7 @@ if [ -z "${AXON_EMBEDDING_MODEL:-}" ] && [ ! -f "$MODEL_DIR/$DEFAULT_MODEL_NAME"
   elif [ "${AXON_DOWNLOAD_MODEL:-}" = "1" ]; then
     do_download=1
   elif [ -t 0 ]; then
-    read -r -p "[axon] Download embedding model (~80 MiB) to $MODEL_DIR? [Y/n] " yn
+    read -r -p "[axon] Download embedding model (~640 MiB) to $MODEL_DIR? [Y/n] " yn
     [[ "$yn" =~ ^[Nn] ]] && do_download=0
   fi
   if [ "$do_download" = 1 ]; then

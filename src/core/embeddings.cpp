@@ -1,4 +1,8 @@
 #include "embeddings.hpp"
+#include <filesystem>
+#include "utf8.hpp"
+#include <unordered_map>
+#include <fstream>
 #include "portfolio/domain/index_journal.hpp"
 #include "db.hpp"
 #include <ggml-backend.h>
@@ -12,10 +16,11 @@
 #include <cstdio>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 namespace axon {
 
-EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
+EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) : path_(model_path) {
     std::string preference =
         std::getenv("AXON_EMBEDDING_DEVICE") ? std::getenv("AXON_EMBEDDING_DEVICE") : "auto";
     std::transform(preference.begin(), preference.end(), preference.begin(),
@@ -70,6 +75,19 @@ EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
     cparams.n_ctx = 512;
     cparams.n_batch = cparams.n_ctx;
     cparams.embeddings = true;
+    {
+        // The llama.cpp default (4) leaves most of a workstation idle during indexing.
+        int threads = static_cast<int>(std::thread::hardware_concurrency()) / 2;
+        threads = std::clamp(threads, 4, 8);
+        if (const char* env = std::getenv("AXON_EMBEDDING_THREADS")) {
+            try {
+                threads = std::clamp(std::stoi(env), 1, 64);
+            } catch (...) {
+            }
+        }
+        cparams.n_threads = threads;
+        cparams.n_threads_batch = threads;
+    }
 
     auto load_model = [&]() {
         model_ = llama_model_load_from_file(model_path.string().c_str(), mparams);
@@ -95,10 +113,45 @@ EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
         selected_gpu = nullptr;
     }
 
-    dims_ = llama_model_n_embd(model_);
+    native_dims_ = llama_model_n_embd(model_);
+    if (native_dims_ < kStoredEmbeddingDims) {
+        llama_free(ctx_);
+        llama_model_free(model_);
+        ctx_ = nullptr;
+        model_ = nullptr;
+        throw std::runtime_error("Embedding model outputs " + std::to_string(native_dims_) +
+                                 " dimensions; the index stores " +
+                                 std::to_string(kStoredEmbeddingDims) +
+                                 ". Use a model with at least that many dimensions.");
+    }
+    dims_ = kStoredEmbeddingDims;
+    {
+        auto meta = [&](const char* key) {
+            char buf[256] = {0};
+            const int n = llama_model_meta_val_str(model_, key, buf, sizeof(buf));
+            return n > 0 ? std::string(buf) : std::string();
+        };
+        const std::string arch = meta("general.architecture");
+        if (arch == "qwen3") {
+            profile_ = {"qwen3-embedding",
+                        "Instruct: Given a natural language question about a codebase, retrieve "
+                        "the relevant function definition\nQuery: ",
+                        "Instruct: Given a query, retrieve the relevant notes or conversation "
+                        "turns\nQuery: ",
+                        ""};
+        } else if (arch == "gemma-embedding") {
+            profile_ = {"embeddinggemma", "task: code retrieval | query: ",
+                        "task: search result | query: ", "title: none | text: "};
+        } else if (arch == "nomic-bert") {
+            profile_ = {"nomic-embed-text-v1.5", "", "", ""};
+        } else {
+            std::string name = meta("general.name");
+            profile_ = {arch + (name.empty() ? "" : ":" + name), "", "", ""};
+        }
+    }
     std::cerr << "[axon] embedding device: "
               << (selected_gpu ? ggml_backend_dev_name(selected_gpu) : "CPU") << "\n";
-    std::cerr << "[axon] embedding model loaded, dims=" << dims_ << "\n";
+    std::cerr << "[axon] embedding model loaded, dims=" << dims_ << " (" << profile_.id << ")\n";
 }
 
 EmbeddingModel::~EmbeddingModel() {
@@ -109,6 +162,29 @@ EmbeddingModel::~EmbeddingModel() {
 
 std::vector<float> EmbeddingModel::embed(const std::string& text) {
     return embed_batch({text})[0];
+}
+
+std::vector<float> EmbeddingModel::embed_query(const std::string& text) {
+    return embed(profile_.code_query + text);
+}
+
+std::vector<float> EmbeddingModel::embed_memory_query(const std::string& text) {
+    return embed(profile_.memory_query + text);
+}
+
+std::vector<std::vector<float>>
+EmbeddingModel::embed_documents(const std::vector<std::string>& texts) {
+    if (profile_.document.empty()) return embed_batch(texts);
+    std::vector<std::string> prefixed;
+    prefixed.reserve(texts.size());
+    for (const auto& text : texts)
+        prefixed.push_back(profile_.document + text);
+    return embed_batch(prefixed);
+}
+
+std::string EmbeddingModel::index_id() const {
+    return profile_.id + "|" + std::to_string(dims_) + "|doc" +
+           std::to_string(kSymbolDocumentRevision);
 }
 
 std::vector<std::vector<float>> EmbeddingModel::embed_batch(const std::vector<std::string>& texts) {
@@ -138,6 +214,7 @@ std::vector<std::vector<float>> EmbeddingModel::embed_batch(const std::vector<st
         const float* emb = llama_get_embeddings_seq(ctx_, 0);
         if (!emb) emb = llama_get_embeddings_ith(ctx_, (int32_t)tokens.size() - 1);
 
+        // Matryoshka-trained models keep their quality when cut to the stored width.
         std::vector<float> vec(emb, emb + dims_);
 
         // L2 normalize
@@ -178,24 +255,111 @@ std::vector<float> deserialize_embedding(const uint8_t* data, size_t byte_len) {
     return v;
 }
 
-int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
-    auto syms = db.conn().Query("SELECT id, name, kind, signature "
-                                "FROM symbols WHERE embedding IS NULL LIMIT " +
-                                std::to_string(limit));
+namespace {
+
+// Directory the project lives in: Axon keeps the index at <root>/.axon/index.duckdb.
+std::filesystem::path project_root_of(Database& db) {
+    const auto parent = db.path().parent_path();
+    return parent.filename() == ".axon" ? parent.parent_path() : std::filesystem::path();
+}
+
+std::string trim_copy(const std::string& value) {
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    const auto last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+// Text embedded for one symbol: where it lives, what it is called (identifier split into
+// words), its declaration, its documentation and the first lines of its body. The identifier
+// alone is a poor retrieval target for natural-language questions.
+std::string symbol_document(const std::string& path, const std::string& name,
+                            const std::string& signature, const std::string& docstring,
+                            const std::vector<std::string>* source_lines, int start_line,
+                            int end_line) {
+    std::string words;
+    for (size_t i = 0; i < name.size(); ++i) {
+        const char c = name[i];
+        if (c == '_') {
+            words += ' ';
+            continue;
+        }
+        if (i > 0 && std::isupper(static_cast<unsigned char>(c)) &&
+            (std::islower(static_cast<unsigned char>(name[i - 1])) ||
+             std::isdigit(static_cast<unsigned char>(name[i - 1]))))
+            words += ' ';
+        words += c;
+    }
+    std::string head;
+    if (source_lines && start_line > 0) {
+        int taken = 0;
+        const int last = std::min<int>(end_line, static_cast<int>(source_lines->size()));
+        // Skip the declaration line (already in the signature).
+        for (int line = start_line + 1; line <= last && taken < 8; ++line) {
+            const std::string text = trim_copy((*source_lines)[line - 1]);
+            if (text.empty() || text.rfind("//", 0) == 0 || text.rfind("#", 0) == 0 ||
+                text.rfind("*", 0) == 0 || text.rfind("/*", 0) == 0)
+                continue;
+            if (!head.empty()) head += " ; ";
+            head += text;
+            ++taken;
+        }
+    }
+    std::string doc = path + " | " + words + " | " + trim_copy(signature) + " | " +
+                      trim_copy(docstring).substr(0, 200) + " | " + head;
+    if (doc.size() > 700) doc.resize(700);
+    return doc;
+}
+
+// Symbols that answer "how does X work" questions. Variables, constants, signals, namespaces and
+// the like stay in the lexical index only: as vectors they are noise that outranks real code.
+constexpr const char* kEmbeddedKinds =
+    "('function','async_function','method','constructor','class','partial_class','struct',"
+    "'interface','enum','record','trait','protocol','object','mixin','extension','union','impl',"
+    "'type','module')";
+
+// Embeds up to `batch` pending symbols; returns how many were written.
+int embed_symbol_batch(Database& db, EmbeddingModel& model, const std::filesystem::path& root,
+                       int batch) {
+    // Variables, fields, parameters and similar noise are left to lexical search.
+    auto syms = db.conn().Query(
+        "SELECT s.id, s.name, s.kind, COALESCE(s.signature,''), COALESCE(s.docstring,''), "
+        "s.start_line, s.end_line, f.path FROM symbols s JOIN files f ON f.id = s.file_id "
+        "WHERE s.embedding IS NULL AND (s.kind IN " +
+        std::string(kEmbeddedKinds) +
+        " OR (s.kind = 'constant' AND f.language IN ('typescript','javascript'))) "
+        "ORDER BY s.id LIMIT " +
+        std::to_string(batch));
     if (syms->HasError())
         throw std::runtime_error("Failed to fetch pending symbols: " + syms->GetError());
+    if (syms->RowCount() == 0) return 0;
 
     std::vector<int64_t> ids;
     std::vector<std::string> texts;
+    std::unordered_map<std::string, std::vector<std::string>> file_lines;
     for (duckdb::idx_t i = 0; i < syms->RowCount(); i++) {
         ids.push_back(syms->GetValue<int64_t>(0, i));
-        texts.push_back(syms->GetValue(1, i).ToString() + " " + syms->GetValue(2, i).ToString() +
-                        " " + syms->GetValue(3, i).ToString());
+        const std::string path = syms->GetValue(7, i).ToString();
+        const std::vector<std::string>* lines = nullptr;
+        if (!root.empty()) {
+            auto it = file_lines.find(path);
+            if (it == file_lines.end()) {
+                std::vector<std::string> loaded;
+                std::ifstream in(root / path, std::ios::binary);
+                std::string line;
+                while (in && std::getline(in, line))
+                    loaded.push_back(to_valid_utf8(line));
+                it = file_lines.emplace(path, std::move(loaded)).first;
+            }
+            lines = &it->second;
+        }
+        texts.push_back(
+            symbol_document(path, syms->GetValue(1, i).ToString(), syms->GetValue(3, i).ToString(),
+                            syms->GetValue(4, i).ToString(), lines, syms->GetValue<int32_t>(5, i),
+                            syms->GetValue<int32_t>(6, i)));
     }
 
-    if (texts.empty()) return 0;
-
-    auto embeddings = model.embed_batch(texts);
+    auto embeddings = model.embed_documents(texts);
     int dims = model.dims();
     portfolio::Transaction transaction(db.conn());
     transaction.mark_index_mutation();
@@ -221,7 +385,62 @@ int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
     portfolio::append_index_events(transaction, db.conn(), "IndexSymbolsUpdated", affected,
                                    manifest);
     transaction.commit();
-    return (int)ids.size();
+    return static_cast<int>(ids.size());
+}
+
+} // namespace
+
+bool embedding_model_matches(Database& db, const EmbeddingModel& model) {
+    const std::string stored = stored_embedding_model_id(db);
+    if (stored.empty())
+        return !any_stored_embedding_vectors(db) || model.profile().id == "nomic-embed-text-v1.5";
+    return stored == model.index_id();
+}
+
+bool ensure_embedding_model(Database& db, const EmbeddingModel& model) {
+    const std::string current = model.index_id();
+    const std::string stored = stored_embedding_model_id(db);
+    if (stored == current) return false;
+    // Legacy indexes (no recorded identity) hold nomic vectors from before profiles existed; they
+    // stay valid for the nomic model and are cleared for any other.
+    const bool legacy_compatible = stored.empty() && model.profile().id == "nomic-embed-text-v1.5";
+    const bool had_vectors =
+        legacy_compatible ? false : (stored.empty() ? any_stored_embedding_vectors(db) : true);
+    if (had_vectors) {
+        for (const char* sql :
+             {"UPDATE symbols SET embedding = NULL WHERE embedding IS NOT NULL",
+              "UPDATE turns SET embedding = NULL WHERE embedding IS NOT NULL",
+              "UPDATE observations SET embedding = NULL WHERE embedding IS NOT NULL",
+              "UPDATE sessions SET digest_embedding = NULL WHERE digest_embedding IS NOT NULL",
+              "DELETE FROM capsule_cache"}) {
+            auto result = db.conn().Query(sql);
+            if (result->HasError())
+                throw std::runtime_error(std::string("embedding model switch failed: ") +
+                                         result->GetError());
+        }
+        std::cerr << "[axon] embedding model changed (" << (stored.empty() ? "legacy" : stored)
+                  << " -> " << current << "); vectors will be rebuilt\n";
+    }
+    auto recorded = db.conn().Query(
+        "INSERT INTO embedding_state(singleton, model_id) VALUES (true, '" + current +
+        "') ON CONFLICT (singleton) DO UPDATE SET model_id = excluded.model_id, "
+        "updated_at = now()");
+    if (recorded->HasError())
+        throw std::runtime_error("recording embedding model failed: " + recorded->GetError());
+    return had_vectors;
+}
+
+int embed_pending_symbols(Database& db, EmbeddingModel& model, int limit) {
+    ensure_embedding_model(db, model);
+    const auto root = project_root_of(db);
+    constexpr int kBatch = 256;
+    int total = 0;
+    while (total < limit) {
+        const int embedded = embed_symbol_batch(db, model, root, std::min(kBatch, limit - total));
+        if (embedded == 0) break;
+        total += embedded;
+    }
+    return total;
 }
 
 } // namespace axon
