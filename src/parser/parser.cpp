@@ -1,4 +1,5 @@
 #include "parser.hpp"
+#include "../core/utf8.hpp"
 #include <tree_sitter/api.h>
 #include <cstdio>
 #include <fstream>
@@ -1787,6 +1788,9 @@ std::optional<ParsedFile> parse_file(const std::filesystem::path& abs_path,
 
     // Compute hash
     std::string hash = compute_blake3(src);
+    // Legacy sources (Windows-1252) are transcoded after hashing so change detection still keys
+    // on the file bytes while every derived string is valid UTF-8 for storage.
+    src = axon::to_valid_utf8(src);
 
     // Parse with tree-sitter
     TSParser* parser = ts_parser_new();

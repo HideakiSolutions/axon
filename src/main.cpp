@@ -151,7 +151,7 @@ static axon::mcp::ServerContext make_server_context(const char* binary_path,
     return ctx;
 }
 
-int main(int argc, char* argv[]) {
+static int axon_main(int argc, char* argv[]) {
 #ifdef _WIN32
     // The MSVC CRT opens stdin/stdout in text mode, which rewrites \n as
     // \r\n on write (and strips \r on read). That corrupts every byte-exact
@@ -1155,4 +1155,18 @@ int main(int argc, char* argv[]) {
 
     print_usage();
     return 1;
+}
+
+// A failure inside a command (storage error, journal bound, ...) must end as a readable error and
+// a non-zero exit code, not as std::terminate with a core dump.
+int main(int argc, char* argv[]) {
+    try {
+        return axon_main(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "axon: error: " << error.what() << "\n";
+        return 1;
+    } catch (...) {
+        std::cerr << "axon: error: unknown failure\n";
+        return 1;
+    }
 }
