@@ -49,6 +49,16 @@ EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) : path_(
             const auto type = ggml_backend_dev_type(device);
             if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU)
                 continue;
+            // Virtualized GPUs (CI VMs, some hypervisors) lack features the Metal kernels rely
+            // on: a Qwen3 decode aborts in ggml_metal_cpy_tensor_async (GGML_ASSERT(buf_dst)).
+            // `auto` treats them as absent; `gpu` still uses them for whoever insists.
+            const std::string description =
+                ggml_backend_dev_description(device) ? ggml_backend_dev_description(device) : "";
+            if (preference == "auto" && description.find("Paravirtual") != std::string::npos) {
+                std::cerr << "[axon] ignoring virtualized GPU (" << description
+                          << "); using CPU (AXON_EMBEDDING_DEVICE=gpu forces it)\n";
+                continue;
+            }
             size_t free_bytes = 0;
             size_t total_bytes = 0;
             ggml_backend_dev_memory(device, &free_bytes, &total_bytes);
@@ -69,7 +79,9 @@ EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) : path_(
 
     ggml_backend_dev_t gpu_devices[] = {selected_gpu, nullptr};
     mparams.n_gpu_layers = selected_gpu ? -1 : 0;
-    if (selected_gpu) mparams.devices = gpu_devices;
+    // An empty device list means CPU only. Leaving it unset would let llama.cpp offload large
+    // batches to any registered GPU even with zero GPU layers.
+    mparams.devices = selected_gpu ? gpu_devices : gpu_devices + 1;
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = 512;
@@ -104,7 +116,8 @@ EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) : path_(
                                      model_path.string());
         }
         std::cerr << "[axon] GPU embedding initialization failed; retrying on CPU\n";
-        mparams.devices = nullptr;
+        static ggml_backend_dev_t no_devices[] = {nullptr};
+        mparams.devices = no_devices;
         mparams.n_gpu_layers = 0;
         if (!load_model()) {
             throw std::runtime_error("Failed to initialize embedding model on GPU or CPU: " +

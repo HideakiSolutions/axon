@@ -62,6 +62,13 @@ capsule scored 2.00/2, the same as answers written from the whole files (65k tok
   later run. It now embeds in batches until nothing is pending.
 - Memory vectors (turns, observations, digests) are rebuilt on a model change instead of silently
   mixing embedding spaces.
+- `AXON_EMBEDDING_DEVICE=cpu` now really means CPU: the GPU device list is emptied, where before
+  llama.cpp could still offload large batches to a registered GPU even with zero GPU layers.
+- `auto` ignores virtualized GPUs ("Apple Paravirtual device" on macOS CI VMs and some
+  hypervisors). Their Metal backend lacks simdgroup matrices and `llama_decode` aborted with
+  `GGML_ASSERT(buf_dst)` on the second text (found by the 1.7.0 macOS release gate). Use
+  `AXON_EMBEDDING_DEVICE=gpu` to force such a device anyway.
+- The MCP capsule smoke test prints the index stderr when indexing fails.
 
 ## [1.6.2] — 2026-09-30
 
