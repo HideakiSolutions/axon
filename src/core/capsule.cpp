@@ -1,4 +1,5 @@
 #include "capsule.hpp"
+#include "utf8.hpp"
 #include "ccr.hpp"
 #include "compress.hpp"
 #include "skeleton.hpp"
@@ -23,7 +24,7 @@ static std::string read_file(const fs::path& p) {
     if (!f) return "";
     std::ostringstream ss;
     ss << f.rdbuf();
-    return ss.str();
+    return to_valid_utf8(ss.str());
 }
 
 static std::optional<Language> lang_from_string(const std::string& s) {

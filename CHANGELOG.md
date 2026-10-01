@@ -5,6 +5,18 @@ All notable changes to axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] — 2026-09-30
+
+### Fixed
+- A single source file that is not valid UTF-8 (for example Windows-1252 text such
+  as `servi\xE7os` in a legacy `.cs` file) made DuckDB reject the insert, and an
+  uncaught exception aborted the whole index with a core dump, storing no symbols.
+  Sources that are not valid UTF-8 are now transcoded from Windows-1252 after
+  hashing (so change detection still keys on the file bytes), and the database
+  boundary sanitizes text.
+- Command failures now end as `axon: error: <message>` with exit code 1 instead of
+  `std::terminate`.
+
 ## [1.6.1] — 2026-09-30
 
 ### Fixed
