@@ -48,7 +48,12 @@ export function createSession(userId: string): string {
 TS
 
 "$axon_bin" init "$tmpdir" >/dev/null
-"$axon_bin" index "$tmpdir" --force >/dev/null 2> "$tmpdir/index.err"
+"$axon_bin" index "$tmpdir" --force >/dev/null 2> "$tmpdir/index.err" || {
+  status=$?
+  echo "axon index failed (exit $status); stderr follows:" >&2
+  cat "$tmpdir/index.err" >&2
+  exit "$status"
+}
 
 request='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_context_capsule","arguments":{"query":"token ttl","pivot_files":["src/auth/token.ts"],"token_budget":1000,"no_cache":true}}}'
 (
