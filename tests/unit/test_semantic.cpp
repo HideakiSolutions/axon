@@ -216,3 +216,43 @@ TEST_F(SemanticTest, SessionEnd_DigestEmbeddingPopulated) {
     EXPECT_TRUE(r->GetValue<bool>(0, 0)) << "digest should be non-null";
     EXPECT_TRUE(r->GetValue<bool>(1, 0)) << "digest_embedding should be non-null";
 }
+
+// ── Embedding model identity ──────────────────────────────────────────────────
+
+TEST_F(SemanticTest, ModelSwitchClearsVectorsRecordsIdentityAndIsIdempotent) {
+    const int64_t file_id = insert_file("src/a.ts");
+    db->conn().Query("INSERT INTO symbols (id, file_id, name, kind, start_line, end_line) VALUES "
+                     "(nextval('seq_id'), " +
+                     std::to_string(file_id) + ", 'alpha', 'function', 1, 3)");
+    auto zero = std::vector<float>(768, 0.0f);
+    std::string vec = "[";
+    for (size_t i = 0; i < zero.size(); ++i)
+        vec += (i ? ",0" : "0");
+    vec += "]::FLOAT[768]";
+    db->conn().Query("UPDATE symbols SET embedding = " + vec);
+    // Vectors recorded under another embedding space.
+    db->conn().Query(
+        "INSERT INTO embedding_state(singleton, model_id) VALUES (true, 'other|768|doc0')");
+
+    EXPECT_FALSE(axon::embedding_model_matches(*db, *model));
+    EXPECT_TRUE(axon::ensure_embedding_model(*db, *model));
+    auto remaining = db->conn().Query("SELECT COUNT(*) FROM symbols WHERE embedding IS NOT NULL");
+    EXPECT_EQ(remaining->GetValue<int64_t>(0, 0), 0) << "old-space vectors must be cleared";
+    EXPECT_TRUE(axon::embedding_model_matches(*db, *model));
+    EXPECT_FALSE(axon::ensure_embedding_model(*db, *model)) << "second call is a no-op";
+    auto stored = db->conn().Query("SELECT model_id FROM embedding_state");
+    EXPECT_EQ(stored->GetValue(0, 0).ToString(), model->index_id());
+}
+
+TEST_F(SemanticTest, QueryAndDocumentEmbeddingsAreStoredWidthAndNormalized) {
+    auto query = model->embed_query("how is the player velocity computed");
+    auto documents =
+        model->embed_documents({"src/player.gd | compute velocity | func compute_velocity()"});
+    ASSERT_EQ(query.size(), static_cast<size_t>(axon::kStoredEmbeddingDims));
+    ASSERT_EQ(documents.size(), 1u);
+    ASSERT_EQ(documents[0].size(), static_cast<size_t>(axon::kStoredEmbeddingDims));
+    double norm = 0;
+    for (float v : query)
+        norm += static_cast<double>(v) * v;
+    EXPECT_NEAR(norm, 1.0, 1e-3);
+}

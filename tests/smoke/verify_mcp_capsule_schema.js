@@ -19,15 +19,18 @@ if (!Array.isArray(capsule.pivot_files) || capsule.pivot_files.length === 0) {
 }
 
 const pivot = capsule.pivot_files[0];
-for (const field of ['path', 'source_ref', 'expand_command', 'content', 'tokens']) {
+// Compact wire format: no per-file expand command or token count, one `expand` hint instead.
+for (const field of ['path', 'source_ref', 'content']) {
   if (!(field in pivot)) throw new Error(`missing pivot field: ${field}`);
+}
+for (const field of ['expand_command', 'tokens']) {
+  if (field in pivot) throw new Error(`pivot field should be omitted from the compact format: ${field}`);
 }
 if (!pivot.source_ref.includes('src/auth/token.ts')) {
   throw new Error(`unexpected source_ref: ${pivot.source_ref}`);
 }
-if (!pivot.expand_command.includes('get_skeleton') &&
-    !pivot.expand_command.includes('get_context_capsule')) {
-  throw new Error(`unexpected expand_command: ${pivot.expand_command}`);
+if (typeof capsule.expand !== 'string' || !capsule.expand.includes('get_symbol')) {
+  throw new Error(`missing expand hint: ${capsule.expand}`);
 }
 
 if (typeof capsule.token_estimate !== 'number' || capsule.token_estimate <= 0) {
@@ -36,11 +39,9 @@ if (typeof capsule.token_estimate !== 'number' || capsule.token_estimate <= 0) {
 if (capsule.token_estimate > 1000) {
   throw new Error(`capsule exceeded requested budget: ${capsule.token_estimate}`);
 }
-if (!capsule.compression || typeof capsule.compression.tokens_saved !== 'number') {
-  throw new Error('missing compression counters');
-}
-if (!Array.isArray(capsule.ccr_artifact_ids)) {
-  throw new Error('missing CCR artifact id array');
+// Compression counters and CCR ids only appear when compression actually ran.
+if ('compression' in capsule || 'ccr_artifact_ids' in capsule) {
+  throw new Error('empty compression/CCR sections must be omitted');
 }
 if (capsule.cache !== 'miss') {
   throw new Error(`expected no_cache miss path, got ${capsule.cache}`);

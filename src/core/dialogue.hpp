@@ -125,6 +125,13 @@ std::vector<TurnHit> turns_for_files(Database& db, EmbeddingModel& model, const 
 // Embed all turns WHERE embedding IS NULL. Mirrors embed_pending_symbols().
 int embed_pending_turns(Database& db, EmbeddingModel& model, int limit = 5000);
 
+// Embeds turns, observations and session digests that have no vector yet.
+int embed_pending_memory(Database& db, EmbeddingModel& model);
+
+// Switches the index to `model` when it changed (clearing vectors from the old space) and
+// rebuilds the memory vectors. Symbol vectors are rebuilt by embed_pending_symbols.
+bool refresh_memory_model(Database& db, EmbeddingModel& model);
+
 // ── Symbol name cache ─────────────────────────────────────────────────────────
 
 // Returns the top-N most-referenced symbol names in the graph.

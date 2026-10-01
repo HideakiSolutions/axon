@@ -1,0 +1,238 @@
+[
+ {
+  "id": "h01",
+  "lang": "pt",
+  "query": "Como o jogo calcula o caminho que o personagem segue quando o jogador toca em um ponto distante do mapa, desviando de áreas bloqueadas?",
+  "gold": [
+   {
+    "file": "world/pathfinding.gd",
+    "symbol": "find_path"
+   }
+  ]
+ },
+ {
+  "id": "h02",
+  "lang": "pt",
+  "query": "O que impede o jogador de sair da área caminhável de uma zona e como a posição é corrigida?",
+  "gold": [
+   {
+    "file": "world/zone.gd",
+    "symbol": "clamp_to_walkable"
+   }
+  ]
+ },
+ {
+  "id": "h03",
+  "lang": "en",
+  "query": "How does the game switch from one map area to another, freeing the old scene and loading the destination?",
+  "gold": [
+   {
+    "file": "world/zone_transition.gd",
+    "symbol": "swap"
+   }
+  ]
+ },
+ {
+  "id": "h04",
+  "lang": "pt",
+  "query": "Onde se verifica se um carimbo de data/hora do arquivo salvo é válido, incluindo anos bissextos?",
+  "gold": [
+   {
+    "file": "domain/timestamp_validator.gd",
+    "symbol": "is_valid"
+   },
+   {
+    "file": "domain/timestamp_validator.gd",
+    "symbol": "_is_leap_year"
+   }
+  ]
+ },
+ {
+  "id": "h05",
+  "lang": "pt",
+  "query": "Como uma nova fonte de evidência é registrada no caderno de investigação do jogador?",
+  "gold": [
+   {
+    "file": "domain/mission_rules.gd",
+    "symbol": "collect"
+   }
+  ]
+ },
+ {
+  "id": "h06",
+  "lang": "en",
+  "query": "How does the player submit a plan with a justification for the mission, and what checks apply?",
+  "gold": [
+   {
+    "file": "domain/mission_rules.gd",
+    "symbol": "propose"
+   }
+  ]
+ },
+ {
+  "id": "h07",
+  "lang": "pt",
+  "query": "Como é calculado o quanto das fontes obrigatórias e opcionais já foi coberto pelo jogador?",
+  "gold": [
+   {
+    "file": "persistence/notebook_rules.gd",
+    "symbol": "coverage"
+   }
+  ]
+ },
+ {
+  "id": "h08",
+  "lang": "en",
+  "query": "How does the game talk to the browser's local storage when running as a web export, and how does it tell whether it is usable?",
+  "gold": [
+   {
+    "file": "persistence/web_local_storage.gd",
+    "symbol": "set_value"
+   },
+   {
+    "file": "persistence/web_local_storage.gd",
+    "symbol": "is_available"
+   }
+  ]
+ },
+ {
+  "id": "h09",
+  "lang": "pt",
+  "query": "Onde a escolha de profundidade das conversas (direta ou contextual) é guardada entre sessões?",
+  "gold": [
+   {
+    "file": "persistence/preferences.gd",
+    "symbol": "set_dialogue_depth"
+   }
+  ]
+ },
+ {
+  "id": "h10",
+  "lang": "en",
+  "query": "How are hex colour fields in the content JSON files validated when data is loaded?",
+  "gold": [
+   {
+    "file": "content/content_validators.gd",
+    "symbol": "require_colour"
+   }
+  ]
+ },
+ {
+  "id": "h11",
+  "lang": "pt",
+  "query": "Como o tamanho da interface é adaptado a telas de densidades de pixel diferentes?",
+  "gold": [
+   {
+    "file": "src/systems/ui_scale.gd",
+    "symbol": "resolve_dp_size"
+   }
+  ]
+ },
+ {
+  "id": "h12",
+  "lang": "en",
+  "query": "How does the game keep track of which modal window owns keyboard focus and give it back when the window closes?",
+  "gold": [
+   {
+    "file": "src/systems/focus_manager.gd",
+    "symbol": "push"
+   },
+   {
+    "file": "src/systems/focus_manager.gd",
+    "symbol": "pop"
+   }
+  ]
+ },
+ {
+  "id": "h13",
+  "lang": "pt",
+  "query": "Como o direcional virtual de toque converte a posição do dedo em um vetor de movimento?",
+  "gold": [
+   {
+    "file": "src/ui/virtual_joystick.gd",
+    "symbol": "_update_from_local_point"
+   }
+  ]
+ },
+ {
+  "id": "h14",
+  "lang": "en",
+  "query": "How does an NPC decide whether the player can see it well enough to start an interaction, considering obstacles?",
+  "gold": [
+   {
+    "file": "world/npc.gd",
+    "symbol": "_has_clear_line_of_sight"
+   }
+  ]
+ },
+ {
+  "id": "h15",
+  "lang": "pt",
+  "query": "De que forma o visual (iluminação/sombreamento) da cena é escolhido por parâmetro de URL ou build de depuração?",
+  "gold": [
+   {
+    "file": "world/look/render_look_system.gd",
+    "symbol": "_resolve_variant_id"
+   }
+  ]
+ },
+ {
+  "id": "h16",
+  "lang": "en",
+  "query": "How is Tab navigation trapped inside a dialog so focus cycles among its controls?",
+  "gold": [
+   {
+    "file": "ui/components/accessibility.gd",
+    "symbol": "move_trapped_focus"
+   }
+  ]
+ },
+ {
+  "id": "h17",
+  "lang": "pt",
+  "query": "Como o HUD decide qual personagem está mais próximo do jogador para destacar seu indicador na borda da tela?",
+  "gold": [
+   {
+    "file": "ui/hud/npc_indicators.gd",
+    "symbol": "_nearest_npc_id"
+   }
+  ]
+ },
+ {
+  "id": "h18",
+  "lang": "pt",
+  "query": "Como funciona o painel que pede confirmação do jogador antes de viajar para outra zona?",
+  "gold": [
+   {
+    "file": "world/zone_transfer_button.gd",
+    "symbol": "_build_consent_panel"
+   }
+  ]
+ },
+ {
+  "id": "h19",
+  "lang": "en",
+  "query": "How is the walking animation's stride length measured from a character model's skeleton tracks?",
+  "gold": [
+   {
+    "file": "world/character/walk_stride_measurement.gd",
+    "symbol": "measure"
+   }
+  ]
+ },
+ {
+  "id": "h20",
+  "lang": "pt",
+  "query": "Como o progresso da missão salvo pode ser exportado como texto JSON e como o usuário é avisado quando o salvamento falha?",
+  "gold": [
+   {
+    "file": "persistence/save_local.gd",
+    "symbol": "export_json"
+   },
+   {
+    "file": "ui/hud/save_status_label.gd",
+    "symbol": "_on_save_failed"
+   }
+  ]
+ }
+]

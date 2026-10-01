@@ -223,6 +223,13 @@ void Database::run_migrations() {
          "  value VARCHAR NOT NULL"
          ")");
 
+    // Identity of the embedding model behind every stored vector (see ensure_embedding_model).
+    exec("CREATE TABLE IF NOT EXISTS embedding_state ("
+         "  singleton  BOOLEAN PRIMARY KEY,"
+         "  model_id   VARCHAR NOT NULL,"
+         "  updated_at TIMESTAMP NOT NULL DEFAULT now()"
+         ")");
+
     exec("CREATE TABLE IF NOT EXISTS observations ("
          "  id         BIGINT PRIMARY KEY,"
          "  content    VARCHAR NOT NULL,"

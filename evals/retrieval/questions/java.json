@@ -1,0 +1,172 @@
+[
+ {
+  "id": "java01",
+  "lang": "pt",
+  "query": "Como converter um texto JSON em uma instância de uma classe de domínio informando o tipo desejado?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/Gson.java",
+    "symbol": "fromJson"
+   }
+  ]
+ },
+ {
+  "id": "java02",
+  "lang": "en",
+  "query": "How can I make the parser accept sloppy JSON such as unquoted keys, comments or single-quoted strings?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/stream/JsonReader.java",
+    "symbol": "setStrictness"
+   }
+  ]
+ },
+ {
+  "id": "java03",
+  "lang": "pt",
+  "query": "Qual política transforma nomes de campos em camelCase para minúsculas separadas por um caractere, como sublinhado ou hífen?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/FieldNamingPolicy.java",
+    "symbol": "separateCamelCase"
+   },
+   {
+    "file": "java/com/google/gson/FieldNamingPolicy.java",
+    "symbol": "FieldNamingPolicy"
+   }
+  ]
+ },
+ {
+  "id": "java04",
+  "lang": "en",
+  "query": "How do I make very large whole numbers be written as quoted text in the output so they don't lose precision in JavaScript?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/LongSerializationPolicy.java",
+    "symbol": "LongSerializationPolicy"
+   }
+  ]
+ },
+ {
+  "id": "java05",
+  "lang": "pt",
+  "query": "Ao desserializar para um tipo genérico de objeto, como escolher se os números viram double, BigDecimal ou valores preguiçosos?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/ToNumberPolicy.java",
+    "symbol": "ToNumberPolicy"
+   },
+   {
+    "file": "java/com/google/gson/internal/bind/ObjectTypeAdapter.java",
+    "symbol": "ObjectTypeAdapter"
+   }
+  ]
+ },
+ {
+  "id": "java06",
+  "lang": "en",
+  "query": "Where is the code that parses timestamps written in the international standard date-time text format?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/internal/bind/util/ISO8601Utils.java",
+    "symbol": "parse"
+   }
+  ]
+ },
+ {
+  "id": "java07",
+  "lang": "pt",
+  "query": "Como descartar o próximo valor do fluxo de entrada sem materializá-lo, incluindo estruturas aninhadas?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/stream/JsonReader.java",
+    "symbol": "skipValue"
+   }
+  ]
+ },
+ {
+  "id": "java08",
+  "lang": "en",
+  "query": "How do I find out the location inside the document (like a path expression) where reading is currently positioned, to help diagnose errors?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/stream/JsonReader.java",
+    "symbol": "getPath"
+   }
+  ]
+ },
+ {
+  "id": "java09",
+  "lang": "pt",
+  "query": "Como capturar em tempo de execução um tipo parametrizado, como uma lista de strings, contornando o apagamento de tipos?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/reflect/TypeToken.java",
+    "symbol": "TypeToken"
+   }
+  ]
+ },
+ {
+  "id": "java10",
+  "lang": "en",
+  "query": "How does the writer avoid emitting characters like angle brackets and ampersands that are dangerous inside HTML pages?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/stream/JsonWriter.java",
+    "symbol": "setHtmlSafe"
+   }
+  ]
+ },
+ {
+  "id": "java11",
+  "lang": "pt",
+  "query": "Como criar instâncias de classes que não possuem construtor sem argumentos, sem chamar nenhum construtor?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/internal/UnsafeAllocator.java",
+    "symbol": "UnsafeAllocator"
+   },
+   {
+    "file": "java/com/google/gson/internal/ConstructorConstructor.java",
+    "symbol": "ConstructorConstructor"
+   }
+  ]
+ },
+ {
+  "id": "java12",
+  "lang": "en",
+  "query": "How can I read a sequence of several top-level JSON values from one input, one at a time, as an iterator?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/JsonStreamParser.java",
+    "symbol": "JsonStreamParser"
+   }
+  ]
+ },
+ {
+  "id": "java13",
+  "lang": "pt",
+  "query": "Como a biblioteca decide ignorar campos com base em modificadores, anotações de versão ou estratégias de exclusão?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/internal/Excluder.java",
+    "symbol": "Excluder"
+   },
+   {
+    "file": "java/com/google/gson/internal/Excluder.java",
+    "symbol": "excludeField"
+   }
+  ]
+ },
+ {
+  "id": "java14",
+  "lang": "en",
+  "query": "How is the conversion between enum constants and their JSON names performed, including custom names from annotations?",
+  "gold": [
+   {
+    "file": "java/com/google/gson/internal/bind/EnumTypeAdapter.java",
+    "symbol": "EnumTypeAdapter"
+   }
+  ]
+ }
+]

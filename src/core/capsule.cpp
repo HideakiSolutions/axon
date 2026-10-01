@@ -1,4 +1,5 @@
 #include "capsule.hpp"
+#include "symbol_reader.hpp"
 #include "utf8.hpp"
 #include "ccr.hpp"
 #include "compress.hpp"
@@ -109,7 +110,14 @@ static std::vector<PivotMatch> select_pivots_by_query(const std::string& query_t
                                                       EmbeddingModel& model,
                                                       const std::string& mode,
                                                       const fs::path& project_root, int top_k = 5) {
-    auto qvec = model.embed(query_text);
+    if (!embedding_model_matches(db, model)) {
+        throw std::runtime_error(
+            "The index embeddings were built with a different embedding model than the one "
+            "loaded (" +
+            model.profile().id +
+            "). Run `axon index` (or the run_pipeline MCP tool) to rebuild them.");
+    }
+    auto qvec = model.embed_query(query_text);
 
     std::ostringstream vec_str;
     vec_str << "[";
@@ -803,13 +811,389 @@ static ContextCapsule assemble_symbol_mode(const std::string& query,
     return capsule;
 }
 
+static std::string sql_quote_local(const std::string& value) {
+    std::string out;
+    for (char c : value) {
+        if (c == '\'') out += '\'';
+        out += c;
+    }
+    return out;
+}
+
+// ── Dense packer ─────────────────────────────────────────────────────────────
+//
+// Ranks symbols by embedding similarity alone (fusing BM25 on top of a strong dense model
+// measurably lowered recall) and delivers the top-K functions with complete bodies. Long bodies
+// keep their head and tail (declaration, control flow and the return path) instead of being cut
+// at an arbitrary byte; the next K symbols are listed as signatures only.
+
+namespace {
+
+struct DenseCandidate {
+    int64_t id = 0;
+    int64_t file_id = 0;
+    double similarity = 0;
+};
+
+int dense_top_k() {
+    if (const char* value = std::getenv("AXON_CAPSULE_TOP_K")) {
+        try {
+            return std::clamp(std::stoi(value), 1, 40);
+        } catch (...) {
+        }
+    }
+    // Held-out sweep (62 questions, 4 languages): K=8 49 delivered at ~1.4k tokens, K=10 53 at
+    // ~1.8k, K=12 55 at ~2.1k, K=16 57 at ~2.8k. K=10 is the knee.
+    return 10;
+}
+
+double lexical_bonus_weight() {
+    if (const char* value = std::getenv("AXON_LEXICAL_WEIGHT")) {
+        try {
+            return std::clamp(std::stod(value), 0.0, 1.0);
+        } catch (...) {
+        }
+    }
+    return 0.0;
+}
+
+std::vector<DenseCandidate> dense_candidates(const std::string& query_text, Database& db,
+                                             EmbeddingModel& model, int limit) {
+    if (!embedding_model_matches(db, model)) {
+        throw std::runtime_error(
+            "The index embeddings were built with a different embedding model than the one "
+            "loaded (" +
+            model.profile().id +
+            "). Run `axon index` (or the run_pipeline MCP tool) to rebuild them.");
+    }
+    auto qvec = model.embed_query(query_text);
+    std::ostringstream vec;
+    vec << "[";
+    for (size_t i = 0; i < qvec.size(); i++) {
+        if (i) vec << ",";
+        vec << qvec[i];
+    }
+    vec << "]::FLOAT[" << model.dims() << "]";
+    auto res = db.conn().Query(
+        "SELECT id, file_id, CAST(array_cosine_similarity(embedding, " + vec.str() +
+        ") AS DOUBLE) AS sim FROM symbols WHERE embedding IS NOT NULL ORDER BY sim DESC LIMIT " +
+        std::to_string(limit));
+    if (res->HasError()) throw std::runtime_error("dense query failed: " + res->GetError());
+    std::vector<DenseCandidate> out;
+    for (duckdb::idx_t i = 0; i < res->RowCount(); ++i) {
+        DenseCandidate c;
+        c.id = res->GetValue<int64_t>(0, i);
+        c.file_id = res->GetValue<int64_t>(1, i);
+        try {
+            c.similarity = std::stod(res->GetValue(2, i).ToString());
+        } catch (...) {
+        }
+        out.push_back(c);
+    }
+
+    // The vector only sees the head of each body; terms deeper inside (status names, error
+    // kinds) are in the lexical index. A small BM25 bonus applied inside the dense candidate set
+    // reorders close calls without letting lexical noise displace strong semantic matches.
+    const double lexical_weight = lexical_bonus_weight();
+    if (lexical_weight > 0 && out.size() > 1) {
+        auto qterms = lexical_query_terms(query_text);
+        std::sort(qterms.begin(), qterms.end());
+        qterms.erase(std::unique(qterms.begin(), qterms.end()), qterms.end());
+        if (!qterms.empty()) {
+            std::string terms, ids;
+            for (const auto& t : qterms)
+                terms += (terms.empty() ? "'" : ",'") + sql_quote_local(t) + "'";
+            for (const auto& c : out)
+                ids += (ids.empty() ? "" : ",") + std::to_string(c.id);
+            auto stats = db.conn().Query("SELECT COUNT(*), COALESCE(AVG(search_length),1) FROM "
+                                         "symbols WHERE search_length IS NOT NULL");
+            const double docs = stats->HasError() ? 0 : stats->GetValue<int64_t>(0, 0);
+            double avg_len = 1;
+            if (!stats->HasError()) {
+                try {
+                    avg_len = std::max(1.0, std::stod(stats->GetValue(1, 0).ToString()));
+                } catch (...) {
+                }
+            }
+            auto df_rows =
+                db.conn().Query("SELECT term, COUNT(*) FROM symbol_terms WHERE term IN (" + terms +
+                                ") GROUP BY term");
+            std::unordered_map<std::string, double> df;
+            if (!df_rows->HasError())
+                for (duckdb::idx_t i = 0; i < df_rows->RowCount(); ++i)
+                    df[df_rows->GetValue(0, i).ToString()] =
+                        static_cast<double>(df_rows->GetValue<int64_t>(1, i));
+            auto postings = db.conn().Query(
+                "SELECT t.symbol_id, t.term, t.tf, COALESCE(s.search_length,1) FROM symbol_terms t "
+                "JOIN symbols s ON s.id = t.symbol_id WHERE t.symbol_id IN (" +
+                ids + ") AND t.term IN (" + terms + ")");
+            std::unordered_map<int64_t, double> bm25;
+            if (!postings->HasError() && docs > 0) {
+                for (duckdb::idx_t i = 0; i < postings->RowCount(); ++i) {
+                    const int64_t id = postings->GetValue<int64_t>(0, i);
+                    const std::string term = postings->GetValue(1, i).ToString();
+                    const double tf = postings->GetValue<int32_t>(2, i);
+                    const double length = postings->GetValue<int32_t>(3, i);
+                    const double d = df[term];
+                    const double idf = std::log(1.0 + (docs - d + 0.5) / (d + 0.5));
+                    bm25[id] += idf * tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * length / avg_len));
+                }
+            }
+            double best = 0;
+            for (const auto& [_, v] : bm25)
+                best = std::max(best, v);
+            if (best > 0) {
+                for (auto& c : out) {
+                    auto it = bm25.find(c.id);
+                    c.similarity += lexical_weight * (it == bm25.end() ? 0.0 : it->second / best);
+                }
+                std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+                    return a.similarity > b.similarity;
+                });
+            }
+        }
+    }
+
+    // An identifier written exactly as in the code (snake_case / camelCase / with digits) is a
+    // direct reference, not a description: put its definitions first.
+    std::vector<std::string> identifiers;
+    std::string token;
+    auto flush = [&] {
+        if (token.size() >= 4 &&
+            (std::isalpha(static_cast<unsigned char>(token[0])) || token[0] == '_')) {
+            bool shaped = token.find('_') != std::string::npos;
+            for (size_t k = 1; k < token.size(); ++k)
+                if (std::isupper(static_cast<unsigned char>(token[k])) ||
+                    std::isdigit(static_cast<unsigned char>(token[k])))
+                    shaped = true;
+            if (shaped &&
+                std::find(identifiers.begin(), identifiers.end(), token) == identifiers.end())
+                identifiers.push_back(token);
+        }
+        token.clear();
+    };
+    for (char ch : query_text) {
+        if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_')
+            token += ch;
+        else
+            flush();
+    }
+    flush();
+    if (!identifiers.empty() && identifiers.size() <= 8) {
+        std::string list;
+        for (const auto& name : identifiers) {
+            if (!list.empty()) list += ",";
+            list += "'" + sql_quote_local(name) + "'";
+        }
+        auto exact = db.conn().Query("SELECT id, file_id FROM symbols WHERE name IN (" + list +
+                                     ") AND embedding IS NOT NULL ORDER BY id LIMIT 8");
+        if (!exact->HasError() && exact->RowCount() > 0) {
+            std::vector<DenseCandidate> front;
+            for (duckdb::idx_t i = 0; i < exact->RowCount(); ++i) {
+                DenseCandidate c;
+                c.id = exact->GetValue<int64_t>(0, i);
+                c.file_id = exact->GetValue<int64_t>(1, i);
+                c.similarity = 1.0;
+                front.push_back(c);
+            }
+            for (const auto& c : out)
+                if (std::none_of(front.begin(), front.end(),
+                                 [&](const auto& f) { return f.id == c.id; }))
+                    front.push_back(c);
+            out = std::move(front);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+static ContextCapsule assemble_dense_capsule(const std::string& query, Database& db,
+                                             EmbeddingModel& model, const DependencyGraph& graph,
+                                             const fs::path& project_root, int token_budget) {
+    ContextCapsule capsule;
+    capsule.query = query;
+    capsule.retrieval_mode = "dense";
+    capsule.total_files = static_cast<int>(graph.id_to_path.size());
+
+    const int top_k = dense_top_k();
+    auto candidates = dense_candidates(query, db, model, std::max(top_k * 4, 48));
+    if (candidates.empty()) return capsule;
+
+    // Distinct symbols in rank order.
+    std::vector<DenseCandidate> ranked;
+    for (const auto& c : candidates)
+        if (std::none_of(ranked.begin(), ranked.end(), [&](const auto& r) { return r.id == c.id; }))
+            ranked.push_back(c);
+    const size_t body_count = std::min<size_t>(top_k, ranked.size());
+    const size_t list_count = std::min<size_t>(top_k, ranked.size() - body_count);
+
+    std::vector<int64_t> ids;
+    for (size_t i = 0; i < body_count + list_count; ++i)
+        ids.push_back(ranked[i].id);
+    auto rows = hydrate_symbols(db, ids);
+    std::unordered_map<int64_t, SymbolRow> by_id;
+    for (auto& row : rows)
+        by_id[row.id] = row;
+
+    std::unordered_map<std::string, std::string> sources;
+    auto source_of = [&](const std::string& path) -> const std::string& {
+        auto it = sources.find(path);
+        if (it == sources.end()) it = sources.emplace(path, read_file(project_root / path)).first;
+        return it->second;
+    };
+
+    const int per_symbol_cap = std::clamp(token_budget / static_cast<int>(top_k + 1), 120, 350);
+    int tokens_used = 0;
+    std::vector<int64_t> file_order;
+    std::unordered_map<int64_t, std::vector<SymbolRow>> body_by_file;
+    for (size_t i = 0; i < body_count; ++i) {
+        auto it = by_id.find(ranked[i].id);
+        if (it == by_id.end()) continue;
+        capsule.selection.push_back(
+            {ranked[i].id, ranked[i].file_id, static_cast<int>(i + 1), 0, ranked[i].similarity});
+        if (!body_by_file.count(it->second.file_id)) file_order.push_back(it->second.file_id);
+        body_by_file[it->second.file_id].push_back(it->second);
+    }
+
+    for (int64_t fid : file_order) {
+        auto path_it = graph.id_to_path.find(fid);
+        if (path_it == graph.id_to_path.end()) continue;
+        const std::string& path = path_it->second;
+        const std::string& content = source_of(path);
+        const auto extension = fs::path(path).extension().string();
+        const bool hash_comments = extension == ".py" || extension == ".gd" || extension == ".sh" ||
+                                   extension == ".bash" || extension == ".rb" ||
+                                   extension == ".nix";
+        std::ostringstream out;
+        out << "// file: " << path << "\n";
+        bool wrote = false;
+        for (const auto& sym : body_by_file[fid]) {
+            if (tokens_used >= token_budget * 90 / 100) break;
+            std::ostringstream entry;
+            entry << "\n// === " << sym.name << " (" << sym.kind << ") lines " << sym.start_line
+                  << "-" << sym.end_line << " ===\n";
+            if (!sym.docstring.empty())
+                entry << "/// "
+                      << sym.docstring.substr(0, std::min<size_t>(200, sym.docstring.size()))
+                      << "\n";
+            std::vector<std::string> lines;
+            if (!content.empty()) {
+                std::istringstream body(code_without_comments(
+                    extract_lines(content, sym.start_line, sym.end_line), hash_comments));
+                std::string line;
+                while (std::getline(body, line))
+                    if (line.find_first_not_of(" \t\r") != std::string::npos) lines.push_back(line);
+            }
+            const std::string head = entry.str();
+            const int remaining = token_budget - tokens_used - estimate_tokens(head);
+            const std::string rendered =
+                lines.empty() ? std::string()
+                              : elide_body(lines, std::min(per_symbol_cap, remaining));
+            out << head << rendered;
+            tokens_used += estimate_tokens(head) + estimate_tokens(rendered);
+            wrote = true;
+        }
+        if (!wrote) continue;
+        CapsuleFile cf;
+        cf.path = path;
+        cf.source_ref = source_ref_for_symbols(path, body_by_file[fid]);
+        cf.expand_command = capsule_expand_command(path, false);
+        cf.content = sanitize_utf8(out.str());
+        cf.is_skeleton = false;
+        cf.token_estimate = estimate_tokens(cf.content);
+        capsule.pivot_files.push_back(std::move(cf));
+    }
+
+    // Next-ranked symbols as signatures: enough to recognize a neighbour, cheap to carry.
+    std::vector<int64_t> list_files;
+    std::unordered_map<int64_t, std::vector<SymbolRow>> list_by_file;
+    for (size_t i = body_count; i < body_count + list_count; ++i) {
+        auto it = by_id.find(ranked[i].id);
+        if (it == by_id.end()) continue;
+        if (!list_by_file.count(it->second.file_id)) list_files.push_back(it->second.file_id);
+        list_by_file[it->second.file_id].push_back(it->second);
+    }
+    for (int64_t fid : list_files) {
+        if (tokens_used >= token_budget) break;
+        auto path_it = graph.id_to_path.find(fid);
+        if (path_it == graph.id_to_path.end()) continue;
+        // A file already delivered with bodies carries its neighbours in the same entry instead
+        // of a second one with its own header.
+        auto pivot_it =
+            std::find_if(capsule.pivot_files.begin(), capsule.pivot_files.end(),
+                         [&](const CapsuleFile& f) { return f.path == path_it->second; });
+        if (pivot_it != capsule.pivot_files.end()) {
+            std::ostringstream extra;
+            extra << "\n// related (signatures):\n";
+            for (const auto& sym : list_by_file[fid]) {
+                std::string signature = sym.signature.empty() ? sym.name : sym.signature;
+                if (signature.size() > 160) signature.resize(160);
+                extra << "// " << sym.name << " (" << sym.kind << ") lines " << sym.start_line
+                      << "-" << sym.end_line << ": " << signature << "\n";
+            }
+            const int extra_tokens = estimate_tokens(extra.str());
+            if (tokens_used + extra_tokens <= token_budget) {
+                pivot_it->content += sanitize_utf8(extra.str());
+                pivot_it->token_estimate += extra_tokens;
+                tokens_used += extra_tokens;
+            }
+            continue;
+        }
+        std::ostringstream out;
+        for (const auto& sym : list_by_file[fid]) {
+            std::string signature = sym.signature.empty() ? sym.name : sym.signature;
+            if (signature.size() > 160) signature.resize(160);
+            out << sym.name << " (" << sym.kind << ") lines " << sym.start_line << "-"
+                << sym.end_line << ": " << signature << "\n";
+        }
+        CapsuleFile cf;
+        cf.path = path_it->second;
+        cf.source_ref = source_ref_for_symbols(cf.path, list_by_file[fid]);
+        cf.expand_command = capsule_expand_command(cf.path, true);
+        cf.content = sanitize_utf8(out.str());
+        cf.is_skeleton = true;
+        cf.token_estimate = estimate_tokens(cf.content);
+        if (tokens_used + cf.token_estimate > token_budget) continue;
+        tokens_used += cf.token_estimate;
+        capsule.support_files.push_back(std::move(cf));
+    }
+    capsule.token_estimate = tokens_used;
+    return capsule;
+}
+
 ContextCapsule assemble_capsule(const std::string& query,
                                 const std::vector<std::string>& explicit_pivots, Database& db,
                                 EmbeddingModel& model, const DependencyGraph& graph,
                                 const fs::path& project_root, int token_budget, int dialogue_budget,
                                 CapsuleCompression compression, const std::string& retrieval_mode) {
-    if (retrieval_mode != "semantic" && retrieval_mode != "hybrid")
-        throw std::invalid_argument("retrieval_mode must be semantic or hybrid");
+    if (retrieval_mode != "semantic" && retrieval_mode != "hybrid" && retrieval_mode != "dense")
+        throw std::invalid_argument("retrieval_mode must be dense, semantic or hybrid");
+    if (retrieval_mode == "dense" && explicit_pivots.empty() && !query.empty()) {
+        auto cap = assemble_dense_capsule(query, db, model, graph, project_root, token_budget);
+        if (cap.pivot_files.empty()) {
+            std::cerr << "[axon] No pivots found. Run `axon index` first.\n";
+            return {};
+        }
+        if (dialogue_budget > 0) {
+            std::vector<int64_t> file_ids;
+            for (const auto& entry : cap.selection)
+                file_ids.push_back(entry.file_id);
+            auto hits = turns_for_files(db, model, query, file_ids, dialogue_budget);
+            for (const auto& h : hits) {
+                DialogueTurn dt;
+                dt.role = h.turn.role;
+                dt.content = h.turn.content;
+                dt.session_label = h.session_label;
+                dt.thread_name = h.thread_name;
+                dt.ts = h.turn.ts;
+                dt.token_estimate = estimate_tokens(dt.content);
+                cap.token_estimate += dt.token_estimate;
+                cap.related_turns.push_back(std::move(dt));
+            }
+        }
+        return cap;
+    }
     // 1. Select pivots — preserves WHICH symbol matched (if query-driven)
     std::vector<PivotMatch> pivot_matches;
     std::vector<int64_t> pivot_ids;
