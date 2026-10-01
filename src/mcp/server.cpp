@@ -690,7 +690,7 @@ static bool ensure_db_open(ServerContext& ctx, bool create_if_missing = false) {
             try {
                 fs::path binary_dir =
                     ctx.binary_dir.empty() ? ctx.cfg.project_root / "models" : ctx.binary_dir;
-                auto model_path = find_model(binary_dir);
+                auto model_path = find_model(binary_dir, embedding_state_hint(*ctx.db));
                 ctx.model = std::make_unique<EmbeddingModel>(model_path);
                 ctx.model_error.clear();
             } catch (const std::exception& e) {
@@ -849,6 +849,8 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
     if (name == "run_pipeline") {
         if (!ctx.db_ready()) return db_unavailable_result(ctx);
 
+        // run_pipeline is the explicit migration point: it loads the current default model even
+        // when the server started with the one that built the existing vectors.
         if (std::getenv("AXON_EMBEDDING_DEVICE") && !ctx.model_ready()) {
             try {
                 auto model_path = find_model(ctx.binary_dir);
@@ -863,9 +865,24 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
         auto stats = index_project(ctx.cfg, *ctx.db);
         ctx.graph = load_graph(*ctx.db);
 
+        {
+            // Reload when the loaded model is not the current default (see above).
+            bool reload = !ctx.model_ready();
+            std::filesystem::path preferred;
+            try {
+                preferred = find_model(ctx.binary_dir.empty() ? ctx.cfg.project_root / "models"
+                                                              : ctx.binary_dir);
+                if (ctx.model_ready())
+                    reload = std::filesystem::weakly_canonical(ctx.model->path()) !=
+                             std::filesystem::weakly_canonical(preferred);
+            } catch (const std::exception&) {
+            }
+            if (reload) ctx.model.reset();
+        }
         if (!ctx.model_ready()) {
             try {
-                auto mp = find_model(ctx.cfg.project_root / "models");
+                auto mp = find_model(ctx.binary_dir.empty() ? ctx.cfg.project_root / "models"
+                                                            : ctx.binary_dir);
                 ctx.model = std::make_unique<EmbeddingModel>(mp);
             } catch (const std::exception& e) {
                 ctx.model_error = e.what();
@@ -907,7 +924,7 @@ static json handle_tool(const std::string& name, const json& args, ServerContext
 
         if (std::getenv("AXON_EMBEDDING_DEVICE") && !ctx.model_ready()) {
             try {
-                auto model_path = find_model(ctx.binary_dir);
+                auto model_path = find_model(ctx.binary_dir, embedding_state_hint(*ctx.db));
                 ctx.model = std::make_unique<EmbeddingModel>(model_path);
                 ctx.model_error.clear();
             } catch (const std::exception& e) {

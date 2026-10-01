@@ -189,6 +189,7 @@ add_executable(test_dialogue unit/test_dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embedding_state.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_dialogue PRIVATE
@@ -212,6 +213,7 @@ add_executable(test_objectives unit/test_objectives.cpp
     ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embedding_state.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
     ${CMAKE_SOURCE_DIR}/src/core/symbol_reader.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
@@ -259,6 +261,7 @@ add_test(NAME test_registry COMMAND test_registry)
 # Portfolio journal: real DuckDB, real parser, transactional fault injection.
 add_executable(test_portfolio_journal unit/test_portfolio_journal.cpp
     ${CMAKE_SOURCE_DIR}/src/core/symbol_reader.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embedding_state.cpp
     ${CMAKE_SOURCE_DIR}/src/core/db.cpp
     ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/indexer.cpp
@@ -486,6 +489,7 @@ add_executable(test_capsule_budget unit/test_capsule_budget.cpp
     ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embedding_state.cpp
     ${CMAKE_SOURCE_DIR}/src/core/capsule.cpp
     ${CMAKE_SOURCE_DIR}/src/core/symbol_reader.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ccr.cpp
@@ -522,6 +526,7 @@ add_executable(test_semantic unit/test_semantic.cpp
     ${CMAKE_SOURCE_DIR}/src/core/contracts.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dialogue.cpp
     ${CMAKE_SOURCE_DIR}/src/core/embeddings.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/embedding_state.cpp
     ${CMAKE_SOURCE_DIR}/src/portfolio/domain/index_journal.cpp
 )
 target_include_directories(test_semantic PRIVATE

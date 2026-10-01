@@ -14,18 +14,22 @@ of the questions, against 24% (18/76) for 1.6.1, at ~1,800 instead of ~4,000 est
 capsule. In a blind answer-quality check (10 questions, independent judge) answers from a `dense`
 capsule scored 2.00/2, the same as answers written from the whole files (65k tokens against 17k).
 
-### Changed — reindex required
+### Changed — reindex to benefit
 - **The default embedding model is now Qwen3-Embedding-0.6B** (GGUF Q8_0, ~640 MB, downloaded
   by the installers with a pinned SHA-256). nomic-embed-text-v1.5 (no task prefixes, name +
   signature only) found the right file for 6 of 20 held-out questions; the new model with
   enriched symbol text found it for 19. Vectors stay 768-wide (Qwen3 is truncated and
   re-normalized, Matryoshka-trained), so the schema is unchanged. nomic remains supported.
-- The index records which model produced its vectors. After upgrading, the next `axon index`
-  (or `run_pipeline`) clears the old vectors — symbols, turns, observations, session digests —
-  and rebuilds them; until then query tools return an error that says so instead of comparing
-  vectors from different spaces. **Expect the first rebuild to be several times slower than
-  nomic on CPU** (~0.4 s per symbol with 4-6 threads); a GPU backend (Vulkan on Linux, Metal on
-  macOS) removes most of that. `AXON_EMBEDDING_THREADS` tunes CPU threads.
+- The index records which model produced its vectors, and **existing projects keep working
+  after the upgrade**: queries, the MCP server and incremental updates (editor hooks run
+  `index-paths` after every edit) use the model that built the vectors already in the index
+  (nomic for indexes created before 1.7.0) as long as its file is present. Only an explicit
+  `axon index` or `run_pipeline` switches the index to the new default: it clears the old
+  vectors — symbols, turns, observations, session digests — and rebuilds them, and a query that
+  meets vectors from a different model returns an error saying so instead of comparing
+  different spaces. **Expect that rebuild to be several times slower than nomic on CPU** (~0.4 s
+  per symbol with 4-6 threads); a GPU backend (Vulkan on Linux, Metal on macOS) removes most of
+  that. `AXON_EMBEDDING_THREADS` tunes CPU threads.
 - `get_context_capsule` defaults to `retrieval_mode=dense`: the top-K functions (default 10,
   `AXON_CAPSULE_TOP_K`) ranked by embedding similarity alone, with complete bodies; long bodies
   keep head and tail and replace the middle with `// … N lines elided …`; the next K symbols

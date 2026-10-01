@@ -29,7 +29,12 @@ find_project_root(const std::filesystem::path& start = std::filesystem::current_
 Config make_config(const std::filesystem::path& root);
 
 // Find the embedding model (searches common locations)
-std::filesystem::path find_model(const std::filesystem::path& axon_binary_dir);
+// `index_model_hint` is the identity of the model that built the vectors already in the index
+// (see embedding_state_hint). When given, the matching model file is preferred so queries and
+// incremental updates keep working against an index built by an older default; an empty hint
+// (a fresh index, or a full `axon index`) selects the current default.
+std::filesystem::path find_model(const std::filesystem::path& axon_binary_dir,
+                                 const std::string& index_model_hint = "");
 
 ProjectConfig load_project_config(const std::filesystem::path& axon_dir);
 

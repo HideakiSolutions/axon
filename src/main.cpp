@@ -133,7 +133,8 @@ static axon::mcp::ServerContext make_server_context(const char* binary_path,
             ctx.graph = axon::load_graph(*ctx.db);
             if (load_model) {
                 try {
-                    auto model_path = axon::find_model(ctx.binary_dir);
+                    auto model_path =
+                        axon::find_model(ctx.binary_dir, axon::embedding_state_hint(*ctx.db));
                     ctx.model = std::make_unique<axon::EmbeddingModel>(model_path);
                 } catch (const std::exception& e) {
                     ctx.model_error = e.what();
@@ -296,7 +297,10 @@ static int axon_main(int argc, char* argv[]) {
         // Embed any newly-inserted symbols so get_context_capsule sees them immediately
         if (stats.files_indexed > 0) {
             try {
-                auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
+                // Incremental updates (run by editor hooks after every edit) must not switch
+                // the index to another model: that would re-embed the whole project.
+                auto model_path = axon::find_model(fs::path(argv[0]).parent_path(),
+                                                   axon::embedding_state_hint(*db));
                 axon::EmbeddingModel model(model_path);
                 axon::embed_pending_symbols(*db, model);
             } catch (const std::exception& e) {
@@ -629,7 +633,8 @@ static int axon_main(int argc, char* argv[]) {
 
         std::optional<axon::EmbeddingModel> model_opt;
         try {
-            auto model_path = axon::find_model(fs::path(argv[0]).parent_path());
+            auto model_path =
+                axon::find_model(fs::path(argv[0]).parent_path(), axon::embedding_state_hint(*db));
             model_opt.emplace(model_path);
         } catch (const std::exception& e) {
             std::cerr << "[axon] " << e.what() << "\n";

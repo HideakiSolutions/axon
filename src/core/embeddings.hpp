@@ -1,4 +1,5 @@
 #pragma once
+#include "embedding_state.hpp"
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -45,6 +46,7 @@ public:
 
     int dims() const { return dims_; }
     const EmbeddingProfile& profile() const { return profile_; }
+    const std::filesystem::path& path() const { return path_; }
 
     // Identity of the vector space: profile + stored dims + document-text revision. Vectors
     // produced under different identities are not comparable.
@@ -56,6 +58,7 @@ private:
     int dims_ = kStoredEmbeddingDims;
     int native_dims_ = kStoredEmbeddingDims;
     EmbeddingProfile profile_;
+    std::filesystem::path path_;
 };
 
 // Revision of the text built for each symbol (path, name, signature, docs, body head). Bump when

@@ -20,7 +20,7 @@
 
 namespace axon {
 
-EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) {
+EmbeddingModel::EmbeddingModel(const std::filesystem::path& model_path) : path_(model_path) {
     std::string preference =
         std::getenv("AXON_EMBEDDING_DEVICE") ? std::getenv("AXON_EMBEDDING_DEVICE") : "auto";
     std::transform(preference.begin(), preference.end(), preference.begin(),
@@ -257,23 +257,6 @@ std::vector<float> deserialize_embedding(const uint8_t* data, size_t byte_len) {
 
 namespace {
 
-std::string stored_model_id(Database& db) {
-    auto result = db.conn().Query("SELECT model_id FROM embedding_state WHERE singleton = true");
-    if (result->HasError() || result->RowCount() == 0) return "";
-    return result->GetValue(0, 0).ToString();
-}
-
-bool any_stored_vectors(Database& db) {
-    for (const char* sql : {"SELECT COUNT(*) FROM symbols WHERE embedding IS NOT NULL",
-                            "SELECT COUNT(*) FROM turns WHERE embedding IS NOT NULL",
-                            "SELECT COUNT(*) FROM observations WHERE embedding IS NOT NULL",
-                            "SELECT COUNT(*) FROM sessions WHERE digest_embedding IS NOT NULL"}) {
-        auto result = db.conn().Query(sql);
-        if (!result->HasError() && result->GetValue<int64_t>(0, 0) > 0) return true;
-    }
-    return false;
-}
-
 // Directory the project lives in: Axon keeps the index at <root>/.axon/index.duckdb.
 std::filesystem::path project_root_of(Database& db) {
     const auto parent = db.path().parent_path();
@@ -408,21 +391,21 @@ int embed_symbol_batch(Database& db, EmbeddingModel& model, const std::filesyste
 } // namespace
 
 bool embedding_model_matches(Database& db, const EmbeddingModel& model) {
-    const std::string stored = stored_model_id(db);
+    const std::string stored = stored_embedding_model_id(db);
     if (stored.empty())
-        return !any_stored_vectors(db) || model.profile().id == "nomic-embed-text-v1.5";
+        return !any_stored_embedding_vectors(db) || model.profile().id == "nomic-embed-text-v1.5";
     return stored == model.index_id();
 }
 
 bool ensure_embedding_model(Database& db, const EmbeddingModel& model) {
     const std::string current = model.index_id();
-    const std::string stored = stored_model_id(db);
+    const std::string stored = stored_embedding_model_id(db);
     if (stored == current) return false;
     // Legacy indexes (no recorded identity) hold nomic vectors from before profiles existed; they
     // stay valid for the nomic model and are cleared for any other.
     const bool legacy_compatible = stored.empty() && model.profile().id == "nomic-embed-text-v1.5";
     const bool had_vectors =
-        legacy_compatible ? false : (stored.empty() ? any_stored_vectors(db) : true);
+        legacy_compatible ? false : (stored.empty() ? any_stored_embedding_vectors(db) : true);
     if (had_vectors) {
         for (const char* sql :
              {"UPDATE symbols SET embedding = NULL WHERE embedding IS NOT NULL",

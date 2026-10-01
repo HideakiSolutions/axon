@@ -107,7 +107,7 @@ Config make_config(const fs::path& root) {
     return cfg;
 }
 
-fs::path find_model(const fs::path& binary_dir) {
+fs::path find_model(const fs::path& binary_dir, const std::string& index_model_hint) {
     // 1. Honor AXON_EMBEDDING_MODEL (absolute or relative path to .gguf)
     if (const char* env_model = std::getenv("AXON_EMBEDDING_MODEL")) {
         fs::path p(env_model);
@@ -119,8 +119,12 @@ fs::path find_model(const fs::path& binary_dir) {
     // Note: the *project's* ./models is only found for build-tree binaries
     // (build/../models); installed binaries look next to their own package.
     // Qwen3-Embedding is the default; nomic stays supported for existing installs.
-    const char* model_files[] = {"Qwen3-Embedding-0.6B-Q8_0.gguf",
-                                 "nomic-embed-text-v1.5.Q4_K_M.gguf"};
+    const char* qwen_file = "Qwen3-Embedding-0.6B-Q8_0.gguf";
+    const char* nomic_file = "nomic-embed-text-v1.5.Q4_K_M.gguf";
+    const bool index_is_legacy =
+        index_model_hint == "legacy" || index_model_hint.rfind("nomic", 0) == 0;
+    const char* model_files[] = {index_is_legacy ? nomic_file : qwen_file,
+                                 index_is_legacy ? qwen_file : nomic_file};
     const fs::path home = fs::path(std::getenv("HOME") ? std::getenv("HOME") : "");
     std::vector<fs::path> candidates;
     for (const char* file : model_files) {

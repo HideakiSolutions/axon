@@ -1,5 +1,6 @@
 #include "core/config.hpp"
 #include "core/db.hpp"
+#include "core/embeddings.hpp"
 #include "core/symbol_reader.hpp"
 #include "core/indexer.hpp"
 #include "core/routes.hpp"
@@ -686,6 +687,55 @@ TEST_F(PortfolioJournalTest, ReadSymbolReturnsDefinitionAndElidesLongBodies) {
 
     EXPECT_TRUE(axon::read_symbols(db, root, "smallWorker", "other.ts", "", 400).empty());
     EXPECT_TRUE(axon::read_symbols(db, root, "doesNotExist", "", "", 400).empty());
+}
+
+TEST_F(PortfolioJournalTest, ModelSelectionFollowsTheModelBehindTheIndex) {
+    // Existing indexes keep working after the default model changes: queries and incremental
+    // updates use the model that built their vectors; only a full index migrates.
+    const fs::path home = root / "home";
+    fs::create_directories(home / ".axon/models");
+    write_file(home / ".axon/models/Qwen3-Embedding-0.6B-Q8_0.gguf", "q");
+    write_file(home / ".axon/models/nomic-embed-text-v1.5.Q4_K_M.gguf", "n");
+    const char* old_home = std::getenv("HOME");
+    const std::string saved_home = old_home ? old_home : "";
+    const char* old_model = std::getenv("AXON_EMBEDDING_MODEL");
+    const std::string saved_model = old_model ? old_model : "";
+    setenv("HOME", home.c_str(), 1);
+    unsetenv("AXON_EMBEDDING_MODEL");
+    const fs::path bin = root / "bin";
+
+    EXPECT_EQ(axon::find_model(bin).filename(), "Qwen3-Embedding-0.6B-Q8_0.gguf") << "default";
+    EXPECT_EQ(axon::find_model(bin, "").filename(), "Qwen3-Embedding-0.6B-Q8_0.gguf");
+    EXPECT_EQ(axon::find_model(bin, "legacy").filename(), "nomic-embed-text-v1.5.Q4_K_M.gguf");
+    EXPECT_EQ(axon::find_model(bin, "nomic-embed-text-v1.5|768|doc3").filename(),
+              "nomic-embed-text-v1.5.Q4_K_M.gguf");
+    EXPECT_EQ(axon::find_model(bin, "qwen3-embedding|768|doc3").filename(),
+              "Qwen3-Embedding-0.6B-Q8_0.gguf");
+
+    // A legacy index whose model file is gone falls back to the other one (and then reports
+    // the mismatch itself) instead of failing to find any model.
+    fs::remove(home / ".axon/models/nomic-embed-text-v1.5.Q4_K_M.gguf");
+    EXPECT_EQ(axon::find_model(bin, "legacy").filename(), "Qwen3-Embedding-0.6B-Q8_0.gguf");
+
+    // The hint comes from the index itself.
+    axon::Database db(cfg.db_path);
+    EXPECT_EQ(axon::embedding_state_hint(db), "") << "no vectors yet";
+    db.conn().Query("INSERT INTO files (id, path, language, hash, byte_size) VALUES (1, 'a.ts', "
+                    "'typescript', 'h', 1)");
+    db.conn().Query("INSERT INTO symbols (id, file_id, name, kind, start_line, end_line) VALUES "
+                    "(1, 1, 'f', 'function', 1, 2)");
+    std::string zeros = "[0";
+    for (int i = 1; i < 768; ++i)
+        zeros += ",0";
+    zeros += "]::FLOAT[768]";
+    db.conn().Query("UPDATE symbols SET embedding = " + zeros + " WHERE id = 1");
+    EXPECT_EQ(axon::embedding_state_hint(db), "legacy") << "vectors without a recorded model";
+    db.conn().Query("INSERT INTO embedding_state(singleton, model_id) VALUES (true, "
+                    "'qwen3-embedding|768|doc3')");
+    EXPECT_EQ(axon::embedding_state_hint(db), "qwen3-embedding|768|doc3");
+
+    if (old_home) setenv("HOME", saved_home.c_str(), 1);
+    if (old_model) setenv("AXON_EMBEDDING_MODEL", saved_model.c_str(), 1);
 }
 
 } // namespace
