@@ -36,6 +36,22 @@ std::string scalar_string(axon::Database& db, const std::string& sql) {
     return result->GetValue(0, 0).ToString();
 }
 
+void set_env(const char* key, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(key, value.c_str());
+#else
+    setenv(key, value.c_str(), 1);
+#endif
+}
+
+void unset_env(const char* key) {
+#ifdef _WIN32
+    _putenv_s(key, ""); // an empty value removes the variable
+#else
+    unsetenv(key);
+#endif
+}
+
 class PortfolioJournalTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -700,8 +716,8 @@ TEST_F(PortfolioJournalTest, ModelSelectionFollowsTheModelBehindTheIndex) {
     const std::string saved_home = old_home ? old_home : "";
     const char* old_model = std::getenv("AXON_EMBEDDING_MODEL");
     const std::string saved_model = old_model ? old_model : "";
-    setenv("HOME", home.c_str(), 1);
-    unsetenv("AXON_EMBEDDING_MODEL");
+    set_env("HOME", home.string());
+    unset_env("AXON_EMBEDDING_MODEL");
     const fs::path bin = root / "bin";
 
     EXPECT_EQ(axon::find_model(bin).filename(), "Qwen3-Embedding-0.6B-Q8_0.gguf") << "default";
@@ -734,8 +750,8 @@ TEST_F(PortfolioJournalTest, ModelSelectionFollowsTheModelBehindTheIndex) {
                     "'qwen3-embedding|768|doc3')");
     EXPECT_EQ(axon::embedding_state_hint(db), "qwen3-embedding|768|doc3");
 
-    if (old_home) setenv("HOME", saved_home.c_str(), 1);
-    if (old_model) setenv("AXON_EMBEDDING_MODEL", saved_model.c_str(), 1);
+    if (old_home) set_env("HOME", saved_home);
+    if (old_model) set_env("AXON_EMBEDDING_MODEL", saved_model);
 }
 
 } // namespace
