@@ -507,7 +507,7 @@ When telemetry is enabled, `/api/metrics` returns backward-compatible totals plu
 | `AXON_EMBEDDING_MODEL` | `~/.axon/models/Qwen3-Embedding-0.6B-Q8_0.gguf` | Path to the embedding model. Search order: `<package>/models/`, then `~/.axon/models/`, Qwen3-Embedding first and `nomic-embed-text-v1.5.Q4_K_M.gguf` as the legacy fallback |
 | `AXON_EMBEDDING_THREADS` | half the logical CPUs, 4–8 | CPU threads used while embedding |
 | `AXON_CAPSULE_TOP_K` | `10` | Number of functions `dense` capsules deliver with bodies (1–40) |
-| `AXON_EMBEDDING_DEVICE` | `auto` | `auto` uses an available GPU and falls back to CPU; `cpu` forces CPU; `gpu` requires a usable GPU backend/device and fails clearly if unavailable. The Linux release includes Vulkan; macOS uses Metal. The Windows package currently supports CPU only. |
+| `AXON_EMBEDDING_DEVICE` | `auto` | `auto` uses an available GPU and falls back to CPU; `cpu` forces CPU; `gpu` requires a usable GPU backend/device and fails clearly if unavailable. `cpu` uses no GPU at all; `auto` also ignores virtualized GPUs (e.g. "Apple Paravirtual device"), whose Metal backend aborts. The Linux release includes Vulkan; macOS uses Metal. The Windows package currently supports CPU only. |
 | `AXON_DB_PATH` | `.axon/index.duckdb` | Path to the DuckDB index file |
 | `AXON_REGISTRY_DIR` | `~/.axon` | Directory holding the multi-repo `registry.json`; tests and sandboxes point it at a scratch dir so runs never touch the real registry |
 | `AXON_TELEMETRY` | off | Opt into local telemetry with `1`, `true`, `yes`, or `on` |
